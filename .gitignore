@@ -1,0 +1,10 @@
+# Secrets
+.env
+
+# Your guild's data and secrets never go to GitHub
+data/*
+!data/.gitkeep
+demo-data/
+node_modules/
+*.log
+.DS_Store

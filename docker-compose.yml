@@ -1,0 +1,25 @@
+# Runs the image that GitHub builds on every push to main.
+# 1. Replace YOUR-GITHUB-NAME below with your GitHub user or organisation (lower case).
+# 2. If the repository is private: docker login ghcr.io  (user name + a personal access token with read:packages).
+# 3. docker compose up -d
+services:
+  guild-hall:
+    image: ghcr.io/YOUR-GITHUB-NAME/guild-hall:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Discord settings live in a file called .env next to this compose file (copy .env.example to .env and fill it in).
+    env_file: .env
+    volumes:
+      - ./data:/data
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  # Optional: checks every 5 minutes whether GitHub published a newer image and restarts the app with it.
+  # Remove this block if you prefer to update by hand with:  docker compose pull && docker compose up -d
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 --label-enable
