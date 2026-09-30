@@ -1,0 +1,9 @@
+.git
+.github
+data
+demo-data
+node_modules
+test
+*.md
+.env
+deploy

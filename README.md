@@ -250,7 +250,9 @@ The steps, on Debian or Ubuntu:
    Open ports 80 and 443 in the firewall and keep port 3000 closed (the service file already makes the app listen on this machine only).
 7. **Discord Developer Portal**: the redirect must be exactly `https://your-domain/auth/discord/callback`.
 
-Docker instead: create `.env`, then `docker compose up -d` (see `docker-compose.yml`; the data goes into `./data`).
+Docker instead: create `.env`, then `docker compose up -d` (see `docker-compose.yml`; builds the image locally by
+default, the data goes into `/opt/persistent_volume/guildhub/data` on the host, and there is a `/health` endpoint
+the container's healthcheck uses).
 
 **Test-run checklist** (about 30 minutes with two people):
 - [ ] `node check-discord.js` shows no FAIL, including a test picture and a direct message.
@@ -292,11 +294,32 @@ GitHub runs the tests (Actions tab). If they fail you get an email and the image
   again. Nothing needs to be reachable from the internet. Change `AUTO_UPDATE_MINUTES` to check more or less
   often, or set it to 0 to turn it off. Uses `git pull --ff-only`, so if you edited files on the server
   itself and they clash, the update is refused instead of overwriting your work.
-- *Docker*: edit `docker-compose.yml` (your GitHub name), then `docker compose up -d`. The included
-  Watchtower container pulls the new image after every successful push.
+- *Docker*: `docker-compose.yml` builds the image locally by default (Option A), which never auto-updates itself -
+  you `git pull && docker compose up -d --build` when you want the new code. Switching to Option B (the commented-out
+  `image: ghcr.io/YOUR-GITHUB-NAME/guild-hall:latest` line, with your GitHub name lower case) pulls the image GitHub
+  already built instead of building locally, but this compose file does not include Watchtower or any other
+  auto-updater, so you still update it yourself with `docker compose pull && docker compose up -d` whenever you
+  want the newer image. Add your own Watchtower (or similar) service if you want that step to happen on its own.
 
 The first time, GitHub may keep the published image private. That is fine for `docker login ghcr.io`, or set
 the package to public under your profile's Packages.
+
+### If the container crash-loops with "Cannot find module '/app/server.js'"
+
+The image built, but `server.js` never made it into it. Two causes, in order of likelihood:
+
+1. **The build context was missing the source.** `docker-compose.yml`'s default (option A) builds from the
+   folder the compose file is in. If that folder only has `docker-compose.yml` and `.env` - for example a slim
+   deploy folder copied from a server that otherwise uses the prebuilt image - there is nothing to copy in.
+   Fix: either put the full source next to `docker-compose.yml` (the whole unzipped/cloned `guild-hall` folder),
+   or switch to option B (the commented-out `image: ghcr.io/...` line), which needs no source at all.
+2. **An old, broken image is cached under the `guild-hall:latest` tag** from an earlier attempt, and
+   `docker compose up -d` reused it instead of rebuilding. Fix: force a rebuild once with
+   `docker compose up -d --build` (or `docker compose build --no-cache` first).
+
+Since this version, `docker build` fails loudly with a clear message the moment this happens, instead of
+producing an image that starts and then crash-loops - so a plain `docker compose up -d --build` now tells you
+straight away if the context is wrong, rather than leaving you to read the runtime error.
 
 ## Tests
 

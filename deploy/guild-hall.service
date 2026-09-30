@@ -1,0 +1,31 @@
+# systemd service for Guild Hall on a Linux server (Debian, Ubuntu, ...).
+# Copy to /etc/systemd/system/guild-hall.service, then:  sudo systemctl daemon-reload && sudo systemctl enable --now guild-hall
+# Assumes: the app is in /opt/guild-hall (with its .env file), Node.js is /usr/bin/node, and a user "guildhall" exists:
+#   sudo useradd --system --home /opt/guild-hall --shell /usr/sbin/nologin guildhall
+# The data (db.json, uploaded pictures) lives in /var/lib/guild-hall. Back that folder up.
+[Unit]
+Description=Guild Hall (guild manager for Throne and Liberty)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=guildhall
+WorkingDirectory=/opt/guild-hall
+Environment=PORT=3000
+# Only reachable through the reverse proxy on this machine (Caddy or nginx). Remove this line to listen on every address.
+Environment=LISTEN_HOST=127.0.0.1
+Environment=DATA_DIR=/var/lib/guild-hall
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+StateDirectory=guild-hall
+# A few safety belts
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/guild-hall
+
+[Install]
+WantedBy=multi-user.target

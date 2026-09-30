@@ -1,0 +1,948 @@
+// Guild Hall - a tiny self-hosted guild manager.
+// No dependencies. Needs Node 18+.
+//
+//   MEMBER_PASSCODE=xxx OFFICER_PASSCODE=yyy node server.js
+//
+// Data is stored in ./data/db.json. Back it up (or use the Export button in Admin).
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { createDiscord } = require('./discord');
+
+// Optional .env file next to server.js (one KEY=value per line). Real environment variables always win.
+try {
+  for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (m && !line.trim().startsWith('#') && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+  }
+} catch { /* no .env file: fine */ }
+
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.LISTEN_HOST || '';                  // empty = listen on every network address; 127.0.0.1 = only through a reverse proxy on this machine
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+const SECRET_FILE = path.join(DATA_DIR, 'secret.txt');
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+
+const discord = createDiscord();
+
+// Without Discord settings the app falls back to shared passcodes. That is meant for trying it out on your own PC.
+const MEMBER_PASSCODE = process.env.MEMBER_PASSCODE || 'guild';
+const OFFICER_PASSCODE = process.env.OFFICER_PASSCODE || 'officer';
+if (!discord.loginEnabled && (!process.env.MEMBER_PASSCODE || !process.env.OFFICER_PASSCODE)) {
+  console.warn('WARNING: Discord sign-in is not set up, so the app uses shared passcodes ("guild" / "officer"). Fine for a demo on your own PC; NEVER put this on the internet. For real use set the DISCORD_* variables (see README).');
+}
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// ---------- storage ----------
+// Guild-wide settings. Officers change them in the app; config.json supplies the starting values.
+const SETTING_DEFAULTS = {
+  lootFrom: '',                                           // day the loot window counts back from ('' = today)
+  lootThreshold: config.lootThresholdPercent ?? 60,       // attendance % needed to qualify
+  lootRedMax: config.lootBands?.redMax ?? 59,             // red is 0..redMax
+  lootOrangeMax: config.lootBands?.orangeMax ?? 80,       // orange is redMax+1..orangeMax, green above
+  lootItemDays: config.lootItemDays ?? 7,                 // "items received in the last N days"
+  pointsEnabled: false,                                   // award points for attending events (off unless the leadership switches it on)
+  signupCloseDefault: 30,                                 // sign-ups close this many minutes before an event starts
+  pinOffsetMinutes: 0,                                    // the attendance PIN is created this many minutes after the event starts
+  pinWindowDefault: 15,                                   // players have this many minutes to type the PIN in
+  reminderMinutes: [300, 120],                            // "you have not answered" reminders, minutes before the event
+  remindersEnabled: true,
+  // Attendance rules: who gets asked for a reason, who gets warnings, and when a warning goes away. 0 switches a limit off.
+  // People who are not in the Discord server can sign in and apply. Off by default: then outsiders are turned away as before.
+  applications: { enabled: false, intro: 'Tell us a bit about yourself and the character you play. The leadership reads every application.', inviteUrl: '' },
+  // "Post to Discord" next to the parties of an event: which channel, and the text that goes with the picture.
+  partyPost: { channelId: '', channelName: '', text: '📋 **{event}**: parties for {date} at {time} ({parties} parties)\n{link}' },
+  compliance: {
+    enabled: true,
+    windowDays: 30,         // how far back attendance is looked at
+    mandatoryOnly: true,    // only mandatory events count
+    minEvents: 3,           // fewer events than this: no judgement on the attendance percentage
+    minAttendance: 40,      // below this % the player is asked for a reason
+    noShowLimit: 3,         // said Going but did not come this many times: reason + warning
+    noReplyLimit: 4,        // never answered this many events: reason + warning
+    expiryDays: 60,         // every warning disappears after this many days
+    quietDays: 0,           // ...or: after this many days without a new warning...
+    quietRemove: 0,         // ...this many of the oldest warnings vanish (0 = all of them)
+    disqualifyAt: 3,        // at this many active warnings the player is disqualified from loot
+    loaNeedsApproval: true, // leave of absence has to be approved by the leadership
+  },
+  approvals: Object.fromEntries((config.approvalGroups || []).map((g) => [g.key, !!g.default])),   // which player changes need leadership approval
+  hiddenSections: [],                                     // sections normal members do not see
+  branding: { name: '', tagline: '', accent: '', bgDim: 82, announcement: '', iconFile: '', bgFile: '' },
+};
+let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };
+if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
+
+function save() {
+  const tmp = DB_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+  fs.renameSync(tmp, DB_FILE);
+}
+const newId = () => db.nextId++;
+
+// ---------- auth (stateless signed tokens, survive restarts) ----------
+let SECRET = process.env.SECRET;
+if (!SECRET) {
+  if (fs.existsSync(SECRET_FILE)) SECRET = fs.readFileSync(SECRET_FILE, 'utf8').trim();
+  else {
+    SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(SECRET_FILE, SECRET);
+  }
+}
+const sign = (s) => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
+
+function makeToken(user, days = 30) {
+  const body = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + days * 864e5 })).toString('base64url');
+  return `${body}.${sign(body)}`;
+}
+const SESSION_COOKIE = 'gh_session';
+const cookieOf = (req, name) => (String(req.headers.cookie || '').split(';').map((s) => s.trim()).find((s) => s.startsWith(name + '=')) || '').slice(name.length + 1);
+const cookieHeader = (name, value, maxAgeSec) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${discord.cfg.publicUrl.startsWith('https') ? '; Secure' : ''}`;
+function readToken(token) {
+  if (!token) return null;
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+  const expected = sign(body);
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const u = JSON.parse(Buffer.from(body, 'base64url').toString());
+    if (!(u.exp > Date.now())) return null;
+    if (discord.loginEnabled && !u.discord) return null;      // old passcode sessions stop working once Discord is switched on
+    if (!u.key) u.key = u.name;                                // sessions from before Discord sign-in existed
+    return u;
+  } catch { return null; }
+}
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+const failures = new Map(); // ip -> [timestamps]
+function tooManyFailures(ip) {
+  const now = Date.now();
+  const list = (failures.get(ip) || []).filter((t) => now - t < 10 * 60e3);
+  failures.set(ip, list);
+  return list.length >= 10;
+}
+
+// ---------- helpers ----------
+const isOfficer = (u) => u.role === 'officer';
+const LEADERSHIP = config.leadershipRanks || ['Guild Master', 'Officer'];
+const DUTY_STATUSES = ['todo', 'doing', 'done'];
+const LOOT_TYPES = config.lootTypes || ['Skillcore', 'Item', 'Shard'];
+const LOOT_DEFAULT_TYPE = config.lootDefaultType || (LOOT_TYPES.includes('Item') ? 'Item' : LOOT_TYPES[0]);
+const clean = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
+class HttpError extends Error {
+  constructor(status, msg) { super(msg); this.status = status; }
+}
+const need = (cond, status, msg) => { if (!cond) throw new HttpError(status, msg); };
+const findMember = (id) => db.members.find((m) => m.id === Number(id));
+const findEvent = (id) => db.events.find((e) => e.id === Number(id));
+const hooks = { memberDeleted: [], skipReminder: [] };                 // features register cleanup here
+const tickHooks = [];                               // and periodic jobs here
+const canEditMember = (u, m) => isOfficer(u) || m.owner === u.key;   // owner = Discord user id (or the display name in demo mode)
+
+// Parties are stored as [{ name, members: [memberId] }]. Older data stored bare id arrays; convert on load.
+const dropFromParty = (p, id) => { const builds = { ...(p.builds || {}) }; delete builds[id]; return { ...p, members: p.members.filter((x) => x !== id), leader: p.leader === id ? null : p.leader, builds }; };
+function normParties(arr) {
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set();
+  return arr.slice(0, 20).map((p, i) => {
+    const list = Array.isArray(p) ? p : p && Array.isArray(p.members) ? p.members : [];
+    const members = [];
+    for (const raw of list) {
+      const id = Number(raw);
+      if (findMember(id) && !seen.has(id)) { seen.add(id); members.push(id); }
+    }
+    const name = (!Array.isArray(p) && p && clean(p.name, 40)) || `Party ${i + 1}`;
+    const leader = !Array.isArray(p) && p && members.includes(Number(p.leader)) ? Number(p.leader) : null;
+    // builds: { memberId: buildId } only for players who use one of their extra builds in this party (everybody else plays their main)
+    const builds = {};
+    if (!Array.isArray(p) && p && p.builds && typeof p.builds === 'object') {
+      for (const id of members) {
+        const k = String(p.builds[id] ?? 'main'), m = findMember(id);
+        if (k !== 'main' && m && (m.builds || []).some((b) => String(b.id) === k)) builds[id] = k;
+      }
+    }
+    return { name, members, leader, builds };
+  });
+}
+// Brings data written by older versions up to date. Runs on start and after a backup is restored.
+function migrate() {
+  db.duties = db.duties || [];
+  db.presets = db.presets || [];
+  db.loot = db.loot || [];
+  db.users = db.users || {};
+  db.presetRules = db.presetRules || [];
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications']) db[k] = db[k] || [];
+  for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
+  db.infoBoard = db.infoBoard && Array.isArray(db.infoBoard.categories) ? db.infoBoard : { categories: [] };
+  db.infoBoard.title = db.infoBoard.title || 'Info';
+  db.settings.compliance = { ...SETTING_DEFAULTS.compliance, ...(db.settings.compliance || {}) };
+  db.settings.applications = { ...SETTING_DEFAULTS.applications, ...(db.settings.applications || {}) };
+  db.settings.partyPost = { ...SETTING_DEFAULTS.partyPost, ...(db.settings.partyPost || {}) };
+  db.settings = { ...SETTING_DEFAULTS, ...(db.settings || {}) };
+  db.settings.approvals = { ...SETTING_DEFAULTS.approvals, ...(db.settings.approvals || {}) };
+  db.settings.branding = { ...SETTING_DEFAULTS.branding, ...(db.settings.branding || {}) };
+  for (const m of db.members) {
+    if (typeof m.questlog === 'string') { m.questlogs = m.questlog ? [{ label: 'Questlog', url: m.questlog }] : []; delete m.questlog; }   // one link became a list
+    m.questlogs = m.questlogs || [];
+    m.builds = m.builds || [];
+    m.mode = m.mode || config.buildModes?.[0] || 'PvE';
+  }
+  for (const se of db.series) { se.skipped = se.skipped || []; }
+  for (const l of db.loot) if (!l.type) l.type = LOOT_DEFAULT_TYPE;
+  for (const p of db.presets) p.parties = normParties(p.parties);
+  db.presetRules = db.presetRules.filter((r) => db.presets.some((p) => p.id === r.presetId));
+  for (const ev of db.events) {
+    ev.parties = normParties(ev.parties);
+    ev.rsvps = ev.rsvps || {};
+    for (const [id, st] of Object.entries(ev.rsvps)) if (st !== 'yes' && st !== 'no') delete ev.rsvps[id];   // "maybe" no longer exists
+    if (ev.pinWindowMinutes === undefined) {
+      // Event from before PINs existed: never send a PIN for one that has already started.
+      ev.pinSkip = Date.parse(ev.start) < Date.now();
+      ev.pinWindowMinutes = db.settings.pinWindowDefault;
+      ev.signupCloseMinutes = db.settings.signupCloseDefault;
+      ev.reminders = true;
+    }
+    ev.pin = ev.pin || null;
+    ev.pinEntries = ev.pinEntries || {};
+    ev.remindersSent = ev.remindersSent || {};
+    ev.reminderLog = ev.reminderLog || [];
+  }
+}
+migrate();
+
+// Only plain http(s) links are kept, so a pasted "javascript:" link can never end up clickable.
+function cleanUrl(v) {
+  const u = clean(v, 300);
+  if (!u) return '';
+  need(/^https?:\/\/[^\s<>"']+$/i.test(u), 400, 'Links must start with http:// or https://');
+  return u;
+}
+function cleanLinks(list) {
+  const arr = Array.isArray(list) ? list : [];
+  need(arr.length <= 6, 400, 'You can add up to 6 Questlog links.');
+  return arr.map((l) => ({ label: clean(l && l.label, 30), url: cleanUrl(l && l.url) })).filter((l) => l.url);
+}
+
+// With Discord sign-in an owner must be somebody who has signed in; in demo mode any name is fine.
+function pickOwner(v) {
+  const o = clean(v, 40);
+  need(!discord.loginEnabled || db.users[o], 400, 'Pick a player who has signed in with Discord.');
+  return o;
+}
+
+function pickMember(b, existing) {
+  const m = existing || {};
+  const roles = config.roles, weapons = config.weapons, ranks = config.ranks;
+  const out = {
+    name: clean(b.name, 40),
+    role: roles.includes(b.role) ? b.role : roles[0],
+    primaryWeapon: weapons.includes(b.primaryWeapon) ? b.primaryWeapon : '',
+    secondaryWeapon: weapons.includes(b.secondaryWeapon) ? b.secondaryWeapon : '',
+    gearScore: Math.max(0, Math.min(99999, Math.round(num(b.gearScore)))),
+    level: Math.max(0, Math.min(99, Math.round(num(b.level)))),
+    specialization: clean(b.specialization, 40),
+    questlogs: b.questlogs !== undefined ? cleanLinks(b.questlogs) : b.questlog !== undefined ? cleanLinks([{ label: 'Questlog', url: b.questlog }]) : (m.questlogs || []),
+    mode: (config.buildModes || ['PvE']).includes(b.mode) ? b.mode : (m.mode || config.buildModes?.[0] || 'PvE'),
+    discord: clean(b.discord, 40),
+    timezone: clean(b.timezone, 40),
+    notes: clean(b.notes, 500),
+    active: b.active !== false,
+  };
+  need(out.name.length >= 2, 400, 'Character name is required (2+ characters).');
+  // Only officers may change ranks.
+  out.rank = m.rank || ranks[ranks.length - 1];
+  return out;
+}
+
+function syncAttendancePoints(ev) {
+  // Keep ledger entries for this event in step with the attendance list.
+  const attended = new Set(ev.attended || []);
+  db.points = db.points.filter((p) => !(p.eventId === ev.id && !attended.has(p.memberId)));
+  if (ev.points > 0 && db.settings.pointsEnabled) {
+    for (const memberId of attended) {
+      if (!db.points.some((p) => p.eventId === ev.id && p.memberId === memberId)) {
+        db.points.push({
+          id: newId(), memberId, delta: ev.points,
+          reason: `Attended: ${ev.title}`, eventId: ev.id, at: new Date().toISOString(), by: 'system',
+        });
+      }
+    }
+  }
+}
+
+// ---------- routes ----------
+const routes = [];
+const route = (method, pattern, handler, { auth = true, officer = false, applicant = false } = {}) => {
+  const keys = [];
+  const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '$');
+  routes.push({ method, re, keys, handler, auth, officer, applicant });
+};
+
+route('POST', '/api/login', ({ body, ip }) => {
+  need(!discord.loginEnabled, 400, 'This server uses Discord sign-in.');
+  need(!tooManyFailures(ip), 429, 'Too many failed attempts. Try again in a few minutes.');
+  const name = clean(body.name, 24);
+  need(name.length >= 2, 400, 'Enter a display name (2+ characters).');
+  const code = String(body.passcode || '');
+  let role = null;
+  if (safeEqual(code, OFFICER_PASSCODE)) role = 'officer';
+  else if (safeEqual(code, MEMBER_PASSCODE)) role = 'member';
+  if (!role) {
+    failures.get(ip).push(Date.now());
+    throw new HttpError(401, 'Wrong passcode.');
+  }
+  const user = { key: name, name, role };
+  return { token: makeToken(user), user };
+}, { auth: false });
+
+const publicBranding = () => {
+  const b = db.settings.branding;
+  return { name: b.name, tagline: b.tagline, accent: b.accent, bgDim: b.bgDim, icon: b.iconFile ? '/uploads/' + b.iconFile : '', bg: b.bgFile ? '/uploads/' + b.bgFile : '' };
+};
+route('GET', '/api/config', () => ({ ...config, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
+
+const closeAt = (ev) => Date.parse(ev.start) - (ev.signupCloseMinutes ?? db.settings.signupCloseDefault) * 60000;
+function pinInfo(ev) {
+  const start = Date.parse(ev.start), win = ev.pinWindowMinutes * 60000;
+  const scheduledAt = new Date(start + db.settings.pinOffsetMinutes * 60000).toISOString();
+  if (!ev.pin) return { state: 'pending', scheduledAt, windowMinutes: ev.pinWindowMinutes };
+  const opens = Date.parse(ev.pin.at);
+  return { state: Date.now() <= opens + win ? 'open' : 'closed', scheduledAt, opensAt: ev.pin.at, closesAt: new Date(opens + win).toISOString(), windowMinutes: ev.pinWindowMinutes };
+}
+// Officers get the whole event. Everybody else gets it without the PIN itself.
+function eventFor(ev, user) {
+  const out = { ...ev, pinInfo: pinInfo(ev), signupClosesAt: new Date(closeAt(ev)).toISOString() };
+  if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; }
+  return out;
+}
+
+// GET /api/state is built per person in server-features.js (members only get their own loot, attendance and requests).
+
+// Characters: created and edited in server-features.js (some changes can need leadership approval).
+route('DELETE', '/api/members/:id', ({ user, params }) => {
+  const m = findMember(params.id);
+  need(m, 404, 'Character not found.');
+  need(canEditMember(user, m), 403, 'You can only remove your own characters.');
+  db.members = db.members.filter((x) => x.id !== m.id);
+  db.points = db.points.filter((p) => p.memberId !== m.id);
+  db.duties = db.duties.filter((d) => d.memberId !== m.id);
+  db.loot = db.loot.filter((l) => l.memberId !== m.id);
+  for (const ev of db.events) {
+    delete ev.rsvps[m.id];
+    ev.attended = ev.attended.filter((id) => id !== m.id);
+    ev.parties = ev.parties.map((p) => dropFromParty(p, m.id));
+  }
+  for (const p of db.presets) p.parties = p.parties.map((q) => dropFromParty(q, m.id));
+  for (const h of hooks.memberDeleted) h(m);
+  save();
+  return { ok: true };
+});
+
+// Events
+function pickEvent(b, ex) {
+  const type = config.eventTypes.find((t) => t.name === b.type) || config.eventTypes[config.eventTypes.length - 1];
+  const start = new Date(b.start);
+  need(!isNaN(start), 400, 'Pick a valid date and time.');
+  const title = clean(b.title, 80) || type.name;                 // no title typed: the type becomes the title
+  const int = (v, dflt, lo, hi) => { const n = Math.round(Number(v)); return v === undefined || v === '' || v === null || !Number.isFinite(n) ? dflt : Math.min(hi, Math.max(lo, n)); };
+  return {
+    title, type: type.name, start: start.toISOString(),
+    description: clean(b.description, 1500),
+    points: Math.max(0, Math.round(num(b.points, type.points))),
+    mandatory: b.mandatory === undefined ? !!type.mandatory : b.mandatory === true || b.mandatory === 'true',
+    maxSignups: Math.max(0, Math.round(num(b.maxSignups))),
+    signupCloseMinutes: int(b.signupCloseMinutes, ex ? ex.signupCloseMinutes : db.settings.signupCloseDefault, 0, 10080),
+    pinWindowMinutes: int(b.pinWindowMinutes, ex ? ex.pinWindowMinutes : db.settings.pinWindowDefault, 1, 720),
+    reminders: b.reminders === undefined ? (ex ? ex.reminders !== false : true) : b.reminders === true || b.reminders === 'true',
+  };
+}
+const clone = (x) => JSON.parse(JSON.stringify(x));
+// A party preset can be tied to an event type ("use it for every Wargames"). New events of that type get it automatically.
+function applyPresetRule(ev) {
+  if (ev.parties.length) return;
+  const rule = db.presetRules.find((r) => r.type === ev.type);
+  const p = rule && db.presets.find((x) => x.id === rule.presetId);
+  if (p) ev.parties = normParties(clone(p.parties));
+}
+route('POST', '/api/events', ({ body, user }) => {
+  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
+  applyPresetRule(ev);
+  db.events.push(ev);
+  save();
+  return eventFor(ev, user);
+}, { officer: true });
+route('PUT', '/api/events/:id', ({ body, params, user }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const oldStart = ev.start, oldType = ev.type;
+  Object.assign(ev, pickEvent(body, ev));
+  if (ev.start !== oldStart) ev.remindersSent = {};               // moved to another time: reminders start over
+  if (ev.type !== oldType) applyPresetRule(ev);
+  syncAttendancePoints(ev);
+  save();
+  return eventFor(ev, user);
+}, { officer: true });
+route('DELETE', '/api/events/:id', ({ params }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const series = ev.seriesId && db.series.find((x) => x.id === ev.seriesId);   // deleting one date of a recurring event skips just that date
+  if (series && ev.seriesDate && !series.skipped.includes(ev.seriesDate)) series.skipped.push(ev.seriesDate);
+  db.events = db.events.filter((e) => e.id !== ev.id);
+  db.points = db.points.filter((p) => p.eventId !== ev.id);
+  save();
+  return { ok: true };
+}, { officer: true });
+
+route('POST', '/api/events/:id/rsvp', ({ body, user, params }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const m = findMember(body.memberId);
+  need(m, 404, 'Character not found.');
+  need(canEditMember(user, m), 403, 'You can only sign up your own characters.');
+  need(isOfficer(user) || Date.now() < closeAt(ev), 409, 'Sign-ups for this event are closed.');
+  if (body.status === 'none') delete ev.rsvps[m.id];
+  else {
+    need(['yes', 'no'].includes(body.status), 400, 'Bad status.');
+    if (body.status === 'yes' && ev.maxSignups) {
+      const going = Object.entries(ev.rsvps).filter(([id, s]) => s === 'yes' && Number(id) !== m.id).length;
+      need(going < ev.maxSignups, 409, 'This event is full.');
+    }
+    ev.rsvps[m.id] = body.status;
+  }
+  save();
+  return eventFor(ev, user);
+});
+
+route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
+  ev.attended = [...new Set(ids)];
+  syncAttendancePoints(ev);
+  save();
+  return eventFor(ev, user);
+}, { officer: true });
+
+route('POST', '/api/events/:id/parties', ({ body, params, user }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  ev.parties = normParties(body.parties);
+  save();
+  return eventFor(ev, user);
+}, { officer: true });
+
+// Points ledger
+route('POST', '/api/points', ({ body, user }) => {
+  need(db.settings.pointsEnabled, 400, 'Points are turned off in Admin.');
+  const m = findMember(body.memberId);
+  need(m, 404, 'Character not found.');
+  const delta = Math.round(num(body.delta));
+  need(delta !== 0, 400, 'Enter a non-zero amount.');
+  const entry = {
+    id: newId(), memberId: m.id, delta, reason: clean(body.reason, 100) || 'Manual adjustment',
+    at: new Date().toISOString(), by: user.name,
+  };
+  db.points.push(entry);
+  save();
+  return entry;
+}, { officer: true });
+route('DELETE', '/api/points/:id', ({ params }) => {
+  db.points = db.points.filter((p) => p.id !== Number(params.id));
+  save();
+  return { ok: true };
+}, { officer: true });
+
+// Guild-wide settings (officers only).
+route('PUT', '/api/settings', ({ body }) => {
+  const st = db.settings, int = (v) => Math.round(Number(v));
+  if (body.lootFrom !== undefined) {
+    const v = String(body.lootFrom || '');
+    need(v === '' || (/^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(new Date(v + 'T00:00:00'))), 400, 'Pick a valid date.');
+    st.lootFrom = v;
+  }
+  if (body.lootThreshold !== undefined) {
+    const v = int(body.lootThreshold);
+    need(v >= 1 && v <= 100, 400, 'Attendance needed must be between 1 and 100.');
+    st.lootThreshold = v;
+  }
+  if (body.lootRedMax !== undefined || body.lootOrangeMax !== undefined) {
+    const r = int(body.lootRedMax ?? st.lootRedMax), o = int(body.lootOrangeMax ?? st.lootOrangeMax);
+    need(r >= 0 && r < o && o <= 99, 400, 'Colour ranges need: red up to a lower number than orange, and orange up to at most 99 so green has a range.');
+    st.lootRedMax = r; st.lootOrangeMax = o;
+  }
+  if (body.lootItemDays !== undefined) {
+    const v = int(body.lootItemDays);
+    need(v >= 1 && v <= 365, 400, 'The item period must be between 1 and 365 days.');
+    st.lootItemDays = v;
+  }
+  if (body.pointsEnabled !== undefined) st.pointsEnabled = body.pointsEnabled === true || body.pointsEnabled === 'true';
+  if (body.signupCloseDefault !== undefined) {
+    const v = int(body.signupCloseDefault);
+    need(v >= 0 && v <= 10080, 400, 'Sign-ups can close between 0 minutes and 7 days before the event.');
+    st.signupCloseDefault = v;
+  }
+  if (body.pinOffsetMinutes !== undefined) {
+    const v = int(body.pinOffsetMinutes);
+    need(v >= -1440 && v <= 1440, 400, 'The PIN can be created between 24 hours before and 24 hours after the start.');
+    st.pinOffsetMinutes = v;
+  }
+  if (body.pinWindowDefault !== undefined) {
+    const v = int(body.pinWindowDefault);
+    need(v >= 1 && v <= 720, 400, 'The PIN window must be between 1 and 720 minutes.');
+    st.pinWindowDefault = v;
+  }
+  if (body.reminderMinutes !== undefined) {
+    const list = (Array.isArray(body.reminderMinutes) ? body.reminderMinutes : []).map(int);
+    need(list.every((v) => v >= 1 && v <= 10080) && list.length <= 6, 400, 'Reminders: up to 6 times, each between 1 minute and 7 days before the event.');
+    st.reminderMinutes = [...new Set(list)].sort((a, b) => b - a);
+  }
+  if (body.remindersEnabled !== undefined) st.remindersEnabled = body.remindersEnabled === true || body.remindersEnabled === 'true';
+  save();
+  return st;
+}, { officer: true });
+
+// Loot log: which item a player received, and on which day it was handed out.
+const findLoot = (id) => db.loot.find((l) => l.id === Number(id));
+function pickLoot(b, existing) {
+  const m = findMember(b.memberId ?? existing?.memberId);
+  need(m, 404, 'Pick a player.');
+  const type = String(b.type ?? existing?.type ?? LOOT_DEFAULT_TYPE);
+  need(LOOT_TYPES.includes(type), 400, 'Pick a loot type: ' + LOOT_TYPES.join(', ') + '.');
+  // Lucent is an amount, everything else is a named item.
+  const item = type === 'Lucent' ? '' : clean(b.item ?? existing?.item, 120);
+  const amount = type === 'Lucent' ? Math.round(num(b.amount ?? existing?.amount)) : 0;
+  if (type === 'Lucent') need(amount >= 1 && amount <= 1e9, 400, 'Enter how much Lucent was given out.');
+  else need(item, 400, 'Type the item that was given out.');
+  const date = String(b.date ?? existing?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  need(/^\d{4}-\d{2}-\d{2}$/.test(date) && !isNaN(new Date(date + 'T00:00:00')), 400, 'Pick a valid date.');
+  return { memberId: m.id, item, date, type, amount };
+}
+route('POST', '/api/loot', ({ body, user }) => {
+  const l = { id: newId(), ...pickLoot(body), by: user.name, at: new Date().toISOString() };
+  db.loot.push(l);
+  save();
+  return l;
+}, { officer: true });
+route('PUT', '/api/loot/:id', ({ body, params }) => {
+  const l = findLoot(params.id);
+  need(l, 404, 'Entry not found.');
+  Object.assign(l, pickLoot(body, l));
+  save();
+  return l;
+}, { officer: true });
+route('DELETE', '/api/loot/:id', ({ params }) => {
+  const l = findLoot(params.id);
+  need(l, 404, 'Entry not found.');
+  db.loot = db.loot.filter((x) => x.id !== l.id);
+  save();
+  return { ok: true };
+}, { officer: true });
+
+// Party presets: saved line-ups (a set of named parties) that can be loaded into any event.
+const findPreset = (id) => db.presets.find((p) => p.id === Number(id));
+route('POST', '/api/presets', ({ body, user }) => {
+  const name = clean(body.name, 60);
+  need(name, 400, 'Give the preset a name.');
+  const p = { id: newId(), name, description: clean(body.description, 200), parties: normParties(body.parties), createdBy: user.name, at: new Date().toISOString() };
+  db.presets.push(p);
+  save();
+  return p;
+}, { officer: true });
+route('PUT', '/api/presets/:id', ({ body, params }) => {
+  const p = findPreset(params.id);
+  need(p, 404, 'Preset not found.');
+  if (body.name !== undefined) { p.name = clean(body.name, 60); need(p.name, 400, 'Give the preset a name.'); }
+  if (body.description !== undefined) p.description = clean(body.description, 200);
+  if (body.parties !== undefined) p.parties = normParties(body.parties);
+  if (body.hidden !== undefined) p.hidden = body.hidden === true || body.hidden === 'true';
+  save();
+  return p;
+}, { officer: true });
+// Use a preset for every upcoming event of one type, and for future ones of that type too.
+route('POST', '/api/presets/:id/use-for-type', ({ body, params }) => {
+  const p = findPreset(params.id);
+  need(p, 404, 'Preset not found.');
+  const type = config.eventTypes.find((t) => t.name === body.type);
+  need(type, 400, 'Pick an event type.');
+  db.presetRules = db.presetRules.filter((r) => r.type !== type.name);
+  db.presetRules.push({ type: type.name, presetId: p.id, at: new Date().toISOString() });
+  let applied = 0, skipped = 0;
+  for (const ev of db.events) {
+    if (ev.type !== type.name || Date.parse(ev.start) <= Date.now()) continue;      // only events that have not started
+    if (ev.parties.length && body.overwrite !== true) { skipped++; continue; }
+    ev.parties = normParties(clone(p.parties));
+    applied++;
+  }
+  save();
+  return { applied, skipped, rules: db.presetRules };
+}, { officer: true });
+route('DELETE', '/api/preset-rules/:type', ({ params }) => {
+  db.presetRules = db.presetRules.filter((r) => r.type !== params.type);
+  save();
+  return { ok: true };
+}, { officer: true });
+
+route('DELETE', '/api/presets/:id', ({ params }) => {
+  const p = findPreset(params.id);
+  need(p, 404, 'Preset not found.');
+  db.presetRules = db.presetRules.filter((r) => r.presetId !== p.id);
+  db.presets = db.presets.filter((x) => x.id !== p.id);
+  save();
+  return { ok: true };
+}, { officer: true });
+
+// Leadership tasks: what each leader is working on.
+const findDuty = (id) => db.duties.find((d) => d.id === Number(id));
+route('POST', '/api/duties', ({ body, user }) => {
+  const m = findMember(body.memberId);
+  need(m, 404, 'Character not found.');
+  need(canEditMember(user, m), 403, 'You can only add tasks for your own characters.');
+  need(LEADERSHIP.includes(m.rank), 400, 'Tasks can only be added to leadership ranks.');
+  const text = clean(body.text, 140);
+  need(text, 400, 'Write what the task is.');
+  const d = { id: newId(), memberId: m.id, text, status: 'todo', at: new Date().toISOString(), by: user.name };
+  db.duties.push(d);
+  save();
+  return d;
+});
+route('PUT', '/api/duties/:id', ({ body, user, params }) => {
+  const d = findDuty(params.id);
+  need(d, 404, 'Task not found.');
+  need(canEditMember(user, findMember(d.memberId) || {}), 403, 'You can only edit tasks for your own characters.');
+  if (body.text !== undefined) { d.text = clean(body.text, 140); need(d.text, 400, 'Write what the task is.'); }
+  if (body.status !== undefined) { need(DUTY_STATUSES.includes(body.status), 400, 'Bad status.'); d.status = body.status; }
+  d.at = new Date().toISOString();
+  save();
+  return d;
+});
+route('DELETE', '/api/duties/:id', ({ user, params }) => {
+  const d = findDuty(params.id);
+  need(d, 404, 'Task not found.');
+  need(canEditMember(user, findMember(d.memberId) || {}), 403, 'You can only remove tasks for your own characters.');
+  db.duties = db.duties.filter((x) => x.id !== d.id);
+  save();
+  return { ok: true };
+});
+
+// Backup / restore
+route('GET', '/api/export', () => db, { officer: true });
+// Everything the app stores. A backup contains all of it, and restoring one brings all of it back.
+const DB_LISTS = ['members', 'events', 'points', 'duties', 'presets', 'presetRules', 'loot', 'series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications'];
+const DB_MAPS = ['users', 'profiles', 'playerTags', 'prefs', 'noticeAcks'];
+route('POST', '/api/import', ({ body }) => {
+  need(body && Array.isArray(body.members) && Array.isArray(body.events) && Array.isArray(body.points), 400, 'Not a valid export file.');
+  const fresh = { nextId: body.nextId || 1, settings: { ...SETTING_DEFAULTS, ...(body.settings || {}) }, infoBoard: body.infoBoard };
+  for (const k of DB_LISTS) fresh[k] = Array.isArray(body[k]) ? body[k] : [];
+  for (const k of DB_MAPS) fresh[k] = body[k] && typeof body[k] === 'object' && !Array.isArray(body[k]) ? body[k] : {};
+  db = fresh;
+  migrate();
+  const maxId = Math.max(0, ...DB_LISTS.flatMap((k) => db[k]).map((x) => x.id || 0));
+  db.nextId = Math.max(db.nextId, maxId + 1);
+  save();
+  return { ok: true };
+}, { officer: true });
+
+// ---------- attendance PIN, reminders and Discord messages ----------
+const PIN_LENGTH = 4;
+const unix = (iso) => Math.floor(new Date(iso).getTime() / 1000);
+const appUrl = () => discord.cfg.publicUrl || `http://localhost:${PORT}`;
+const nameOfOwner = (id) => (db.users[id] && db.users[id].name) || id;
+
+// Who receives the PIN: the leader of every party, everybody with a leadership rank, and Discord officers.
+function pinRecipients(ev) {
+  const out = new Map();
+  const add = (id, why) => {
+    if (!id) return;
+    if (!out.has(id)) out.set(id, { id, name: nameOfOwner(id), reasons: [] });
+    if (!out.get(id).reasons.includes(why)) out.get(id).reasons.push(why);
+  };
+  for (const p of ev.parties) { const m = p.leader && findMember(p.leader); if (m) add(m.owner, `leader of ${p.name}`); }
+  for (const m of db.members) if (m.active && LEADERSHIP.includes(m.rank)) add(m.owner, 'leadership');
+  for (const u of Object.values(db.users)) if (u.role === 'officer') add(u.id, 'leadership');
+  return [...out.values()];
+}
+
+// Players who have not answered (Going or Can't) with any of their characters.
+function reminderRecipients(ev) {
+  const byOwner = new Map();
+  for (const m of db.members) if (m.active) (byOwner.get(m.owner) || byOwner.set(m.owner, []).get(m.owner)).push(m);
+  const out = [];
+  for (const [owner, chars] of byOwner) if (!chars.some((m) => ev.rsvps[m.id] === 'yes' || ev.rsvps[m.id] === 'no') && !hooks.skipReminder.some((h) => h(owner, ev))) out.push({ id: owner, name: nameOfOwner(owner) });
+  return out;
+}
+
+async function sendPinDMs(ev) {
+  const results = [];
+  for (const r of pinRecipients(ev)) {
+    const end = unix(ev.pin.at) + ev.pinWindowMinutes * 60;
+    const text = [
+      `🔑 **Attendance PIN for ${ev.title}: ${ev.pin.code}**`,
+      `The event starts <t:${unix(ev.start)}:F>. Players can type the PIN in on the event page from <t:${unix(ev.pin.at)}:t> until <t:${end}:t>.`,
+      `You are getting this as ${r.reasons.join(' and ')}. Please tell it to your party. ${appUrl()}/#/events/${ev.id}`,
+    ].join('\n');
+    const res = await discord.sendDM(r.id, text);
+    results.push({ id: r.id, name: r.name, why: r.reasons.join(', '), ok: !!res.ok, error: res.error || '' });
+  }
+  ev.pin.sent = results;
+  ev.pin.sentAt = new Date().toISOString();
+  save();
+  console.log(`[pin] ${ev.title}: sent to ${results.filter((x) => x.ok).length}/${results.length} people`);
+}
+
+async function generatePin(ev, by) {
+  const code = String(crypto.randomInt(0, 10 ** PIN_LENGTH)).padStart(PIN_LENGTH, '0');
+  ev.pin = { code, at: new Date().toISOString(), by, sent: [] };
+  for (const k of [...pinFails.keys()]) if (k.endsWith(':' + ev.id)) pinFails.delete(k);   // a new PIN starts with a clean slate
+  save();                                                                                  // saved first, so a restart never makes a second PIN
+  await sendPinDMs(ev);
+}
+
+async function runReminders(ev, now) {
+  const st = db.settings;
+  if (!st.remindersEnabled || ev.reminders === false) return;
+  const start = Date.parse(ev.start);
+  if (now >= start || now >= closeAt(ev)) return;                       // too late to answer anyway
+  const offsets = [...st.reminderMinutes].sort((a, b) => b - a);
+  const due = offsets.filter((m) => now >= start - m * 60000);
+  if (!due.length) return;
+  const latest = due[due.length - 1];                                   // if several are overdue (server was off) only send the newest
+  const fresh = !ev.remindersSent[latest];
+  for (const m of due) ev.remindersSent[m] = ev.remindersSent[m] || new Date().toISOString();
+  save();
+  if (!fresh) return;
+  const number = offsets.indexOf(latest) + 1;
+  const people = reminderRecipients(ev);
+  const failed = [];
+  for (const r of people) {
+    const text = [
+      `⏰ **Reminder ${number}/${offsets.length}:** you have not answered for **${ev.title}** yet.`,
+      `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeAt(ev) / 1000)}:R>.`,
+      `Please say Going or Can't here: ${appUrl()}/#/events/${ev.id}`,
+    ].join('\n');
+    const res = await discord.sendDM(r.id, text);
+    if (!res.ok) failed.push({ id: r.id, name: r.name, error: res.error });
+  }
+  ev.reminderLog.push({ number, minutesBefore: latest, at: new Date().toISOString(), sent: people.length - failed.length, failed });
+  save();
+  console.log(`[reminder ${number}/${offsets.length}] ${ev.title}: ${people.length - failed.length}/${people.length} delivered`);
+}
+
+let ticking = false;
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    for (const ev of [...db.events]) {
+      const now = Date.now(), start = Date.parse(ev.start);
+      if (start < now - 24 * 36e5) continue;
+      if (!ev.pin && !ev.pinSkip && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
+      await runReminders(ev, Date.now());
+    }
+    for (const h of tickHooks) await h();
+  } catch (e) { console.error('scheduler:', e); }
+  ticking = false;
+}
+const SCHEDULER_MS = Number(process.env.SCHEDULER_INTERVAL_MS || 30000);
+setInterval(tick, SCHEDULER_MS);
+setTimeout(tick, Math.min(5000, SCHEDULER_MS));
+
+// Players type the PIN in during the window; a correct PIN marks that character as having attended.
+const pinFails = new Map();
+route('POST', '/api/events/:id/pin', ({ body, user, params }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const m = findMember(body.memberId);
+  need(m, 404, 'Pick one of your characters.');
+  need(canEditMember(user, m), 403, 'You can only enter the PIN for your own characters.');
+  need(ev.pin, 409, 'The PIN has not been sent out yet.');
+  const opens = Date.parse(ev.pin.at), closes = opens + ev.pinWindowMinutes * 60000;
+  need(Date.now() <= closes, 409, 'The PIN window is closed. Ask an officer to mark your attendance.');
+  const fk = `${user.key}:${ev.id}`, fails = pinFails.get(fk) || 0;
+  need(fails < 5, 429, 'Too many wrong PINs. Ask an officer to mark your attendance.');
+  if (!safeEqual(String(body.pin ?? '').trim(), ev.pin.code)) {
+    pinFails.set(fk, fails + 1);
+    throw new HttpError(400, `Wrong PIN. ${4 - fails} ${4 - fails === 1 ? 'try' : 'tries'} left.`);
+  }
+  if (!ev.attended.includes(m.id)) { ev.attended.push(m.id); syncAttendancePoints(ev); }
+  ev.pinEntries[m.id] = { at: new Date().toISOString(), by: user.name };
+  save();
+  return { ok: true };
+});
+route('POST', '/api/events/:id/pin/send', async ({ body, params, user }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  if (!ev.pin || body.mode === 'new') await generatePin(ev, user.name);
+  else await sendPinDMs(ev);
+  return eventFor(ev, user);
+}, { officer: true });
+
+// Admin helpers
+route('POST', '/api/admin/test-dm', async ({ user }) => {
+  const res = await discord.sendDM(user.key, '✅ Guild Hall can send you direct messages. PINs and reminders will arrive like this.');
+  return { ok: !!res.ok, error: res.error || '', bot: discord.botEnabled };
+}, { officer: true });
+// Characters created before Discord sign-in belong to a display name. This links them to a Discord player.
+route('POST', '/api/admin/link-owner', ({ body }) => {
+  const from = clean(body.from, 40), to = clean(body.to, 40);
+  need(from && db.users[to], 400, 'Pick the old name and a player who has signed in with Discord.');
+  let n = 0;
+  for (const m of db.members) if (m.owner === from) { m.owner = to; n++; }
+  for (const ev of db.events) if (ev.createdBy === from) ev.createdBy = to;
+  save();
+  return { moved: n };
+}, { officer: true });
+
+// ---------- more features (approvals, profiles, builds, requests, tags, recurring events, branding) ----------
+require('./server-features')({
+  route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, canEditMember, findMember, findEvent, normParties, applyPresetRule,
+  eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
+  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding,
+  get db() { return db; },
+});
+
+// ---------- server ----------
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+};
+
+function readBody(req, limit = 2e6) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { reject(new HttpError(413, 'Request too large.')); req.destroy(); }
+      else chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!chunks.length) return resolve({});
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
+      catch { reject(new HttpError(400, 'Invalid JSON.')); }
+    });
+  });
+}
+
+const send = (res, status, data, headers = {}) => {
+  const body = typeof data === 'string' ? data : JSON.stringify(data);
+  res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+  res.end(body);
+};
+
+http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://x');
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+  // Health check for Docker / a load balancer: no auth, no DB access, just "the process is alive and serving".
+  if (url.pathname === '/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
+  }
+
+  // Sign in with Discord
+  if (url.pathname === '/auth/discord' && req.method === 'GET') {
+    if (!discord.loginEnabled) { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent('Discord sign-in is not set up on this server.') }); return res.end(); }
+    const state = crypto.randomBytes(16).toString('hex');
+    res.writeHead(302, { Location: discord.authorizeUrl(state), 'Set-Cookie': cookieHeader('gh_oauth', state, 600) });
+    return res.end();
+  }
+  if (url.pathname === '/auth/discord/callback' && req.method === 'GET') {
+    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': cookieHeader('gh_oauth', '', 0) }); res.end(); };
+    try {
+      if (!discord.loginEnabled) return fail('Discord sign-in is not set up on this server.');
+      if (url.searchParams.get('error')) return fail('Discord sign-in was cancelled.');
+      const state = url.searchParams.get('state'), code = url.searchParams.get('code');
+      if (!state || !code || !safeEqual(state, cookieOf(req, 'gh_oauth'))) return fail('The sign-in link expired. Please try again.');
+      const u = await discord.resolveUser(code);
+      const known = db.users[u.id];
+      if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
+      if (u.role === 'applicant' && !db.settings.applications.enabled) return fail(u.whyNot);
+      db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', lastLogin: new Date().toISOString() };
+      save();
+      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, discord: true }, 7);
+      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0)] });
+      return res.end();
+    } catch (e) { return fail(e.message || 'Sign-in failed.'); }
+  }
+  if (url.pathname === '/api/logout' && req.method === 'POST') {
+    return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(SESSION_COOKIE, '', 0) });
+  }
+
+  if (url.pathname.startsWith('/api/')) {
+    try {
+      const r = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
+      need(r, 404, 'Not found.');
+      const m = url.pathname.match(r.re);
+      const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+      let user = null;
+      if (r.auth) {
+        const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
+        user = readToken(bearer || cookieOf(req, SESSION_COOKIE));
+        need(user, 401, 'Please sign in.');
+        // Somebody whose application was accepted since they signed in is a member from now on, without signing in again.
+        if (user.role === 'applicant' && db.users[user.key] && db.users[user.key].accepted) user.role = 'member';
+        if (!bearer && req.method !== 'GET') {           // cookie sessions: block requests that other websites could trigger
+          need(/application\/json/i.test(req.headers['content-type'] || ''), 415, 'Send JSON.');
+          need(!req.headers.origin || (() => { try { return new URL(req.headers.origin).host === req.headers.host; } catch { return false; } })(), 403, 'Cross-site request blocked.');
+        }
+        need(!r.officer || isOfficer(user), 403, 'Officers only.');
+        need(user.role !== 'applicant' || r.applicant, 403, 'Your application has to be accepted first.');       // applicants can reach nothing but the application
+      }
+      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || /\/post-parties$/.test(url.pathname) ? 9e6 : 2e6);
+      const out = await r.handler({ body, user, params, ip });
+      return send(res, 200, out, url.pathname === '/api/export'
+        ? { 'Content-Disposition': 'attachment; filename="guild-backup.json"' } : {});
+    } catch (e) {
+      if (!(e instanceof HttpError)) console.error(e);
+      return send(res, e.status || 500, { error: e.status ? e.message : 'Server error.' });
+    }
+  }
+
+  // uploaded images (guild icon, background). File names are content hashes, so they can be cached forever.
+  const up = url.pathname.match(/^\/uploads\/([a-z]+-[a-f0-9]{12}\.(png|jpg|gif|webp))$/);
+  if (up) {
+    const f = path.join(UPLOAD_DIR, up[1]);
+    if (!fs.existsSync(f)) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'Content-Type': { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[up[2]], 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" });
+    return fs.createReadStream(f).pipe(res);
+  }
+
+  // static files
+  let file = path.normalize(path.join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname));
+  if (!file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC_DIR, 'index.html');
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+  fs.createReadStream(file).pipe(res);
+}).listen(...(HOST ? [PORT, HOST] : [PORT]), () => {
+  console.log(`Guild Hall running on http://${HOST || 'localhost'}:${PORT}`);
+  console.log(discord.loginEnabled ? `Sign-in: Discord (redirect URI ${discord.redirectUri()})` : 'Sign-in: shared passcodes (demo mode)');
+  console.log(discord.botEnabled ? 'Discord bot: on (PINs and reminders are sent as direct messages)' : 'Discord bot: off (PINs and reminders are only written to this log)');
+});
+
+// Optional auto-update: when AUTO_UPDATE_MINUTES is set and this folder is a git checkout, look for new
+// commits on the remote. When there are some, exit with code 75; the start scripts then run `git pull`
+// and start the server again. Only outgoing connections are used, so it works behind a home router.
+const AUTO_UPDATE_MINUTES = Number(process.env.AUTO_UPDATE_MINUTES || 0);
+if (AUTO_UPDATE_MINUTES > 0 && fs.existsSync(path.join(__dirname, '.git'))) {
+  const { execFile } = require('child_process');
+  const git = (args) => new Promise((resolve) => execFile('git', args, { cwd: __dirname, timeout: 60000 }, (err, out) => resolve(err ? null : String(out).trim())));
+  const check = async () => {
+    if ((await git(['fetch', '--quiet'])) === null) return;              // offline or no remote: try again later
+    const behind = Number(await git(['rev-list', '--count', 'HEAD..@{u}']));
+    if (behind > 0) { console.log(`Update found (${behind} new commit${behind === 1 ? '' : 's'}). Restarting to apply it...`); process.exit(75); }
+  };
+  setTimeout(check, 15000);
+  setInterval(check, AUTO_UPDATE_MINUTES * 60e3);
+  console.log(`Auto-update is on: checking for new code every ${AUTO_UPDATE_MINUTES} minute(s).`);
+}

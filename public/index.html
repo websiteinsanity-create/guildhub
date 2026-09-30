@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guild Hall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <form class="login-card" data-form="login">
+    <img id="login-icon" class="login-icon hidden" alt=""><h1 id="login-guild">Guild Hall</h1>
+    <p class="muted" id="login-tag"></p>
+    <div id="login-discord" class="hidden">
+      <a class="btn discord" href="/auth/discord">Sign in with Discord</a>
+      <p class="muted small hidden" id="login-apply-note" style="margin:14px 0 0"><b>Not in our guild yet?</b> Sign in with Discord and send us an application.</p>
+      <p class="muted small" style="margin:14px 0 0">Use the Discord account you have on our Discord server. Your characters and your answers to events stay linked to it.</p>
+    </div>
+    <div id="login-passcode">
+      <div class="field"><label for="l-name">Display name</label><input id="l-name" name="name" autocomplete="nickname" required minlength="2" maxlength="24"></div>
+      <div class="field"><label for="l-pass">Guild passcode</label><input id="l-pass" name="passcode" type="password" required></div>
+      <button class="btn primary" style="width:100%">Enter</button>
+      <p class="muted small" style="margin:16px 0 0">Demo login: Discord sign-in is not set up on this server. Use the same display name every time so your characters stay linked to you.</p>
+    </div>
+    <div class="err" id="login-err" style="margin-top:10px"></div>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <nav class="rail">
+    <div class="brand"><img id="brand-icon" class="guild-icon hidden" alt=""><h2 id="brand-name"></h2><span id="brand-tag"></span></div>
+    <div id="nav-links"></div>
+    <div class="who"><span id="who"></span><br><a href="#" data-act="logout" class="small">Sign out</a></div>
+  </nav>
+  <main id="main"></main>
+</div>
+
+<dialog id="dlg"></dialog>
+<dialog id="notice" class="notice" aria-label="Message from the leadership"></dialog>
+<dialog id="alert" class="notice" aria-label="Attendance rules"></dialog>
+<div id="toast" class="hidden"></div>
+
+<script src="/app.js"></script>
+<script src="/features.js"></script>
+</body>
+</html>
