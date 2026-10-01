@@ -58,7 +58,12 @@ const SETTING_DEFAULTS = {
   // People who are not in the Discord server can sign in and apply. Off by default: then outsiders are turned away as before.
   applications: { enabled: false, intro: 'Tell us a bit about yourself and the character you play. The leadership reads every application.', inviteUrl: '' },
   // "Post to Discord" next to the parties of an event: which channel, and the text that goes with the picture.
-  partyPost: { channelId: '', channelName: '', text: '📋 **{event}**: parties for {date} at {time} ({parties} parties)\n{link}' },
+  partyPost: {
+    channelId: '', channelName: '', text: '📋 **{event}**: parties for {date} at {time} ({parties} parties)\n{link}',
+    mentionRoleIds: [],           // Discord roles to @-mention on every party announcement (empty = none, as before)
+    deletePrevious: false,        // delete the last party announcement message before posting the new one
+    lastMessage: null,            // { channelId, messageId } of the most recent one, so it can be found again to delete
+  },
   compliance: {
     enabled: true,
     windowDays: 30,         // how far back attendance is looked at
@@ -77,7 +82,7 @@ const SETTING_DEFAULTS = {
   hiddenSections: [],                                     // sections normal members do not see
   branding: { name: '', tagline: '', accent: '', bgDim: 82, announcement: '', iconFile: '', bgFile: '' },
 };
-let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };
+let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], auditLog: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };
 if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
 
 function save() {
@@ -184,7 +189,7 @@ function migrate() {
   db.loot = db.loot || [];
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
-  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications']) db[k] = db[k] || [];
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog']) db[k] = db[k] || [];
   for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
   db.infoBoard = db.infoBoard && Array.isArray(db.infoBoard.categories) ? db.infoBoard : { categories: [] };
   db.infoBoard.title = db.infoBoard.title || 'Info';
@@ -291,6 +296,9 @@ const route = (method, pattern, handler, { auth = true, officer = false, applica
   routes.push({ method, re, keys, handler, auth, officer, applicant });
 };
 
+// ---------- audit log: records who changed what, across this file and the feature modules ----------
+const audit = require('./server-audit')({ route, need, clean, newId, save, isOfficer, get db() { return db; } });
+
 route('POST', '/api/login', ({ body, ip }) => {
   need(!discord.loginEnabled, 400, 'This server uses Discord sign-in.');
   need(!tooManyFailures(ip), 429, 'Too many failed attempts. Try again in a few minutes.');
@@ -332,10 +340,10 @@ function eventFor(ev, user) {
 // GET /api/state is built per person in server-features.js (members only get their own loot, attendance and requests).
 
 // Characters: created and edited in server-features.js (some changes can need leadership approval).
-route('DELETE', '/api/members/:id', ({ user, params }) => {
-  const m = findMember(params.id);
-  need(m, 404, 'Character not found.');
-  need(canEditMember(user, m), 403, 'You can only remove your own characters.');
+// The full cleanup for removing one character: every place a member id is referenced elsewhere in the data.
+// Shared by the single-character delete route and the "one character per player" cleanup tool, so both stay
+// in sync - there is exactly one place that knows everything a character touches.
+function deleteMemberCascade(m) {
   db.members = db.members.filter((x) => x.id !== m.id);
   db.points = db.points.filter((p) => p.memberId !== m.id);
   db.duties = db.duties.filter((d) => d.memberId !== m.id);
@@ -347,9 +355,41 @@ route('DELETE', '/api/members/:id', ({ user, params }) => {
   }
   for (const p of db.presets) p.parties = p.parties.map((q) => dropFromParty(q, m.id));
   for (const h of hooks.memberDeleted) h(m);
+}
+route('DELETE', '/api/members/:id', ({ user, params }) => {
+  const m = findMember(params.id);
+  need(m, 404, 'Character not found.');
+  need(canEditMember(user, m), 403, 'You can only remove your own characters.');
+  deleteMemberCascade(m);
+  audit.log(user, 'member.delete', { type: 'member', id: m.id, name: m.name }, `${user.name} removed the character "${m.name}" (owner: ${m.owner}).`);
   save();
   return { ok: true };
 });
+
+// One character per player: who currently has more than one, and a tool to clean that up (keeps the oldest,
+// removes the rest the same safe way a normal delete does). Going forward, POST /api/members itself refuses to
+// create a second one - this is only for data that predates that rule.
+function duplicateGroups() {
+  const byOwner = new Map();
+  for (const m of db.members) { if (!byOwner.has(m.owner)) byOwner.set(m.owner, []); byOwner.get(m.owner).push(m); }
+  return [...byOwner.entries()].filter(([, ms]) => ms.length > 1).map(([owner, ms]) => {
+    const sorted = ms.slice().sort((a, b) => a.id - b.id);
+    return { owner, name: nameOfOwner(owner), keep: sorted[0], remove: sorted.slice(1) };
+  });
+}
+route('GET', '/api/admin/duplicate-characters', () => duplicateGroups().map((g) => ({
+  owner: g.owner, name: g.name,
+  keep: { id: g.keep.id, name: g.keep.name, role: g.keep.role },
+  remove: g.remove.map((m) => ({ id: m.id, name: m.name, role: m.role })),
+})), { officer: true });
+route('POST', '/api/admin/enforce-one-character', ({ user }) => {
+  const groups = duplicateGroups();
+  let removed = 0;
+  for (const g of groups) for (const m of g.remove) { deleteMemberCascade(m); removed++; }
+  if (removed) audit.log(user, 'member.cleanup', { type: 'settings' }, `${user.name} cleaned up extra characters: kept 1 per player for ${groups.length} ${groups.length === 1 ? 'player' : 'players'}, removed ${removed}.`);
+  save();
+  return { players: groups.length, removed };
+}, { officer: true });
 
 // Events
 function pickEvent(b, ex) {
@@ -381,27 +421,30 @@ route('POST', '/api/events', ({ body, user }) => {
   const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
   applyPresetRule(ev);
   db.events.push(ev);
+  audit.log(user, 'event.create', { type: 'event', id: ev.id, name: ev.title }, `${user.name} created the event "${ev.title}" (${ev.type}, ${ev.start}).`);
   save();
   return eventFor(ev, user);
 }, { officer: true });
 route('PUT', '/api/events/:id', ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
-  const oldStart = ev.start, oldType = ev.type;
+  const oldStart = ev.start, oldType = ev.type, oldTitle = ev.title;
   Object.assign(ev, pickEvent(body, ev));
   if (ev.start !== oldStart) ev.remindersSent = {};               // moved to another time: reminders start over
   if (ev.type !== oldType) applyPresetRule(ev);
   syncAttendancePoints(ev);
+  if (ev.start !== oldStart || ev.type !== oldType || ev.title !== oldTitle) audit.log(user, 'event.update', { type: 'event', id: ev.id, name: ev.title }, `${user.name} edited the event "${oldTitle}".`, { title: oldTitle, type: oldType, start: oldStart }, { title: ev.title, type: ev.type, start: ev.start });
   save();
   return eventFor(ev, user);
 }, { officer: true });
-route('DELETE', '/api/events/:id', ({ params }) => {
+route('DELETE', '/api/events/:id', ({ params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
   const series = ev.seriesId && db.series.find((x) => x.id === ev.seriesId);   // deleting one date of a recurring event skips just that date
   if (series && ev.seriesDate && !series.skipped.includes(ev.seriesDate)) series.skipped.push(ev.seriesDate);
   db.events = db.events.filter((e) => e.id !== ev.id);
   db.points = db.points.filter((p) => p.eventId !== ev.id);
+  audit.log(user, 'event.delete', { type: 'event', id: ev.id, name: ev.title }, `${user.name} deleted the event "${ev.title}".`);
   save();
   return { ok: true };
 }, { officer: true });
@@ -432,6 +475,7 @@ route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
   const ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
   ev.attended = [...new Set(ids)];
   syncAttendancePoints(ev);
+  audit.log(user, 'attendance.record', { type: 'event', id: ev.id, name: ev.title }, `${user.name} recorded attendance for "${ev.title}": ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
   save();
   return eventFor(ev, user);
 }, { officer: true });
@@ -440,6 +484,7 @@ route('POST', '/api/events/:id/parties', ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
   ev.parties = normParties(body.parties);
+  audit.log(user, 'party.update', { type: 'event', id: ev.id, name: ev.title }, `${user.name} set the parties for "${ev.title}": ${ev.parties.length} ${ev.parties.length === 1 ? 'party' : 'parties'}.`);
   save();
   return eventFor(ev, user);
 }, { officer: true });
@@ -456,18 +501,22 @@ route('POST', '/api/points', ({ body, user }) => {
     at: new Date().toISOString(), by: user.name,
   };
   db.points.push(entry);
+  audit.log(user, 'points.adjust', { type: 'member', id: m.id, name: m.name }, `${user.name} ${delta > 0 ? 'gave' : 'took'} ${Math.abs(delta)} points ${delta > 0 ? 'to' : 'from'} ${m.name}: ${entry.reason}.`);
   save();
   return entry;
 }, { officer: true });
-route('DELETE', '/api/points/:id', ({ params }) => {
+route('DELETE', '/api/points/:id', ({ params, user }) => {
+  const entry = db.points.find((p) => p.id === Number(params.id));
   db.points = db.points.filter((p) => p.id !== Number(params.id));
+  if (entry) { const m = findMember(entry.memberId); audit.log(user, 'points.delete', { type: 'member', id: entry.memberId, name: m ? m.name : '' }, `${user.name} deleted a points entry${m ? ' for ' + m.name : ''}: ${entry.delta > 0 ? '+' : ''}${entry.delta} (${entry.reason}).`); }
   save();
   return { ok: true };
 }, { officer: true });
 
 // Guild-wide settings (officers only).
-route('PUT', '/api/settings', ({ body }) => {
+route('PUT', '/api/settings', ({ body, user }) => {
   const st = db.settings, int = (v) => Math.round(Number(v));
+  const touchedKeys = Object.keys(body).filter((k) => st[k] !== undefined);
   if (body.lootFrom !== undefined) {
     const v = String(body.lootFrom || '');
     need(v === '' || (/^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(new Date(v + 'T00:00:00'))), 400, 'Pick a valid date.');
@@ -510,6 +559,7 @@ route('PUT', '/api/settings', ({ body }) => {
     st.reminderMinutes = [...new Set(list)].sort((a, b) => b - a);
   }
   if (body.remindersEnabled !== undefined) st.remindersEnabled = body.remindersEnabled === true || body.remindersEnabled === 'true';
+  if (touchedKeys.length) audit.log(user, 'settings.update', { type: 'settings' }, `${user.name} changed guild settings: ${touchedKeys.join(', ')}.`);
   save();
   return st;
 }, { officer: true });
@@ -558,16 +608,18 @@ route('POST', '/api/presets', ({ body, user }) => {
   need(name, 400, 'Give the preset a name.');
   const p = { id: newId(), name, description: clean(body.description, 200), parties: normParties(body.parties), createdBy: user.name, at: new Date().toISOString() };
   db.presets.push(p);
+  audit.log(user, 'party.preset.create', { type: 'preset', id: p.id, name: p.name }, `${user.name} created the party preset "${p.name}".`);
   save();
   return p;
 }, { officer: true });
-route('PUT', '/api/presets/:id', ({ body, params }) => {
+route('PUT', '/api/presets/:id', ({ body, params, user }) => {
   const p = findPreset(params.id);
   need(p, 404, 'Preset not found.');
   if (body.name !== undefined) { p.name = clean(body.name, 60); need(p.name, 400, 'Give the preset a name.'); }
   if (body.description !== undefined) p.description = clean(body.description, 200);
   if (body.parties !== undefined) p.parties = normParties(body.parties);
   if (body.hidden !== undefined) p.hidden = body.hidden === true || body.hidden === 'true';
+  audit.log(user, 'party.preset.update', { type: 'preset', id: p.id, name: p.name }, `${user.name} edited the party preset "${p.name}".`);
   save();
   return p;
 }, { officer: true });
@@ -595,11 +647,12 @@ route('DELETE', '/api/preset-rules/:type', ({ params }) => {
   return { ok: true };
 }, { officer: true });
 
-route('DELETE', '/api/presets/:id', ({ params }) => {
+route('DELETE', '/api/presets/:id', ({ params, user }) => {
   const p = findPreset(params.id);
   need(p, 404, 'Preset not found.');
   db.presetRules = db.presetRules.filter((r) => r.presetId !== p.id);
   db.presets = db.presets.filter((x) => x.id !== p.id);
+  audit.log(user, 'party.preset.delete', { type: 'preset', id: p.id, name: p.name }, `${user.name} deleted the party preset "${p.name}".`);
   save();
   return { ok: true };
 }, { officer: true });
@@ -640,7 +693,7 @@ route('DELETE', '/api/duties/:id', ({ user, params }) => {
 // Backup / restore
 route('GET', '/api/export', () => db, { officer: true });
 // Everything the app stores. A backup contains all of it, and restoring one brings all of it back.
-const DB_LISTS = ['members', 'events', 'points', 'duties', 'presets', 'presetRules', 'loot', 'series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications'];
+const DB_LISTS = ['members', 'events', 'points', 'duties', 'presets', 'presetRules', 'loot', 'series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog'];
 const DB_MAPS = ['users', 'profiles', 'playerTags', 'prefs', 'noticeAcks'];
 route('POST', '/api/import', ({ body }) => {
   need(body && Array.isArray(body.members) && Array.isArray(body.events) && Array.isArray(body.points), 400, 'Not a valid export file.');
@@ -795,12 +848,13 @@ route('POST', '/api/admin/test-dm', async ({ user }) => {
   return { ok: !!res.ok, error: res.error || '', bot: discord.botEnabled };
 }, { officer: true });
 // Characters created before Discord sign-in belong to a display name. This links them to a Discord player.
-route('POST', '/api/admin/link-owner', ({ body }) => {
+route('POST', '/api/admin/link-owner', ({ body, user }) => {
   const from = clean(body.from, 40), to = clean(body.to, 40);
   need(from && db.users[to], 400, 'Pick the old name and a player who has signed in with Discord.');
   let n = 0;
   for (const m of db.members) if (m.owner === from) { m.owner = to; n++; }
   for (const ev of db.events) if (ev.createdBy === from) ev.createdBy = to;
+  audit.log(user, 'owner.link', { type: 'player', id: to, name: db.users[to].name }, `${user.name} linked ${n} character(s) owned by "${from}" to the Discord player ${db.users[to].name}.`);
   save();
   return { moved: n };
 }, { officer: true });
@@ -809,7 +863,7 @@ route('POST', '/api/admin/link-owner', ({ body }) => {
 require('./server-features')({
   route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
-  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding,
+  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log,
   get db() { return db; },
 });
 
@@ -901,7 +955,7 @@ http.createServer(async (req, res) => {
         need(user.role !== 'applicant' || r.applicant, 403, 'Your application has to be accepted first.');       // applicants can reach nothing but the application
       }
       const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || /\/post-parties$/.test(url.pathname) ? 9e6 : 2e6);
-      const out = await r.handler({ body, user, params, ip });
+      const out = await r.handler({ body, user, params, ip, query: Object.fromEntries(url.searchParams) });
       return send(res, 200, out, url.pathname === '/api/export'
         ? { 'Content-Disposition': 'attachment; filename="guild-backup.json"' } : {});
     } catch (e) {

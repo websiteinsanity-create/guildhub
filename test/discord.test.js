@@ -358,3 +358,86 @@ test('the leadership picks a channel, posts a test message, and posts the pictur
   await call('/api/admin/discord', 'PUT', { partyPost: { channelId: '' } }, 'A');
   assert.equal((await post({ image: tinyPng, text: 'x' })).status, 400, 'no channel chosen');
 });
+
+// ---------------------------------------------------------------- role mentions on party announcements
+test('party announcements can @-mention chosen Discord roles, in the correct <@&id> format, with the rest of the text untouched', async () => {
+  const ch = '800000000000000001', officerRole = '900000000000000001', memberRole = '900000000000000010', bogus = '900000000000099999';
+  await call('/api/admin/discord', 'PUT', { partyPost: { channelId: ch } }, 'A');
+  const ev = (await call('/api/events', 'POST', { title: 'Mentions test', type: 'Castle Siege', start: inMinutes(600) }, 'A')).body;
+  const post = (b) => call(`/api/events/${ev.id}/post-parties`, 'POST', { image: tinyPng, text: 'Parties are up!', ...b }, 'A');
+
+  // who may read/pick roles, and what the picker sees
+  assert.equal((await call('/api/discord/roles', 'GET', null, 'B')).status, 403, 'members cannot read the role list');
+  const roles = (await call('/api/discord/roles', 'GET', null, 'A')).body;
+  assert.deepEqual(roles.roles.map((r) => r.name).sort(), ['GuildHallBot', 'Member', 'Officer'], '@everyone is filtered out, the bot is not');
+  assert.deepEqual(roles.selected, [], 'nothing configured yet');
+
+  // saving the setting: only officers, only real-looking role ids, capped
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [officerRole] } }, 'B')).status, 403);
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: ['not-a-role'] } }, 'A')).status, 400);
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: Array.from({ length: 11 }, (_, i) => String(9e17 + i)) } }, 'A')).status, 400, 'up to 10 roles');
+  const saved = (await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [officerRole, memberRole, officerRole] } }, 'A')).body;
+  assert.deepEqual(saved.partyPost.mentionRoleIds.sort(), [memberRole, officerRole].sort(), 'duplicates removed');
+
+  // posting: the message is prefixed with the correct Discord mention syntax, and only those roles are whitelisted
+  fake.state.posts.length = 0;
+  await post({});
+  const p = fake.state.posts[0];
+  assert.match(p.content, /^<@&900000000000000001> <@&900000000000000010>\nParties are up!$/, 'mentions come first, in <@&id> form, then the text unchanged');
+  assert.deepEqual(p.mentions.sort(), [memberRole, officerRole].sort(), 'Discord is told exactly which roles may actually ping, via allowed_mentions.roles');
+  assert.equal(p.parseAll, false, 'free-typed text can never trigger an accidental @everyone/@here/user ping');
+
+  // no roles configured: behaves exactly as before (no prefix at all) - existing guilds are unaffected
+  await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [bogus] } }, 'A').then((r) => assert.equal(r.status, 200, 'a role id can be saved even if it does not exist on the server (deleted role, etc.)'));
+  await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [] } }, 'A');
+  fake.state.posts.length = 0;
+  await post({});
+  assert.equal(fake.state.posts[0].content, 'Parties are up!', 'with no roles configured, the message is exactly what it always was');
+  assert.deepEqual(fake.state.posts[0].mentions, []);
+});
+
+// ---------------------------------------------------------------- deleting the previous party announcement
+test('switching on "delete previous announcement" removes the last one when posting a new one, and copes if it is already gone', async () => {
+  const ch = '800000000000000001';
+  await call('/api/admin/discord', 'PUT', { partyPost: { channelId: ch, mentionRoleIds: [] } }, 'A');
+  const ev1 = (await call('/api/events', 'POST', { title: 'Week 1', type: 'Castle Siege', start: inMinutes(600) }, 'A')).body;
+  const ev2 = (await call('/api/events', 'POST', { title: 'Week 2', type: 'Castle Siege', start: inMinutes(700) }, 'A')).body;
+  const post = (ev, b) => call(`/api/events/${ev.id}/post-parties`, 'POST', { image: tinyPng, text: 'x', ...b }, 'A');
+
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: true } }, 'B')).status, 403);
+
+  // off by default: two posts, both stay up, nothing deleted
+  await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: false } }, 'A');
+  fake.state.posts.length = 0;
+  await post(ev1, {}); await post(ev2, {});
+  assert.equal(fake.state.posts.filter((p) => !p.deleted).length, 2, 'deletePrevious is off by default, so both messages remain');
+
+  // on: posting a second time removes the first message this test itself created (whatever else exists from
+  // earlier tests in this file is not this test's concern - only the outcome of its own two posts is asserted)
+  await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: true } }, 'A');
+  fake.state.posts.length = 0;
+  await post(ev1, {});
+  const first = fake.state.posts[0];
+  assert.equal(first.deleted, false, 'nothing has tried to remove it yet');
+  await post(ev2, {});
+  assert.equal(first.deleted, true, 'the outdated message from this test was deleted');
+  const second = fake.state.posts[1];
+  assert.equal(second.deleted, false, 'the new one stays up');
+  const seenAfterSecond = (await state('A')).events.find((e) => e.id === ev2.id).partyPosts.at(-1);
+  assert.deepEqual(seenAfterSecond.deletedPrevious, { ok: true, error: '' });
+  assert.equal(seenAfterSecond.messageId, second.id);
+
+  // only that one message was touched - nothing else in the channel gets deleted as a side effect
+  assert.equal(fake.state.posts.filter((p) => p.deleted).length, 1);
+
+  // someone already deleted the "previous" message by hand: the next post must not fail because of that
+  await post(ev1, {});                                                   // becomes the new "last one"
+  const third = fake.state.posts[2];
+  third.deleted = true;                                                  // simulate a human deleting it in Discord directly
+  const r4 = await post(ev2, {});
+  assert.equal(r4.status, 200, 'posting still succeeds even though the message to delete was already gone');
+  const seenAfterManualDelete = (await state('A')).events.find((e) => e.id === ev2.id).partyPosts.at(-1);
+  assert.deepEqual(seenAfterManualDelete.deletedPrevious, { ok: true, error: '' }, 'an already-missing message counts as successfully cleaned up');
+
+  await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: false } }, 'A');
+});

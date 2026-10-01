@@ -48,7 +48,7 @@ function tzToIso(str) {
 }
 // A timestamp that sits at noon of a calendar day in the chosen zone (used to remember which week/month the calendar shows).
 const dayRef = (y, m, d) => Date.parse(tzToIso(`${y}-${pad(m)}-${pad(d)}T12:00`));
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: TZ() });
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: TZ() });
 
 async function api(path, method = 'GET', body) {
   const res = await fetch(path, {
@@ -87,8 +87,8 @@ const weaponLine = (m) => {
   const cls = classOf(m);
   return `${esc(w.join(' / '))}${cls ? ` - <span class="cls">${esc(cls)}</span>` : ''}${m.specialization ? ` <span class="spec">| ${esc(m.specialization)}</span>` : ''}`;
 };
-const fmtDate = (iso) => `${new Date(iso).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() })} ${tzAbbr(new Date(iso).getTime())}`;
-const fmtShort = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() });
+const fmtDate = (iso) => `${new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() })} ${tzAbbr(new Date(iso).getTime())}`;
+const fmtShort = (iso) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() });
 const toLocalInput = (iso) => { const w = wall(new Date(iso).getTime()); return `${w.y}-${pad(w.m)}-${pad(w.d)}T${pad(w.hh)}:${pad(w.mm)}`; };
 function until(iso) {
   const ms = new Date(iso) - Date.now(); const abs = Math.abs(ms);
@@ -214,6 +214,7 @@ const NAV = [
   { key: 'leave', label: () => 'Leave of absence', badge: () => (isOfficer() ? 0 : 0) },
   { key: 'approvals', label: () => 'Approvals', officer: true, badge: () => S.changes.filter((c) => c.status === 'pending').length + S.leaves.filter((l) => l.status === 'pending').length + S.explanations.filter((x) => x.status === 'pending').length + S.applications.filter((a) => a.status === 'pending').length },
   { key: 'warnings', label: () => 'Warnings', badge: () => (isOfficer() ? 0 : activeWarn(S.user.key).length) },
+  { key: 'auditlog', label: () => 'Audit log', officer: true },
   { key: 'admin', label: () => 'Admin', officer: true },
   { key: 'profile', label: () => 'My profile', gap: true },
 ];
@@ -293,9 +294,9 @@ function viewDashboard() {
 }
 
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const fmtDay = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+const fmtDay = (d) => d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 
-const fmtLootDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtLootDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 const lootSettings = () => {
   const st = S.settings;
   return { days: S.cfg.lootWindowDays ?? 14, need: st.lootThreshold ?? 60, redMax: st.lootRedMax ?? 59, orangeMax: st.lootOrangeMax ?? 80, itemDays: st.lootItemDays ?? 7 };
@@ -424,7 +425,7 @@ function viewRoster() {
   return `
   <div class="page-head">
     <div><h1>Member</h1><div class="muted">${active.length} active characters · average gear score ${avgGs}</div></div>
-    <button class="btn primary" data-act="member-new">Add character</button>
+    ${S.members.some((m) => m.owner === S.user.key) ? '' : '<button class="btn primary" data-act="member-new">Add character</button>'}
   </div>
   <div class="comp">
     <div class="bar">${strip.map((s) => `<i style="--c:${roleColor(s.r)};width:${100 * s.n / total}%"></i>`).join('')}</div>
@@ -534,7 +535,7 @@ function viewEvents(selId) {
   S.events.forEach((e) => { const k = wallKey(new Date(e.start).getTime()); (byDay[k] = byDay[k] || []).push(e); });
   Object.values(byDay).forEach((l) => l.sort((a, b) => new Date(a.start) - new Date(b.start)));
   const todayKey = wallKey(Date.now());
-  const dowName = (i) => new Date(2024, 0, 7 + ws + i).toLocaleDateString(undefined, { weekday: 'short' });
+  const dowName = (i) => new Date(2024, 0, 7 + ws + i).toLocaleDateString('en-US', { weekday: 'short' });
   const can = isOfficer() ? 'can-add' : '';
   let title, body;
 
@@ -543,7 +544,7 @@ function viewEvents(selId) {
     const first = new Date(y, m, 1);
     const offset = (first.getDay() - ws + 7) % 7;
     const cells = Math.ceil((offset + new Date(y, m + 1, 0).getDate()) / 7) * 7;
-    title = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    title = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     let grid = Array.from({ length: 7 }, (_, i) => `<div class="cal-dow">${dowName(i)}</div>`).join('');
     for (let i = 0; i < cells; i++) {
       const d = new Date(y, m, 1 - offset + i);
@@ -558,7 +559,7 @@ function viewEvents(selId) {
   } else {
     const start = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() - ((ref.getDay() - ws + 7) % 7));
     const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
-    title = `${fmtDay(start)} - ${end.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    title = `${fmtDay(start)} - ${end.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`;
     body = `<div class="wk-grid">${Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
       return `<div class="wk-day ${dayKey(d) === todayKey ? 'today' : ''} ${can}" data-act="cal-day" data-date="${ymd(d)}">

@@ -8,9 +8,13 @@ no dependencies: just Node 18+ and one JSON file of data.
 - **Sign in with Discord**: every player signs in with their Discord account, like on the original guild manager.
   Only members of your Discord server get in, and Discord roles decide who is an officer. Characters and answers
   are tied to the Discord account. (Without Discord settings the app runs in a demo mode with shared passcodes.)
-- **My profile** (bottom of the menu): every player has their own page with a note, their time zone,
-  all their characters, **several Questlog links** per character, and **extra builds** per character
-  (for example a PvE healer and a PvP dagger build, each with its own role, weapons, class and specialization).
+- **One character per player**: every player has exactly one character. It is created the first time they sign in
+  (or, for Discord servers that use applications, as part of applying). The "Add character" option disappears once
+  they have one - enforced by the server itself, not just hidden in the menu - and editing the existing one is how
+  they change role, weapons or anything else. A character can still have **several Questlog links** and **extra
+  builds** (for example a PvE healer and a PvP dagger build on the same character, each with its own role, weapons,
+  class and specialization) - the limit is one *character*, not one *build*.
+- **My profile** (bottom of the menu): every player has their own page with a note, their time zone and their character.
 - **Approval by the leadership**: in Admin the leadership chooses which changes players cannot make on their own
   (role, weapons and class, gear score, level, Questlog links, extra builds, profile text, or even adding a new
   character). Those changes wait under **Approvals** (with a badge in the menu); officers approve or reject with a note, and the player
@@ -49,6 +53,10 @@ no dependencies: just Node 18+ and one JSON file of data.
   for everybody ("Freki: Officer. Jobs: Managing the Wargames"). Only the leadership can customize the dashboard. Everyone with a leadership rank (Guild Master and Officer by
   default) is listed with their tasks (To do / In progress / Done) and the events they are hosting.
   Officers can edit anyone's tasks; a leader can edit their own.
+- **Audit log**: every important change - characters created, edited or removed, events, parties, points, settings
+  (guild and Discord), and applications accepted or rejected - is recorded with who did it, when, and (where it
+  applies) what the value was before and after. Only the leadership can see it, under **Audit log** in the menu, and
+  it can be filtered by player, action, target and date, with pages for large histories.
 - **Qualified for loot** (on the dashboard): attendance on **mandatory** events in the last 14 days, one row
   per member, coloured red / orange / green (default 0-59 / 60-80 / 81-100%). Clicking a row opens a
   dropdown with the player's Questlog link, the items they received in the last 7 days (read live from
@@ -68,7 +76,10 @@ no dependencies: just Node 18+ and one JSON file of data.
   Tax delivery, Guild bosses, PvE-Raid, Interserver Boonstone/Riftstone and Worldboss (Conflict/Peace). Click an event and a **window opens to the right of the calendar**: the event, your sign-up and the attendance PIN. Officers
   click an empty day to add one there. The title is optional (the type is used when you leave it empty). Members answer
   **Going** or **Can't** per character (there is no Maybe). Times show in each viewer's own time zone.
-  - **Colours in the calendar** show how you did: **green** you were there (recorded by the PIN or by an officer), **red** a no-show
+  - The calendar is **usable on a phone**: the week view becomes one full-width day per row instead of seven
+  squeezed-together columns, and the month view stays a real calendar grid with a small coloured dot per event
+  instead of unreadable text. Day and month names are always in English, regardless of the visitor's own browser language.
+- **Colours in the calendar** show how you did: **green** you were there (recorded by the PIN or by an officer), **red** a no-show
     (you said Going, an officer recorded attendance and you were not on it), **orange** no reply (after the event), **grey** not attending
     (you said Can't). The legend is under the calendar. Red and orange appear once an officer has recorded who came.
   - **Recurring events** (leadership only, a dropdown at the top of the Events page): "New recurring event" repeats an event every week, every 2 weeks, on several weekdays, at a
@@ -184,6 +195,12 @@ Good to know:
   are going but not placed), shows you a preview, and the bot posts it with the text. You can change the channel and the text
   before posting. The bot needs View Channel, Send Messages and Attach Files in that channel. The event page keeps a note
   of who posted when, and why it failed if it did.
+  - **@-mention roles**: in Admin > Discord, tick which Discord roles should be pinged on every party announcement (none ticked
+    = no mention, exactly as before). Only roles that actually exist on your server can be picked, and the mention uses Discord's
+    real `<@&role-id>` format - typed text elsewhere (the event title, the message) can never accidentally ping `@everyone`.
+  - **Delete the previous announcement**: also in Admin > Discord, an option to remove the last party announcement message right
+    before posting a new one, so the channel only ever shows the latest line-up instead of piling up old ones. If that old message
+    was already deleted by hand, posting the new one still works normally.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the
   officer tools at their next sign-in.
 - If a message cannot be delivered (DMs closed) the event page shows who did not get it.
@@ -341,6 +358,11 @@ GitHub runs the same command.
 
 - **Upgrading**: existing data is converted automatically (a single Questlog link becomes a list, characters get an empty
   build list). Make a backup first (Admin > Download backup), as always.
+- **Upgrading from before "one character per player"**: existing data is left exactly as it was - nobody loses a character
+  automatically. Going forward, nobody can create a second one. If any player already had more than one, Admin has a
+  **"One character per player"** tool: "Check" lists everyone who still has more than one (keeping their oldest, as a
+  suggestion), and "Remove the extra characters" deletes the rest the same safe way a normal delete does (out of every
+  party, loot entry, points entry and sign-up). Make a backup first, as always with anything that deletes data.
 - **Approvals cannot be dodged by re-creating a character** if you also switch on "Adding a new character": new
   characters then wait, hidden from other players, until approved.
 - **Pictures**: PNG, JPEG, GIF or WebP only (no SVG, because SVG can carry scripts). They are stored in `data/uploads/`
