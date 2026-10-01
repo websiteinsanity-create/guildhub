@@ -7,7 +7,7 @@
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, appUrl } = ctx;
+  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, appUrl, audit } = ctx;
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
   const yes = (v) => v === true || v === 'true';
@@ -54,6 +54,7 @@ module.exports = function install(ctx) {
     a.note = clean(body.note, 300); a.decidedBy = user.name; a.decidedAt = now();
     if (body.decision === 'reject') {
       a.status = 'rejected';
+      audit(user, 'application.reject', { type: 'application', id: a.id, name: a.name }, `${user.name} rejected ${a.name}'s application (${a.character.name}).`);
       save();
       notify(a.userKey, `Your application was not accepted this time.${a.note ? `\nNote: ${a.note}` : ''}`);
       return a;
@@ -65,6 +66,7 @@ module.exports = function install(ctx) {
       D.members.push({ id: newId(), owner: a.userKey, joinedAt: now(), builds: [], ...a.character, active: true });            // their character is on the roster straight away
     }
     if (discord.cfg.memberRoleId && u.inGuild) { const r = await discord.addRole(a.userKey); a.roleResult = r.ok ? 'given' : r.error; }
+    audit(user, 'application.accept', { type: 'application', id: a.id, name: a.name }, `${user.name} accepted ${a.name}'s application and added the character "${a.character.name}".`);
     save();
     const invite = !u.inGuild && D.settings.applications.inviteUrl ? `\nJoin our Discord server: ${D.settings.applications.inviteUrl}` : '';
     notify(a.userKey, `🎉 Your application was accepted. Welcome!${a.note ? `\nNote: ${a.note}` : ''}\n${appUrl()}${invite}`);
@@ -93,15 +95,17 @@ module.exports = function install(ctx) {
     const D = db();
     const out = {
       login: discord.loginEnabled, bot: discord.botEnabled, redirectUri: discord.loginEnabled ? discord.redirectUri() : '', guildIdSet: !!discord.cfg.guildId,
-      memberRole: !!discord.cfg.memberRoleId, inviteUrl: discord.inviteUrl(false), inviteUrlWithRoles: discord.inviteUrl(true), channels: [],
+      memberRole: !!discord.cfg.memberRoleId, inviteUrl: discord.inviteUrl(false), inviteUrlWithRoles: discord.inviteUrl(true), channels: [], roles: [],
     };
     if (discord.botEnabled) {
-      const [b, g, c] = await Promise.all([discord.botInfo(), discord.guildInfo(), discord.listChannels()]);
+      const [b, g, c, ro] = await Promise.all([discord.botInfo(), discord.guildInfo(), discord.listChannels(), discord.listRoles()]);
       out.botUser = b.ok ? { id: b.id, name: b.name } : null; out.botError = b.error || '';
       out.guild = g.ok ? { name: g.name } : null; out.guildError = g.error || '';
       out.channels = c.ok ? c.channels : []; out.channelsError = c.error || '';
+      out.roles = ro.ok ? ro.roles.filter((x) => x.name !== '@everyone').sort((a, b) => b.position - a.position) : []; out.rolesError = ro.error || '';
     }
     out.selected = D.settings.partyPost.channelId;
+    out.selectedRoles = D.settings.partyPost.mentionRoleIds;
     return out;
   }, { officer: true });
 
@@ -111,8 +115,15 @@ module.exports = function install(ctx) {
     return { channels: c.channels, selected: db().settings.partyPost.channelId };
   }, { officer: true });
 
-  route('PUT', '/api/admin/discord', ({ body }) => {
-    const st = db().settings;
+  route('GET', '/api/discord/roles', async () => {
+    const r = await discord.listRoles();
+    need(r.ok, 502, r.error || 'Could not read the roles.');
+    return { roles: r.roles.filter((x) => x.name !== '@everyone').sort((a, b) => b.position - a.position), selected: db().settings.partyPost.mentionRoleIds };
+  }, { officer: true });
+
+  route('PUT', '/api/admin/discord', ({ body, user }) => {
+    const st = db().settings, touched = [];
+    if (body.applications && typeof body.applications === 'object') { touched.push('applications'); }
     if (body.applications && typeof body.applications === 'object') {
       const x = body.applications;
       if (x.enabled !== undefined) st.applications.enabled = yes(x.enabled);
@@ -120,11 +131,21 @@ module.exports = function install(ctx) {
       if (x.inviteUrl !== undefined) st.applications.inviteUrl = httpUrl(x.inviteUrl);
     }
     if (body.partyPost && typeof body.partyPost === 'object') {
+      touched.push('party announcements');
       const x = body.partyPost;
       if (x.channelId !== undefined) { const id = String(x.channelId || ''); need(id === '' || /^\d{15,25}$/.test(id), 400, 'Pick a channel from the list.'); st.partyPost.channelId = id; if (!id) st.partyPost.channelName = ''; }
       if (x.channelName !== undefined) st.partyPost.channelName = clean(x.channelName, 80);
       if (x.text !== undefined) st.partyPost.text = String(x.text).replace(/\r\n/g, '\n').slice(0, 1500);
+      if (x.mentionRoleIds !== undefined) {
+        const ids = Array.isArray(x.mentionRoleIds) ? x.mentionRoleIds : [];
+        need(ids.length <= 10, 400, 'Pick up to 10 roles.');
+        const clean_ids = [...new Set(ids.map((id) => String(id)))];
+        need(clean_ids.every((id) => /^\d{15,25}$/.test(id)), 400, 'That does not look like a Discord role.');
+        st.partyPost.mentionRoleIds = clean_ids;
+      }
+      if (x.deletePrevious !== undefined) st.partyPost.deletePrevious = yes(x.deletePrevious);
     }
+    if (touched.length) audit(user, 'discord.settings.update', { type: 'settings' }, `${user.name} changed Discord settings: ${touched.join(', ')}.`);
     save();
     return st;
   }, { officer: true });
@@ -138,18 +159,27 @@ module.exports = function install(ctx) {
 
   // ---------------------------------------------------------------- "Post to Discord": the picture of an event's parties
   route('POST', '/api/events/:id/post-parties', async ({ body, user, params }) => {
-    const D = db(), ev = findEvent(params.id);
+    const D = db(), ev = findEvent(params.id), pp = D.settings.partyPost;
     need(ev, 404, 'Event not found.');
     need(discord.botEnabled, 400, 'The Discord bot is not set up yet (DISCORD_BOT_TOKEN). See Admin > Discord.');
-    const channelId = String(body.channelId || D.settings.partyPost.channelId || '');
+    const channelId = String(body.channelId || pp.channelId || '');
     need(/^\d{15,25}$/.test(channelId), 400, 'Pick the Discord channel first.');
     const buf = Buffer.from(String(body.image || '').replace(/^data:[^,]*,/, ''), 'base64');
     need(buf.length > 200 && buf.subarray(0, 8).equals(PNG_SIGNATURE), 400, 'The picture is not a PNG.');
     need(buf.length <= 8e6, 413, 'The picture is too large (8 MB at most).');
     const text = String(body.text || '').replace(/\{link\}/g, `${appUrl()}/#/events/${ev.id}`).trim().slice(0, 1900);
     const slug = (ev.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'event';
-    const r = await discord.postMessage(channelId, { content: text, file: { name: `parties-${slug}.png`, type: 'image/png', buffer: buf } });
-    ev.partyPosts = [...(ev.partyPosts || []), { at: now(), by: user.name, channelId, channelName: clean(body.channelName, 80) || D.settings.partyPost.channelName, ok: !!r.ok, error: r.error || '' }].slice(-10);
+    // Remove the outdated previous party announcement first, if that is switched on. A message that is already
+    // gone (someone deleted it by hand) is not an error - deleteMessage treats "not found" as success - and
+    // either way this never blocks posting the new one.
+    let deletedPrevious = null;
+    if (pp.deletePrevious && pp.lastMessage && pp.lastMessage.messageId) {
+      const del = await discord.deleteMessage(pp.lastMessage.channelId, pp.lastMessage.messageId);
+      deletedPrevious = { ok: del.ok, error: del.error || '' };
+    }
+    const r = await discord.postMessage(channelId, { content: text, file: { name: `parties-${slug}.png`, type: 'image/png', buffer: buf }, mentionRoleIds: pp.mentionRoleIds });
+    ev.partyPosts = [...(ev.partyPosts || []), { at: now(), by: user.name, channelId, channelName: clean(body.channelName, 80) || pp.channelName, ok: !!r.ok, error: r.error || '', messageId: r.id || '', deletedPrevious }].slice(-10);
+    if (r.ok && r.id) pp.lastMessage = { channelId, messageId: r.id };
     save();
     need(r.ok, 502, r.error || 'Discord did not accept the message.');
     return { ok: true };

@@ -7,7 +7,7 @@ Object.assign(UI, { attQ: '', attRole: '', attDays: '30', attMand: false, attBan
 
 /* ================= recurring events ================= */
 const wdOrder = () => { const ws = S.cfg.weekStartsOn ?? 1; return Array.from({ length: 7 }, (_, i) => (ws + i) % 7); };
-const wdName = (n, long) => new Date(2024, 0, 7 + n).toLocaleDateString(undefined, { weekday: long ? 'long' : 'short' });
+const wdName = (n, long) => new Date(2024, 0, 7 + n).toLocaleDateString('en-US', { weekday: long ? 'long' : 'short' });
 const tzShort = (tz) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName').value; } catch { return tz; } };
 function seriesText(se) {
   const days = se.weekdays.map((n) => wdName(n)).join(', ');
@@ -124,7 +124,7 @@ function viewProfile(key) {
     </form></div>
 
   <div class="page-head" style="margin:24px 0 12px"><h2>${own ? 'My characters' : 'Characters'}</h2>
-    <button class="btn primary" data-act="member-new-for" data-key="${esc(key)}">Add character</button></div>
+    ${chars.length ? '' : `<button class="btn primary" data-act="member-new-for" data-key="${esc(key)}">Add character</button>`}</div>
   ${chars.length ? chars.map(charCard).join('') : '<div class="empty">No characters yet. Add your first one with "Add character".</div>'}
 
   <div class="panel"><h3>${own ? 'My' : 'Their'} numbers</h3>
@@ -856,9 +856,12 @@ function discordAdmin() {
   const chans = c ? c.channels : [];
   const selected = pp.channelId;
   const options = [...(selected && !chans.some((x) => x.id === selected) ? [{ id: selected, name: pp.channelName || selected }] : []), ...chans];
+  const allRoles = c ? c.roles : [];
+  const mentioned = pp.mentionRoleIds || [];
+  const roleOptions = [...allRoles, ...mentioned.filter((id) => !allRoles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
   return `<div class="panel"><h3>Discord: bot, party pictures and applications</h3>
     <div class="muted small" style="margin:-6px 0 10px">The bot is the Discord account this app uses. It is a <b>bot user</b> you create for free in the Discord Developer Portal (see the README, "Discord setup"). An ordinary Discord account cannot be used, because Discord forbids that.</div>
-    <div class="link-row"><button class="btn" data-act="dcheck">Check the connection</button><span class="muted small">Looks up the bot, your server and its channels.</span></div>
+    <div class="link-row"><button class="btn" data-act="dcheck">Check the connection</button><span class="muted small">Looks up the bot, your server, its channels and its roles.</span></div>
     ${c ? `<div class="chk-list">
       ${okMark(c.login, 'Sign in with Discord is set up', 'Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_GUILD_ID and PUBLIC_URL in the .env file.')}
       ${okMark(c.bot, 'Bot token is set', 'Set DISCORD_BOT_TOKEN in the .env file.')}
@@ -872,7 +875,12 @@ function discordAdmin() {
     <form data-form="dpost"><div class="row"><div class="field"><label for="dc-ch">Channel</label><select id="dc-ch" name="channelId"><option value="">${chans.length || selected ? 'No channel chosen' : 'Press "Check the connection" to load your channels'}</option>${options.map((x) => `<option value="${esc(x.id)}" ${x.id === selected ? 'selected' : ''}>#${esc(x.name)}</option>`).join('')}</select></div></div>
       <div class="field"><label for="dc-tx">Text that goes with the picture</label><textarea id="dc-tx" name="text" maxlength="1500" style="min-height:90px">${esc(pp.text || '')}</textarea>
         <div class="muted small">You can use {event}, {type}, {date}, {time}, {parties} and {link} (the link to the event). Whoever posts can still change the text.</div></div>
-      <div class="link-row"><button class="btn primary">Save</button><button type="button" class="btn" data-act="dtest">Send a test message to this channel</button></div></form>
+      <div class="field"><label>@-mention these roles on every party announcement (optional)</label>
+        ${roleOptions.length ? roleOptions.map((r) => `<label class="tagpick"><input type="checkbox" name="mrole" value="${esc(r.id)}" ${mentioned.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')
+          : '<div class="muted small">Press "Check the connection" above to see your server\'s roles.</div>'}
+        <div class="muted small" style="margin-top:2px">Up to 10. None ticked = no mention, exactly as before.</div></div>
+      <label class="tagpick"><input type="checkbox" name="deletePrevious" ${pp.deletePrevious ? 'checked' : ''}> Delete the last party announcement message before posting a new one, so the channel only ever shows the latest one</label>
+      <div class="link-row" style="margin-top:10px"><button class="btn primary">Save</button><button type="button" class="btn" data-act="dtest">Send a test message to this channel</button></div></form>
     <h4 class="sub-head" style="margin-top:18px">Applications</h4>
     <form data-form="dapps">
       <label class="tagpick"><input type="checkbox" name="enabled" ${ap.enabled ? 'checked' : ''}> People who are not in our Discord server (or lack the member role) can sign in with Discord and apply. Without this they are turned away.</label>
@@ -882,7 +890,12 @@ function discordAdmin() {
   </div>`;
 }
 ACTIONS['dcheck'] = () => act(async () => { UI.dcheck = await api('/api/admin/discord-check'); }, 'Checked');
-FORMS.dpost = (f, fd) => act(() => api('/api/admin/discord', 'PUT', { partyPost: { channelId: fd.channelId, channelName: f.elements.channelId.selectedOptions[0] ? f.elements.channelId.selectedOptions[0].textContent.replace(/^#/, '') : '', text: fd.text } }), 'Saved');
+FORMS.dpost = (f, fd) => act(() => api('/api/admin/discord', 'PUT', {
+  partyPost: {
+    channelId: fd.channelId, channelName: f.elements.channelId.selectedOptions[0] ? f.elements.channelId.selectedOptions[0].textContent.replace(/^#/, '') : '',
+    text: fd.text, mentionRoleIds: [...f.querySelectorAll('input[name=mrole]:checked')].map((i) => i.value), deletePrevious: f.elements.deletePrevious.checked,
+  },
+}), 'Saved');
 ACTIONS['dtest'] = () => {
   const sel = $('#dc-ch');
   if (!sel.value) return toast('Pick a channel first.', true);
@@ -955,7 +968,7 @@ async function renderPartiesImage(ev) {
   });
   let yy = y0 - gap + 16;
   if (unLines.length) { g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; unLines.forEach((l, i) => g.fillText(l, pad, yy + 14 + i * 21)); yy += unLines.length * 21 + 14; }
-  g.fillStyle = '#6f6268'; g.font = `400 13px ${sans}`; g.fillText(`Made with Guild Hall · ${new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: TZ() })} ${tzAbbr(Date.now())}`, pad, H - pad + 6);
+  g.fillStyle = '#6f6268'; g.font = `400 13px ${sans}`; g.fillText(`Made with Guild Hall · ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: TZ() })} ${tzAbbr(Date.now())}`, pad, H - pad + 6);
   return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('the browser could not make the picture'))), 'image/png'));
 }
 const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
@@ -964,17 +977,24 @@ ACTIONS['parties-post'] = async (el, d) => {
   if (!S.cfg.botOn) return toast('The Discord bot is not set up yet. See Admin > Discord.', true);
   toast('Drawing the picture...');
   try { PARTY_IMG = await blobToDataUrl(await renderPartiesImage(ev)); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
-  let channels = [], selected = (S.settings.partyPost || {}).channelId || '', problem = '';
-  try { const r = await api('/api/discord/channels'); channels = r.channels; } catch (e) { problem = e.message; }
-  const pp = S.settings.partyPost || {}, when = new Date(ev.start);
+  const pp = S.settings.partyPost || {};
+  let channels = [], selected = pp.channelId || '', problem = '', mentionNames = [];
+  try {
+    const [rc, rr] = await Promise.all([api('/api/discord/channels'), (pp.mentionRoleIds || []).length ? api('/api/discord/roles') : null]);
+    channels = rc.channels;
+    if (rr) mentionNames = (pp.mentionRoleIds || []).map((id) => (rr.roles.find((r) => r.id === id) || { name: id }).name);
+  } catch (e) { problem = e.message; }
+  const when = new Date(ev.start);
   const text = (pp.text || '📋 **{event}**: parties for {date} at {time}\n{link}')
     .replace(/\{event\}/g, ev.title).replace(/\{type\}/g, ev.type).replace(/\{parties\}/g, ev.parties.length)
-    .replace(/\{date\}/g, when.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ() })).replace(/\{time\}/g, `${fmtTime(ev.start)} ${tzAbbr(when.getTime())}`);
+    .replace(/\{date\}/g, when.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ() })).replace(/\{time\}/g, `${fmtTime(ev.start)} ${tzAbbr(when.getTime())}`);
   openDialog(`<form data-form="postparties" data-id="${ev.id}"><h2>Post the parties to Discord</h2>
     <img class="post-preview" src="${PARTY_IMG}" alt="Preview of the picture that will be posted">
     ${problem ? `<div class="warn-line" style="margin:10px 0">Could not load your channels: ${esc(problem)} Check Admin > Discord.</div>` : ''}
     <div class="field" style="margin-top:12px"><label for="pp-ch">Channel</label><select id="pp-ch" name="channelId" required><option value="">Choose a channel</option>${channels.map((x) => `<option value="${esc(x.id)}" ${x.id === selected ? 'selected' : ''}>#${esc(x.name)}</option>`).join('')}</select></div>
     <div class="field"><label for="pp-tx">Text</label><textarea id="pp-tx" name="text" maxlength="1900" style="min-height:90px">${esc(text)}</textarea><div class="muted small">{link} becomes the link to this event.</div></div>
+    ${mentionNames.length ? `<div class="muted small" style="margin:-4px 0 12px">Will also @-mention: <b>${mentionNames.map(esc).join(', ')}</b> (set in Admin > Discord).</div>` : ''}
+    ${pp.deletePrevious ? `<div class="muted small" style="margin:-4px 0 12px">The last party announcement will be deleted right before this one posts (Admin > Discord).</div>` : ''}
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary" ${problem ? 'disabled' : ''}>Post it</button></div></form>`, true);
 };
 FORMS.postparties = (f, fd, id) => {
@@ -1001,3 +1021,91 @@ AFTER_RENDER.push((page) => {
   if (head && !head.querySelector('[data-act=adm-all]')) head.insertAdjacentHTML('beforeend', '<span class="seg"><button class="btn sm" data-act="adm-all" data-open="1">Open all</button><button class="btn sm" data-act="adm-all" data-open="0">Close all</button></span>');
 });
 ACTIONS['adm-all'] = (el, d) => document.querySelectorAll('details.adm').forEach((x) => { x.open = d.open === '1'; (UI.fold = UI.fold || {})[x.dataset.fold] = x.open; });
+
+/* ================= audit log (leadership only): who changed what, searchable and paginated ================= */
+Object.assign(UI, { auditQ: { user: '', action: '', target: '', from: '', to: '', page: 1 }, auditResult: null, auditActions: null });
+const ACTION_LABELS = {
+  'member.create': 'Character created', 'member.update': 'Character edited', 'member.delete': 'Character removed',
+  'event.create': 'Event created', 'event.update': 'Event edited', 'event.delete': 'Event deleted',
+  'attendance.record': 'Attendance recorded', 'party.update': 'Parties set on an event',
+  'party.preset.create': 'Party preset created', 'party.preset.update': 'Party preset edited', 'party.preset.delete': 'Party preset deleted',
+  'points.adjust': 'Points adjusted', 'points.delete': 'Points entry deleted',
+  'settings.update': 'Guild settings changed', 'discord.settings.update': 'Discord settings changed',
+  'application.accept': 'Application accepted', 'application.reject': 'Application rejected', 'owner.link': 'Characters linked to a player',
+};
+const actionLabel = (a) => ACTION_LABELS[a] || a;
+
+async function loadAudit() {
+  const q = UI.auditQ, qs = Object.entries({ user: q.user, action: q.action, target: q.target, from: q.from, to: q.to, page: q.page, limit: 50 })
+    .filter(([, v]) => v !== '' && v != null).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  try { UI.auditResult = await api('/api/admin/audit?' + qs); } catch (e) { UI.auditResult = { error: e.message }; }
+  if (!UI.auditActions) { try { UI.auditActions = await api('/api/admin/audit/actions'); } catch { UI.auditActions = []; } }
+  render();
+}
+AFTER_RENDER.push((page) => { if (page === 'auditlog' && UI.auditResult === null) loadAudit(); });
+
+const diffRow = (label, before, after) => `<div><span class="muted">${esc(label)}:</span> ${esc(String(before ?? ''))} <span class="arrow">→</span> <b>${esc(String(after ?? ''))}</b></div>`;
+function auditRow(e) {
+  const hasDiff = e.before && e.after && Object.keys(e.before).length;
+  return `<tr>
+    <td class="muted small nowrap">${fmtShort(e.at)}</td>
+    <td><b>${esc(e.byName || 'System')}</b></td>
+    <td><span class="type-pill">${esc(actionLabel(e.action))}</span></td>
+    <td>${e.targetName ? `${esc(e.targetName)}${e.targetType ? ` <span class="muted small">(${esc(e.targetType)})</span>` : ''}` : '<span class="muted">-</span>'}</td>
+    <td>${esc(e.description)}${hasDiff ? `<details class="ql-drop"><summary>What changed</summary><div class="diff">${Object.keys(e.before).map((k) => diffRow(k, e.before[k], e.after[k])).join('')}</div></details>` : ''}</td>
+  </tr>`;
+}
+VIEWS.auditlog = () => {
+  const q = UI.auditQ, r = UI.auditResult;
+  return `
+  <div class="page-head"><div><h1>Audit log</h1><div class="muted">Who changed what, and when. Only the leadership can see this.</div></div></div>
+  <div class="toolbar">
+    <input type="search" placeholder="Search player" value="${esc(q.user)}" data-act="audit-user" aria-label="Filter by player">
+    <select data-act="audit-action" aria-label="Filter by action"><option value="">All actions</option>${(UI.auditActions || []).map((a) => `<option value="${esc(a)}" ${q.action === a ? 'selected' : ''}>${esc(actionLabel(a))}</option>`).join('')}</select>
+    <input type="search" placeholder="Search target (character, event...)" value="${esc(q.target)}" data-act="audit-target" aria-label="Filter by target">
+    <label class="small muted" style="margin:0">From <input type="date" value="${esc(q.from)}" data-act="audit-from" aria-label="From date" style="width:auto"></label>
+    <label class="small muted" style="margin:0">To <input type="date" value="${esc(q.to)}" data-act="audit-to" aria-label="To date" style="width:auto"></label>
+    ${(q.user || q.action || q.target || q.from || q.to) ? '<button class="btn sm" data-act="audit-clear">Clear filters</button>' : ''}
+  </div>
+  ${!r ? '<div class="empty">Loading...</div>' : r.error ? `<div class="empty">${esc(r.error)}</div>` : r.entries.length ? `
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+    <tbody>${r.entries.map(auditRow).join('')}</tbody>
+  </table></div>
+  <div class="toolbar" style="margin-top:14px;justify-content:space-between">
+    <span class="muted small">${r.total} ${r.total === 1 ? 'entry' : 'entries'} · page ${r.page} of ${r.pages}</span>
+    <span class="seg"><button class="btn sm" data-act="audit-page" data-p="${r.page - 1}" ${r.page <= 1 ? 'disabled' : ''}>Previous</button><button class="btn sm" data-act="audit-page" data-p="${r.page + 1}" ${r.page >= r.pages ? 'disabled' : ''}>Next</button></span>
+  </div>` : '<div class="empty">Nothing matches these filters.</div>'}`;
+};
+const auditRefetch = (field) => (el) => { UI.auditQ = { ...UI.auditQ, [field]: el.value, page: 1 }; loadAudit(); };
+CHANGES['audit-user'] = auditRefetch('user');
+CHANGES['audit-action'] = auditRefetch('action');
+CHANGES['audit-target'] = auditRefetch('target');
+CHANGES['audit-from'] = auditRefetch('from');
+CHANGES['audit-to'] = auditRefetch('to');
+ACTIONS['audit-clear'] = () => { UI.auditQ = { user: '', action: '', target: '', from: '', to: '', page: 1 }; loadAudit(); };
+ACTIONS['audit-page'] = (el, d) => { UI.auditQ = { ...UI.auditQ, page: Number(d.p) }; loadAudit(); };
+
+/* ================= Admin: one character per player (clean up duplicates from before this rule existed) ================= */
+{
+  const before = adminExtras;
+  adminExtras = function () { return oneCharAdmin() + before(); };
+}
+Object.assign(UI, { dupes: null });
+function oneCharAdmin() {
+  const d = UI.dupes;
+  return `<div class="panel"><h3>One character per player</h3>
+    <div class="muted small" style="margin:-6px 0 10px">Every player can only have one character now. This finds anyone who still has more than one from before that rule existed, and removes the extra ones - keeping each player's oldest character and cleaning up everywhere else it is referenced (parties, loot, points, sign-ups), the same as a normal delete.</div>
+    <button class="btn" data-act="dupes-check">Check for players with more than one character</button>
+    ${d === null ? '' : !d.length ? '<div class="muted small" style="margin-top:10px">Nobody has more than one character. Nothing to do.</div>' : `
+    <div style="margin-top:12px">${d.map((g) => `<div class="rule-row"><span style="flex:1"><b>${esc(g.name)}</b>:
+      keep <span class="type-pill">${esc(g.keep.name)}</span> (${esc(g.keep.role)}) · remove ${g.remove.map((m) => `${esc(m.name)} (${esc(m.role)})`).join(', ')}</span></div>`).join('')}</div>
+    <button class="btn danger" style="margin-top:10px" data-act="dupes-apply">Remove the extra characters listed above</button>`}
+  </div>`;
+}
+ACTIONS['dupes-check'] = () => act(async () => { UI.dupes = await api('/api/admin/duplicate-characters'); }, 'Checked');
+ACTIONS['dupes-apply'] = () => {
+  const n = (UI.dupes || []).reduce((a, g) => a + g.remove.length, 0);
+  if (!confirm(`Remove ${n} extra ${n === 1 ? 'character' : 'characters'} across ${UI.dupes.length} ${UI.dupes.length === 1 ? 'player' : 'players'}? Each player keeps their oldest character. This cannot be undone.`)) return;
+  act(async () => { const r = await api('/api/admin/enforce-one-character', 'POST', {}); UI.dupes = []; toast(`Removed ${r.removed} extra ${r.removed === 1 ? 'character' : 'characters'}.`); });
+};

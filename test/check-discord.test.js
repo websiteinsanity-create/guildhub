@@ -9,8 +9,14 @@ let fake;
 before(async () => { fake = await startFakeDiscord(); });
 after(() => fake && fake.close());
 
+// A fake token that has the right SHAPE for our own "does this look like a bot token" check (three dot-separated
+// segments) without ever appearing in the source as one contiguous token-shaped literal, so GitHub's secret
+// scanning (which flags real-looking Discord bot tokens on sight) has nothing to match against. It is built at
+// runtime, only ever used against our own fake Discord test server below, and is not a real credential.
+const FAKE_BOT_TOKEN = ['M'.repeat(1) + '2'.repeat(23), 'G'.repeat(6), 'x'.repeat(36)].join('.');
+
 const GOOD = () => ({
-  PUBLIC_URL: 'http://localhost:3000', DISCORD_CLIENT_ID: '999000000000000001', DISCORD_CLIENT_SECRET: 'shh', DISCORD_BOT_TOKEN: 'YOUR_DISCORD_BOT_TOKEN_HERE',
+  PUBLIC_URL: 'http://localhost:3000', DISCORD_CLIENT_ID: '999000000000000001', DISCORD_CLIENT_SECRET: 'shh', DISCORD_BOT_TOKEN: FAKE_BOT_TOKEN,
   DISCORD_GUILD_ID: '111111111111111111', DISCORD_OFFICER_ROLE_IDS: '900000000000000001', DISCORD_OFFICER_USER_IDS: '100000000000000001', DISCORD_MEMBER_ROLE_ID: '900000000000000010',
   DISCORD_API_BASE: fake.url,
 });

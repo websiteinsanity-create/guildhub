@@ -111,20 +111,33 @@ function createDiscord(env = process.env) {
     30046: 'Discord says too many messages were sent. Try again in a minute.',
   };
   const explain = (r) => (r.data && FRIENDLY[r.data.code]) || (r.status === 401 ? 'Discord did not accept the bot token.' : (r.data && r.data.message) || `Discord said ${r.status}`);
-  async function postMessage(channelId, { content, file }) {
+  // mentionRoleIds (optional): Discord role ids to @-mention, using Discord's own mention syntax <@&id>.
+  // allowed_mentions explicitly whitelists only those role ids, so free-typed text (the announcement text field,
+  // an event title) can never accidentally ping @everyone/@here or an unrelated role/user.
+  async function postMessage(channelId, { content, file, mentionRoleIds }) {
     if (!botEnabled) return { ok: false, dry: true, error: 'No bot token set (DISCORD_BOT_TOKEN), so nothing was sent.' };
     if (!isSnowflake(channelId)) return { ok: false, error: 'Pick a channel first.' };
+    const roles = (mentionRoleIds || []).filter(isSnowflake);
+    const full = roles.length ? `${roles.map((id) => `<@&${id}>`).join(' ')}\n${content}` : content;
     for (let attempt = 0; attempt < 2; attempt++) {
       const fd = new FormData();
-      fd.append('payload_json', JSON.stringify({ content, allowed_mentions: { parse: [] }, ...(file ? { attachments: [{ id: 0, filename: file.name }] } : {}) }));
+      fd.append('payload_json', JSON.stringify({ content: full, allowed_mentions: { parse: [], roles }, ...(file ? { attachments: [{ id: 0, filename: file.name }] } : {}) }));
       if (file) fd.append('files[0]', new Blob([file.buffer], { type: file.type || 'application/octet-stream' }), file.name);
       const res = await fetch(`${cfg.apiBase}/channels/${channelId}/messages`, { method: 'POST', headers: { Authorization: 'Bot ' + cfg.botToken, 'User-Agent': 'DiscordBot (guild-hall, 1.0)' }, body: fd, signal: AbortSignal.timeout(20000) });
       const data = await res.json().catch(() => ({}));
       const r = { status: res.status, ok: res.ok, data, retryAfter: Number(res.headers.get('retry-after') || data.retry_after || 0) };
       if (r.status === 429 && attempt === 0) { await sleep(Math.min(10, r.retryAfter || 1) * 1000); continue; }
-      return r.ok ? { ok: true } : { ok: false, error: explain(r) };
+      return r.ok ? { ok: true, id: data.id } : { ok: false, error: explain(r) };
     }
     return { ok: false, error: 'Discord is rate limiting the bot. Try again in a minute.' };
+  }
+  // Deletes a message the bot itself posted earlier (used to remove an outdated party announcement before
+  // posting the new one). A message that is already gone (manually deleted, or too old) counts as success:
+  // the end state - "that message is not there" - is what the caller actually wants.
+  async function deleteMessage(channelId, messageId) {
+    if (!botEnabled || !isSnowflake(channelId) || !isSnowflake(messageId)) return { ok: false, error: 'Nothing to delete.' };
+    const r = await api(`/channels/${channelId}/messages/${messageId}`, { method: 'DELETE', bot: true });
+    return r.ok || r.status === 404 ? { ok: true } : { ok: false, error: explain(r) };
   }
   async function listChannels() {
     if (!botEnabled) return { ok: false, error: 'No bot token set.' };
@@ -172,7 +185,7 @@ function createDiscord(env = process.env) {
 
   const avatarUrl = (u) => (u && u.avatar && isSnowflake(u.id) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '');
 
-  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake };
+  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake };
 }
 
 module.exports = { createDiscord, isSnowflake };

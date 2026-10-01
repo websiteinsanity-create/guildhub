@@ -13,7 +13,7 @@ module.exports = function install(ctx) {
   const {
     route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, findMember, findEvent, normParties, applyPresetRule,
     eventFor, pickMember, cleanLinks, syncAttendancePoints, hooks, tickHooks, clone, appUrl, nameOfOwner, LOOT_TYPES, LOOT_DEFAULT_TYPE,
-    UPLOAD_DIR, publicBranding, pickEvent,
+    UPLOAD_DIR, publicBranding, pickEvent, audit,
   } = ctx;
   const db = () => ctx.db;                                   // the database object is replaced when a backup is restored
   const now = () => new Date().toISOString();
@@ -164,8 +164,12 @@ module.exports = function install(ctx) {
     } else if (gate(user, 'newCharacter')) {
       m.active = false; m.pendingApproval = true;
     }
+    // Each player has exactly one character. Edit the existing one instead of adding another; an officer can
+    // remove the old one first if it genuinely needs replacing.
+    need(!D.members.some((x) => x.owner === m.owner), 409, `${m.owner === user.key ? 'You already have' : (nameOfOwner(m.owner) || m.owner) + ' already has'} a character. Edit it instead of adding another one.`);
     D.members.push(m);
     if (m.pendingApproval) queue(user, { kind: 'newCharacter', ownerKey: m.owner, memberId: m.id });
+    audit(user, 'member.create', { type: 'member', id: m.id, name: m.name }, `${user.name} created the character "${m.name}"${m.pendingApproval ? ' (waiting for approval)' : ''}.`);
     save();
     return m.pendingApproval ? { ...m, approvalPending: ['newCharacter'] } : m;
   });
@@ -173,6 +177,7 @@ module.exports = function install(ctx) {
     const D = db(), m = findMember(params.id);
     need(m, 404, 'Character not found.');
     need(ctx.canEditMember(user, m), 403, 'You can only edit your own characters.');
+    const beforeEdit = { ...m };                               // for the audit log - what the important fields looked like before this request
     const next = pickMember(body, m);
     const immediate = {}, gated = {};
     for (const [f, g] of Object.entries(FIELD_GROUP)) {
@@ -197,6 +202,9 @@ module.exports = function install(ctx) {
       else c = queue(user, { kind: 'member', ownerKey: m.owner, memberId: m.id, changes: fresh });
       pending = [...new Set(Object.keys(gated).map((f) => groupLabel(FIELD_GROUP[f])))];
     }
+    const fields = ['name', 'role', 'rank', 'owner', 'primaryWeapon', 'secondaryWeapon', 'active', 'gearScore', 'level', 'mode'].filter((f) => beforeEdit[f] !== m[f]);
+    if (fields.length) audit(user, 'member.update', { type: 'member', id: m.id, name: m.name }, `${user.name} changed ${m.name}: ${fields.join(', ')}.`,
+      Object.fromEntries(fields.map((f) => [f, beforeEdit[f]])), Object.fromEntries(fields.map((f) => [f, m[f]])));
     save();
     return pending.length ? { ...m, approvalPending: pending } : m;
   });
@@ -452,10 +460,10 @@ module.exports = function install(ctx) {
   }, { officer: true });
 
   // ============================================================ appearance, access, preferences
-  route('PUT', '/api/admin/options', ({ body }) => {
-    const D = db(), st = D.settings;
-    if (body.approvals && typeof body.approvals === 'object') for (const g of groups) if (body.approvals[g.key] !== undefined) st.approvals[g.key] = yes(body.approvals[g.key]);
-    if (Array.isArray(body.hiddenSections)) st.hiddenSections = [...new Set(body.hiddenSections.filter((k) => HIDEABLE.has(k)))];
+  route('PUT', '/api/admin/options', ({ body, user }) => {
+    const D = db(), st = D.settings, touched = [];
+    if (body.approvals && typeof body.approvals === 'object') { for (const g of groups) if (body.approvals[g.key] !== undefined) st.approvals[g.key] = yes(body.approvals[g.key]); touched.push('approval requirements'); }
+    if (Array.isArray(body.hiddenSections)) { st.hiddenSections = [...new Set(body.hiddenSections.filter((k) => HIDEABLE.has(k)))]; touched.push('what members can see'); }
     if (body.branding && typeof body.branding === 'object') {
       const b = st.branding, x = body.branding;
       if (x.name !== undefined) b.name = clean(x.name, 40);
@@ -463,7 +471,9 @@ module.exports = function install(ctx) {
       if (x.announcement !== undefined) b.announcement = clean(x.announcement, 500);
       if (x.accent !== undefined) { need(x.accent === '' || /^#[0-9a-f]{6}$/i.test(x.accent), 400, 'Pick a colour.'); b.accent = String(x.accent).toLowerCase(); }
       if (x.bgDim !== undefined) { const v = int(x.bgDim); need(v >= 0 && v <= 95, 400, 'The background dimming must be between 0 and 95.'); b.bgDim = v; }
+      touched.push('appearance');
     }
+    if (touched.length) audit(user, 'settings.update', { type: 'settings' }, `${user.name} changed guild settings: ${touched.join(', ')}.`);
     save();
     return st;
   }, { officer: true });

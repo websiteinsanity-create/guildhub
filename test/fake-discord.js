@@ -1,7 +1,7 @@
 // A tiny stand-in for Discord's API, used by the tests.
 const http = require('http');
 function startFakeDiscord() {
-  const state = { dms: [], guildMembers: {}, failDM: new Set(), tokens: {}, channels: {}, posts: [], roleAdds: [], roleFail: false, botInGuild: true, denyChannels: new Set(), botToken: '', clientSecret: 'shh', knownUsers: ['100000000000000001'],
+  const state = { dms: [], guildMembers: {}, failDM: new Set(), tokens: {}, channels: {}, posts: [], roleAdds: [], roleFail: false, botInGuild: true, denyChannels: new Set(), denyDelete: new Set(), botToken: '', clientSecret: 'shh', knownUsers: ['100000000000000001'],
     roleList: [{ id: '900000000000000001', name: 'Officer', position: 5 }, { id: '900000000000000010', name: 'Member', position: 2 }, { id: '900000000000000099', name: 'GuildHallBot', position: 3 }],
     channelList: [{ id: '800000000000000001', name: 'parties', type: 0, position: 1 }, { id: '800000000000000002', name: 'general', type: 0, position: 0 }, { id: '800000000000000003', name: 'Voice', type: 2, position: 2 }] };
   const srv = http.createServer((req, res) => {
@@ -40,13 +40,20 @@ function startFakeDiscord() {
         if (!state.channelList.some((c) => c.id === pm[1])) return send(404, { code: 10003, message: 'Unknown Channel' });
         if (state.denyChannels.has(pm[1])) return send(403, { code: 50013, message: 'Missing Permissions' });
         const boundary = /boundary=(.+)$/.exec(req.headers['content-type'])[1], parts = raw.toString('latin1').split('--' + boundary).slice(1, -1);
-        const out = { channel: pm[1], content: '', file: null };
+        const out = { channel: pm[1], content: '', file: null, mentions: [], deleted: false, id: '900000000000' + String(state.posts.length + 1).padStart(6, '0') };   // a realistic snowflake-shaped id (15+ digits), not just "1", "2", ... - real code validates the shape
         for (const p of parts) {
           const [head, ...rest] = p.split('\r\n\r\n'), data = rest.join('\r\n\r\n').replace(/\r\n$/, '');
-          if (/name="payload_json"/.test(head)) out.content = JSON.parse(Buffer.from(data, 'latin1').toString('utf8')).content;
+          if (/name="payload_json"/.test(head)) { const pl = JSON.parse(Buffer.from(data, 'latin1').toString('utf8')); out.content = pl.content; out.mentions = (pl.allowed_mentions && pl.allowed_mentions.roles) || []; out.parseAll = !!(pl.allowed_mentions && pl.allowed_mentions.parse && pl.allowed_mentions.parse.length); }
           if (/name="files\[0\]"/.test(head)) { const buf = Buffer.from(data, 'latin1'); out.file = { name: /filename="([^"]+)"/.exec(head)[1], size: buf.length, png: buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), base64: buf.toString('base64') }; }
         }
-        state.posts.push(out); return send(200, { id: String(state.posts.length) });
+        state.posts.push(out); return send(200, { id: out.id });
+      }
+      const dm2 = path.match(/^\/channels\/(\d+)\/messages\/(\d+)$/);
+      if (req.method === 'DELETE' && dm2 && isBot) {
+        if (state.denyDelete.has(dm2[1])) return send(403, { code: 50013, message: 'Missing Permissions' });
+        const post = state.posts.find((p) => p.id === dm2[2]);
+        if (!post || post.channel !== dm2[1] || post.deleted) return send(404, { code: 10008, message: 'Unknown Message' });
+        post.deleted = true; res.writeHead(204); return res.end();
       }
       if (req.method === 'GET' && path === '/users/@me') { const id = state.tokens[bearer]; return id ? send(200, { id, username: 'user' + id.slice(-3), global_name: 'Global ' + id.slice(-3), avatar: 'abc123' }) : send(401, {}); }
       const gm = path.match(/^\/users\/@me\/guilds\/(\d+)\/member$/);

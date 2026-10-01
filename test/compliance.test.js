@@ -221,7 +221,14 @@ withServer('a leave of absence excuses the missed events: no pop-up, no warning'
 // ---------------------------------------------------------------- the chart on an event
 withServer('the event chart counts who is coming, not coming and silent, per role, and leaves out people on leave', async (s) => {
   const c = await cast(s);                                                     // Ann DPS, Bob Tank, Cat Healer
-  const dps2 = (await s.call('/api/members', 'POST', { name: 'AnnAlt', role: 'Tank' }, s.ann)).body.id;
+  // A second character for Ann, injected directly into the data (not through POST /api/members, which now
+  // refuses a second character for the same player) - this is about the chart still handling old data safely,
+  // not about creating one through the normal app today.
+  const exp = (await s.call('/api/export', 'GET', null, s.officer)).body;
+  const dps2 = Math.max(0, ...exp.members.map((m) => m.id)) + 1;
+  exp.members.push({ id: dps2, owner: 'Ann', name: 'AnnAlt', role: 'Tank', rank: 'Member', active: true, gearScore: 0, level: 1, builds: [], questlogs: [] });
+  exp.nextId = dps2 + 1;
+  assert.equal((await s.call('/api/import', 'POST', exp, s.officer)).status, 200);
   const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: inDays(3) }, s.officer)).body;
   await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: c.bob, status: 'yes' }, s.bob);
   await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: c.cat, status: 'no' }, s.cat);

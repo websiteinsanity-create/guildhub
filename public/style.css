@@ -394,6 +394,7 @@ a.plain:hover { color: var(--accent-text); text-decoration: underline; }
 .rate.red { color: #e2685c; } .rate.orange { color: #eba23c; } .rate.green { color: #6fcf8b; } .rate.none { color: var(--muted); }
 
 .dash-panels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.dash-panels > * { min-width: 0; }                    /* grid items default to min-width:auto, letting their content push them wider than their column at narrow widths */
 .dash-panels > .full { grid-column: 1 / -1; }
 .dash-panels > .wide { grid-column: span 2; }
 .dash-panels > .panel { margin-top: 0 !important; }
@@ -604,3 +605,39 @@ details.fold > summary:hover { color: var(--accent-text); }
 /* radio buttons and tick boxes in a list must not take the width of a text input */
 .tagpick input[type="radio"], .tagpick input[type="checkbox"], .wdbox input[type="radio"], .wdbox input[type="checkbox"] { width: auto; flex: none; padding: 0; margin: 0; }
 .tagpick { justify-content: flex-start; }
+
+/* ---------- mobile phones (≈320-640px): the sidebar becomes a horizontal top bar, the calendar becomes touch-usable ---------- */
+@media (max-width: 640px) {
+  #app { grid-template-columns: 1fr; }
+  .rail { position: sticky; top: 0; z-index: 20; padding: 0; border-right: 0; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; }
+  .rail .brand, .rail .who { display: none; }          /* logo and sign-out: kept for the vertical desktop rail, not worth the width here - Sign out still reachable from My profile */
+  #nav-links { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; padding: 8px 10px; gap: 2px; }
+  .rail a.nav { flex: none; padding: 8px 12px; border-left: 0; border-bottom: 3px solid transparent; border-radius: 6px 6px 0 0; }
+  .rail a.nav.active { border-left: 0; border-bottom-color: var(--accent); }
+  .rail a.nav.gap { margin-top: 0; border-top: 0; padding-top: 8px; }
+  main { padding: 14px 12px 40px; }
+  body { overflow-x: hidden; }
+  .page-head { flex-wrap: wrap; }
+
+  /* week view: one full-width day per row instead of 7 cramped side-by-side columns - fully readable, no horizontal scroll */
+  .events-layout { grid-template-columns: 1fr; gap: 14px; }
+  .wk-grid { grid-template-columns: 1fr; }
+  .wk-day { border-right: 0; border-bottom: 1px solid var(--line); min-height: 0; padding: 10px 12px; }
+  .wk-day:last-child { border-bottom: 0; }
+  .wk-head .num { font-size: 18px; }
+
+  /* month view: keeps its 7-day grid (dates still line up under the weekday letters), but each day becomes a
+     small tap target - the day number plus a coloured dot per event - since there is no room for event text at
+     this width. Tap "Week" above (or a day's "+N more") to read the full, fully-readable week list instead. */
+  .cal-dow { padding: 4px 2px; font-size: 11px; text-align: center; }
+  .cal-cell { min-height: 54px; padding: 3px; gap: 3px; }
+  .cal-num { width: 20px; height: 20px; font-size: 12px; }
+  .cal-ev { padding: 0; border-left: 0; border-radius: 50%; width: 7px; height: 7px; min-height: 7px; background: var(--c); overflow: hidden; flex: none; }
+  .cal-ev .tm, .cal-ev .ttl { display: none; }
+  .cal-more { font-size: 11px; padding: 0 2px; }
+  .cal-head { padding: 10px 12px; gap: 6px; }
+  .cal-head h2 { font-size: 17px; width: 100%; margin-right: 0; }
+  .cal-head .btn.sm { padding: 5px 9px; font-size: 13px; }
+  .cal-legend { padding: 8px 12px; gap: 5px 10px; }
+  .cal-legend .chip, .cal-legend .small, .status-legend .st-key { font-size: 12px; }
+}

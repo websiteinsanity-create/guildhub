@@ -61,14 +61,14 @@ withServer('players can only edit their own characters; ranks are officer-only',
   assert.equal((await call('/api/members/' + c.id, 'PUT', { name: 'Tanky', role: 'Tank', rank: 'Officer' }, officer)).body.rank, 'Officer');
 });
 
-withServer('players can keep several Questlog links, and only plain http(s) links are accepted', async ({ call, member }) => {
+withServer('players can keep several Questlog links, and only plain http(s) links are accepted', async ({ call, member, officer }) => {
   const c = (await call('/api/members', 'POST', { name: 'Linky', role: 'DPS', questlogs: [{ label: 'Main', url: 'https://questlog.gg/x?y=1' }, { url: 'https://example.com/second' }] }, member)).body;
   assert.deepEqual(c.questlogs, [{ label: 'Main', url: 'https://questlog.gg/x?y=1' }, { label: '', url: 'https://example.com/second' }]);
   const put = (questlogs) => call('/api/members/' + c.id, 'PUT', { name: 'Linky', role: 'DPS', questlogs }, member);
   assert.equal((await put([{ url: 'javascript:alert(1)' }])).status, 400);
   assert.equal((await put(Array.from({ length: 7 }, (_, i) => ({ url: 'https://example.com/' + i })))).status, 400);
   assert.deepEqual((await put([])).body.questlogs, []);
-  const old = (await call('/api/members', 'POST', { name: 'Oldstyle', role: 'DPS', questlog: 'https://example.com/single' }, member)).body;
+  const old = (await call('/api/members', 'POST', { name: 'Oldstyle', role: 'DPS', owner: 'OldstyleOwner', questlog: 'https://example.com/single' }, officer)).body;
   assert.equal(old.questlogs[0].url, 'https://example.com/single', 'the old single-link field still works');
 });
 
@@ -95,9 +95,9 @@ withServer('points are off until the leadership switches them on', async ({ call
 withServer('attendance gives points, can be undone, and respects the Admin switch', async ({ call, member, officer }) => {
   await call('/api/settings', 'PUT', { pointsEnabled: true }, officer);
   const ids = [];
-  for (const n of ['One', 'Two', 'Three']) ids.push((await call('/api/members', 'POST', { name: n, role: 'DPS' }, member)).body.id);
+  for (const n of ['One', 'Two', 'Three']) ids.push((await call('/api/members', 'POST', { name: n, role: 'DPS', owner: n }, officer)).body.id);
   const ev = (await call('/api/events', 'POST', { title: 'Boss', type: 'Archboss', start: '2026-10-01T18:00:00Z' }, officer)).body;
-  const pts = async () => (await call('/api/state', 'GET', null, member)).body.points.filter((p) => p.eventId === ev.id);
+  const pts = async () => (await call('/api/state', 'GET', null, officer)).body.points.filter((p) => p.eventId === ev.id);
   await call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: ids }, officer);
   assert.equal((await pts()).length, 3);
   await call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: [ids[0]] }, officer);
@@ -144,7 +144,7 @@ withServer('loot rules are editable and validated', async ({ call, officer }) =>
 
 withServer('party presets keep names and leaders, and clean up when a member is deleted', async ({ call, member, officer }) => {
   const a = (await call('/api/members', 'POST', { name: 'Aaa', role: 'Tank' }, member)).body.id;
-  const b = (await call('/api/members', 'POST', { name: 'Bbb', role: 'Healer' }, member)).body.id;
+  const b = (await call('/api/members', 'POST', { name: 'Bbb', role: 'Healer', owner: 'Bbb' }, officer)).body.id;
   const p = (await call('/api/presets', 'POST', { name: 'Siege', parties: [{ name: 'Front', leader: a, members: [a, b] }, { name: '  ', leader: 999, members: [b] }] }, officer)).body;
   assert.deepEqual(p.parties, [{ name: 'Front', members: [a, b], leader: a, builds: {} }, { name: 'Party 2', members: [], leader: null, builds: {} }], 'a member can only sit in one party, leader must belong to the party');
   assert.equal((await call('/api/presets', 'POST', { name: 'x' }, member)).status, 403);
@@ -192,7 +192,7 @@ withServer('loot entries have a type (skillcore, item, shard) that is validated 
 
 withServer('a party preset can be tied to an event type, for upcoming and future events', async ({ call, member, officer }) => {
   const a = (await call('/api/members', 'POST', { name: 'Aaa', role: 'Tank' }, member)).body.id;
-  const b = (await call('/api/members', 'POST', { name: 'Bbb', role: 'DPS' }, member)).body.id;
+  const b = (await call('/api/members', 'POST', { name: 'Bbb', role: 'DPS', owner: 'Bbb' }, officer)).body.id;
   const preset = (await call('/api/presets', 'POST', { name: 'WG main', parties: [{ name: 'Front', leader: a, members: [a, b] }] }, officer)).body;
   const day = 864e5, iso = (d) => new Date(Date.now() + d * day).toISOString();
   const mk = async (type, d) => (await call('/api/events', 'POST', { type, start: iso(d) }, officer)).body;

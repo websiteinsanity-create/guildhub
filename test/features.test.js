@@ -127,7 +127,7 @@ withServer('a new character can wait for approval and stays hidden from others u
   const req = (await state(s, 'officer')).changes.find((c) => c.kind === 'newCharacter');
   await s.call(`/api/changes/${req.id}/decide`, 'POST', { decision: 'approve' }, s.officer);
   assert.ok((await state(s, 'bob')).members.find((m) => m.id === made.id).active);
-  const second = (await s.call('/api/members', 'POST', { name: 'Nope', role: 'DPS' }, s.ann)).body;
+  const second = (await s.call('/api/members', 'POST', { name: 'Nope', role: 'DPS' }, s.bob)).body;
   await s.call(`/api/changes/${(await state(s, 'officer')).changes.find((c) => c.status === 'pending').id}/decide`, 'POST', { decision: 'reject' }, s.officer);
   assert.ok(!(await state(s, 'officer')).members.some((m) => m.id === second.id), 'a rejected new character is removed');
 });
