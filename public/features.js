@@ -92,6 +92,24 @@ function changeSummary(c) {
 }
 
 VIEWS.profile = (key) => viewProfile(key);
+// A quick "is this player okay" glance for officers: active warnings and leave status, right on their profile,
+// so checking someone over does not mean a separate trip to the Warnings and Leave of absence pages first.
+// Shown to officers only (for anyone's profile, including their own); normal members already get their own
+// status on the Warnings and Leave pages themselves.
+function profileStanding(key) {
+  const wn = activeWarn(key);
+  const leaves = (S.leaves || []).filter((l) => l.ownerKey === key).sort((a, b) => b.from.localeCompare(a.from));
+  const today = guildDate(Date.now());
+  const current = leaves.find((l) => l.status === 'approved' && l.from <= today && today <= l.to);
+  const pendingLeave = leaves.find((l) => l.status === 'pending');
+  const c = S.settings.compliance || {};
+  return `<div class="panel" style="margin-bottom:16px"><h3>Standing</h3>
+    <div class="rule-row"><span>Active warnings</span><span><b>${wn.length}</b>${isDisqualified(key) ? ' <span class="qtag warn">Disqualified from loot</span>' : (c.disqualifyAt > 0 && wn.length ? ` <span class="muted small">(disqualified from ${c.disqualifyAt})</span>` : '')}</span></div>
+    ${wn.length ? wn.map((w) => `<div class="muted small" style="margin:2px 0 0">${fmtShort(w.at)}: ${esc(w.reason)}</div>`).join('') : ''}
+    <div class="rule-row" style="margin-top:10px"><span>Leave of absence</span><span>${current ? `<span class="type-pill">Away until ${fmtLootDate(current.to)}</span>` : pendingLeave ? '<span class="st-pill st-open">Waiting for approval</span>' : '<span class="muted small">Not away</span>'}</span></div>
+    <div class="muted small" style="margin-top:10px"><a href="#/warnings">All warnings</a> · <a href="#/leave">Leave entries</a></div>
+  </div>`;
+}
 function viewProfile(key) {
   const off = isOfficer();
   if (!key || (!off && key !== S.user.key)) key = S.user.key;
@@ -111,6 +129,7 @@ function viewProfile(key) {
   ${pending.length ? `<div class="panel pending-banner"><h3>Waiting for the leadership</h3>${pending.map((c) => `<div class="rule-row"><span style="flex:1">${changeSummary(c)}</span><button class="btn sm" data-act="change-cancel" data-id="${c.id}">${own ? 'Take back' : 'Remove'}</button></div>`).join('')}
       <div class="muted small" style="margin-top:6px">These changes take effect as soon as an officer approves them. You get a Discord message with the answer.</div></div>` : ''}
   ${recent.length && own ? `<div class="muted small" style="margin-bottom:12px">Latest answers: ${recent.map((c) => `${c.status === 'approved' ? 'approved' : 'not approved'}${c.note ? ` (${esc(c.note)})` : ''}`).join(' · ')}</div>` : ''}
+  ${off ? profileStanding(key, own) : ''}
 
   ${own ? `<div class="panel"><h3>Time zone</h3>
     <div class="muted small" style="margin:-6px 0 10px">All times in the app (calendar, events, PIN windows) are shown in this time zone. Nobody else is affected.</div>
@@ -530,15 +549,16 @@ FORMS.dashprefs = (f) => {
 };
 
 /* ================= Admin: appearance, who sees what, approvals, tags ================= */
-const baseAdmin = VIEWS.admin;
-VIEWS.admin = () => baseAdmin() + adminExtras();
-function adminExtras() {
-  const st = S.settings, b = st.branding || {}, hidden = new Set(st.hiddenSections || []);
+// Admin is composed below (search "VIEWS.admin =" near the bottom of this section) from the small panel
+// functions in this file plus the ones in app.js, in the order the leadership actually wants to see them -
+// most used at the top, set-and-forget settings further down. Reordering the page in the future just means
+// reordering that one list, not moving code around.
+function appearanceAdmin() {
+  const st = S.settings, b = st.branding || {};
   const file = (kind, name) => `<div class="upload"><div class="img-prev ${kind}">${name ? `<img src="/uploads/${esc(name)}" alt="">` : '<span class="muted small">none</span>'}</div>
     <div><label class="btn sm" style="margin:0;color:var(--text)">${name ? 'Replace' : 'Upload'}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-act="upload" data-kind="${kind}" class="hidden"></label>
     ${name ? `<button class="btn sm danger" data-act="upload-remove" data-kind="${kind}">Remove</button>` : ''}</div></div>`;
-  return `
-  <div class="panel"><h3>Appearance</h3>
+  return `<div class="panel"><h3>Appearance</h3>
     <form data-form="appearance" class="rules-grid" style="padding-bottom:0">
       <div class="field"><label for="ap-name">Guild name</label><input id="ap-name" name="name" value="${esc(b.name || '')}" maxlength="40" placeholder="${esc(S.cfg.guildName)}"></div>
       <div class="field"><label for="ap-tag">Tagline</label><input id="ap-tag" name="tagline" value="${esc(b.tagline || '')}" maxlength="80" placeholder="${esc(S.cfg.tagline)}"></div>
@@ -549,18 +569,25 @@ function adminExtras() {
     </form>
     <div class="uploads"><div><div class="k">Guild icon</div>${file('icon', b.iconFile)}<div class="muted small">PNG, JPEG, GIF or WebP, up to 1.5 MB. Square works best.</div></div>
       <div><div class="k">Background picture</div>${file('background', b.bgFile)}<div class="muted small">Up to 6 MB. It is dimmed so the text stays readable.</div></div></div>
-  </div>
-  <div class="panel"><h3>What normal members can see</h3>
+  </div>`;
+}
+function accessAdmin() {
+  const hidden = new Set((S.settings.hiddenSections || []));
+  return `<div class="panel"><h3>What normal members can see</h3>
     <div class="muted small" style="margin:-6px 0 10px">Untick a section to hide it from normal members. The leadership always sees everything, and the data of a hidden section is not sent to normal members either.</div>
     <form data-form="access">${S.cfg.sections.map((s) => `<label class="tagpick"><input type="checkbox" name="show" value="${esc(s.key)}" ${hidden.has(s.key) ? '' : 'checked'}> ${esc(s.label)}</label>`).join('')}<button class="btn primary" style="margin-top:8px">Save</button></form>
     <p class="muted small" style="margin:10px 0 0">In the sections they can open, members only ever see their own loot, their own attendance and their own requests.</p>
-  </div>
-  <div class="panel"><h3>Changes that need approval by the leadership</h3>
+  </div>`;
+}
+function approvalRulesAdmin() {
+  const st = S.settings;
+  return `<div class="panel"><h3>Changes that need approval by the leadership</h3>
     <div class="muted small" style="margin:-6px 0 10px">When a normal member changes one of these, it waits under "Approvals" until an officer accepts it. Everything else applies at once. Officers are never held back.</div>
     <form data-form="approvals">${S.cfg.approvalGroups.map((g) => `<label class="tagpick"><input type="checkbox" name="g" value="${esc(g.key)}" ${st.approvals[g.key] ? 'checked' : ''}> ${esc(g.label)}</label>`).join('')}<button class="btn primary" style="margin-top:8px">Save</button></form>
-  </div>
-  ${noticesAdmin()}
-  <div class="panel"><h3>Player tags</h3>
+  </div>`;
+}
+function tagsAdmin() {
+  return `<div class="panel"><h3>Player tags</h3>
     <div class="muted small" style="margin:-6px 0 10px">Only the leadership sees tags. Give them to players on the Member page.</div>
     ${S.tags.map((t) => `<form data-form="tag-save" data-id="${t.id}" class="link-row"><input name="color" type="color" value="${esc(t.color)}" style="width:48px;padding:2px" aria-label="Colour"><input name="name" value="${esc(t.name)}" maxlength="30" style="max-width:220px" aria-label="Tag name">${tagChip(t)}
       <button class="btn sm">Save</button><button type="button" class="btn sm danger" data-act="tag-delete" data-id="${t.id}">Delete</button></form>`).join('') || '<div class="muted small">No tags yet.</div>'}
@@ -779,28 +806,25 @@ ACTIONS['warn-remove'] = (el, d) => { const note = prompt('Why is it removed? (o
 ACTIONS['warn-run'] = () => act(async () => { const r = await api('/api/admin/compliance/run', 'POST', {}); toast(`Checked. ${r.issued} new ${r.issued === 1 ? 'warning' : 'warnings'}, ${r.expired} ended.`); });
 
 /* ================= Admin: attendance rules ================= */
-{
-  const before = adminExtras;
-  adminExtras = function () { return complianceAdmin() + before(); };
-}
 function complianceAdmin() {
   const c = S.settings.compliance || {};
-  const num = (id, name, label, min, max, hint) => `<div class="field"><label for="${id}">${label}</label><input id="${id}" name="${name}" type="number" min="${min}" max="${max}" value="${c[name] ?? 0}" required>${hint ? `<div class="muted small">${hint}</div>` : ''}</div>`;
+  const num = (id, name, label, min, max, desc) => `<div class="rule-field"><label for="${id}">${label}</label><div class="muted small" style="margin:2px 0 6px">${desc}</div><input id="${id}" name="${name}" type="number" min="${min}" max="${max}" value="${c[name] ?? 0}" required></div>`;
+  const check = (name, label, desc) => `<div class="rule-field"><label class="tagpick"><input type="checkbox" name="${name}" ${c[name] ? 'checked' : ''}> ${label}</label><div class="muted small" style="margin:2px 0 0 26px">${desc}</div></div>`;
   return `<div class="panel"><h3>Attendance rules, warnings and disqualification</h3>
-    <div class="muted small" style="margin:-6px 0 10px">Players over a limit get a full-screen pop-up asking for a reason, which you approve or reject under Approvals. No-shows and unanswered events also give automatic warnings. Put 0 to switch a limit off. The leadership itself is never judged.</div>
-    <form data-form="compliance" class="rules-grid" style="padding-bottom:0">
-      ${num('cp-w', 'windowDays', 'Look at the last (days)', 7, 365)}
-      ${num('cp-ns', 'noShowLimit', 'No-shows that trigger', 0, 50, 'Said Going, did not come')}
-      ${num('cp-nr', 'noReplyLimit', 'Unanswered events that trigger', 0, 50, 'Never said Going or Can\'t')}
-      ${num('cp-ma', 'minAttendance', 'Minimum attendance (%)', 0, 100, 'Below this: asked for a reason')}
-      ${num('cp-me', 'minEvents', 'Events needed to judge the attendance %', 1, 50)}
-      ${num('cp-ex', 'expiryDays', 'Every warning goes away after (days)', 0, 730, '0 = it stays until you remove it')}
-      ${num('cp-qd', 'quietDays', 'Quiet period (days)', 0, 730, 'No new warning for this long: some vanish')}
-      ${num('cp-qr', 'quietRemove', 'Warnings removed by the quiet period', 0, 50, '0 = all of them, otherwise the oldest ones')}
-      ${num('cp-dq', 'disqualifyAt', 'Disqualified from loot at (active warnings)', 0, 20, 'Until enough warnings are gone')}
-      <label class="tagpick" style="align-self:end"><input type="checkbox" name="mandatoryOnly" ${c.mandatoryOnly ? 'checked' : ''}> Only mandatory events count</label>
-      <label class="tagpick" style="align-self:end"><input type="checkbox" name="loaNeedsApproval" ${c.loaNeedsApproval ? 'checked' : ''}> Leave of absence needs approval</label>
-      <label class="tagpick" style="align-self:end"><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}> Rules switched on</label>
+    <div class="muted small" style="margin:-6px 0 10px"><b>Put 0 in any limit below to switch it off.</b> The leadership itself is never judged by any of this.</div>
+    <form data-form="compliance" class="rules-stack">
+      ${num('cp-w', 'windowDays', 'Attendance window (days)', 7, 365, 'How far back to look when counting no-shows, unanswered events, and the attendance percentage below. Anything older than this does not count.')}
+      ${num('cp-ns', 'noShowLimit', 'No-shows that trigger a warning', 0, 50, 'A no-show is saying Going and then not showing up. Once a player reaches this many within the window above, they get the pop-up and an automatic warning.')}
+      ${num('cp-nr', 'noReplyLimit', 'Unanswered events that trigger a warning', 0, 50, "Counts events where a player never answered Going or Can't. Once they reach this many within the window above, they get the pop-up and an automatic warning.")}
+      ${num('cp-ma', 'minAttendance', 'Minimum attendance (%)', 0, 100, 'If attendance over the window above drops below this, the player gets the pop-up asking them to explain. This one does not give an automatic warning by itself.')}
+      ${num('cp-me', 'minEvents', 'Events needed before judging attendance %', 1, 50, 'The attendance rule above only applies once a player has had at least this many events to attend, so someone brand new is not judged on one or two events.')}
+      ${num('cp-ex', 'expiryDays', 'A warning goes away after (days)', 0, 730, 'Automatically removes a warning this many days after it was given. Set to 0 to make warnings permanent until an officer removes them.')}
+      ${num('cp-qd', 'quietDays', 'Quiet period (days)', 0, 730, 'If a player goes this many days in a row without earning another warning, some of their oldest warnings are automatically cleared. How many get cleared is set in the next field.')}
+      ${num('cp-qr', 'quietRemove', 'Warnings removed by the quiet period', 0, 50, 'How many warnings disappear once the quiet period above is reached. 0 clears every active warning at once; any other number clears just that many, oldest first.')}
+      ${num('cp-dq', 'disqualifyAt', 'Disqualified from loot at (active warnings)', 0, 20, 'Once a player has this many active warnings at the same time, they are disqualified from loot until enough of those warnings expire or get removed.')}
+      ${check('mandatoryOnly', 'Only mandatory events count', 'When on, only events marked Mandatory count toward no-shows, unanswered events and attendance percentage. Optional events are ignored for every rule above.')}
+      ${check('loaNeedsApproval', 'Leave of absence needs approval', "When on, a player's requested leave of absence has to be approved by an officer before it excuses them from these rules. When off, leave is approved automatically.")}
+      ${check('enabled', 'Rules switched on', 'Turns this whole system on or off. When off, nothing on this page does anything: no pop-ups, no automatic warnings, no disqualification.')}
       <button class="btn primary">Save rules</button>
     </form></div>`;
 }
@@ -844,21 +868,56 @@ VIEWS.apply = () => {
 FORMS.application = (f, fd) => act(async () => { await api('/api/applications', 'POST', fd); }, 'Sent. The leadership will look at it.');
 ACTIONS['app-withdraw'] = (el, d) => { if (confirm('Withdraw your application?')) act(() => api('/api/applications/' + d.id, 'DELETE'), 'Withdrawn'); };
 
+/* ================= Mercenary signup: a non-member who followed a "Get mercenaries" Discord link ================= */
+Object.assign(UI, { mercInfo: null, mercInfoFor: null });
+async function loadMercEvent(id) {
+  try { UI.mercInfo = await api('/api/merc-event/' + id); } catch (e) { UI.mercInfo = { error: e.message }; }
+  UI.mercInfoFor = id; render();
+}
+AFTER_RENDER.push((page) => { if (page === 'merc') { const { id } = route(); if (UI.mercInfoFor !== id) loadMercEvent(id); } });
+VIEWS.merc = (id) => {
+  const info = UI.mercInfoFor === id ? UI.mercInfo : null;
+  const head = `<div class="page-head"><div><h1>Join as a mercenary</h1><div class="muted">Signed in as ${esc(S.user.name)}. This does not make you a guild member - you only show up for the one event below.</div></div></div>`;
+  if (!info) return `${head}<div class="empty">Loading…</div>`;
+  if (info.error) return `${head}<div class="empty">${esc(info.error)}</div>`;
+  if (info.alreadyMember) return `${head}<div class="empty">This Discord account already belongs to one of our guild's characters - no need to sign up as a mercenary too.</div>`;
+  const ev = info.event, m = info.character || { name: '', role: S.cfg.roles[0], primaryWeapon: '', secondaryWeapon: '', specialization: '' };
+  const r = ev.mercRequest;
+  return `${head}
+  <div class="panel" style="margin-bottom:16px"><h3>${esc(ev.title)}</h3>
+    <div class="muted small">${fmtDate(ev.start)} · ${esc(ev.type)}</div>
+    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any role` : (r.needs || []).map((n) => `${n.count}× ${esc(n.role)}${n.cls ? ' (' + esc(n.cls) + ')' : ''}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px">${esc(r.note)}</div>` : ''}` : ''}
+  </div>
+  <div class="panel"><h3>${info.character ? 'Welcome back - confirm your character' : 'Your character for this event'}</h3>
+    ${info.character ? '<div class="muted small" style="margin:-4px 0 10px">You signed up with us before. Change anything that is different, or just join as-is.</div>' : ''}
+    <form data-form="merc-signup" data-id="${ev.id}">
+      <div class="row"><div class="field"><label>Character name</label><input name="name" value="${esc(m.name)}" required maxlength="40"></div>
+        <div class="field"><label>Role</label><select name="role">${opts(S.cfg.roles, m.role)}</select></div></div>
+      <div class="row"><div class="field"><label>Primary weapon</label><select name="primaryWeapon">${opts(S.cfg.weapons, m.primaryWeapon, 'None')}</select></div>
+        <div class="field"><label>Secondary weapon</label><select name="secondaryWeapon">${opts(S.cfg.weapons, m.secondaryWeapon, 'None')}</select></div></div>
+      <div class="muted small" id="class-preview" style="margin:-4px 0 10px">${esc(classPreviewText(m.primaryWeapon, m.secondaryWeapon))}</div>
+      <div class="field"><label>Specialization (optional)</label><input name="specialization" value="${esc(m.specialization || '')}" maxlength="40"></div>
+      <div class="row"><div class="field"><label>Gear score</label><input name="gearScore" type="number" min="0" value="${m.gearScore || ''}"></div>
+        <div class="field"><label>Level</label><input name="level" type="number" min="0" max="99" value="${m.level || ''}"></div></div>
+      <button class="btn primary">${info.character ? 'Confirm and join' : 'Join this event'}</button>
+    </form>
+  </div>`;
+};
+FORMS['merc-signup'] = (f, fd, id) => act(async () => { await api('/api/merc-signup/' + id, 'POST', fd); UI.mercInfoFor = null; }, 'Joined. The officers can see you in the party board now.');
+
 /* ================= Admin: the Discord bot, the channel for party pictures, applications ================= */
 UI.dcheck = null;
-{
-  const before = adminExtras;
-  adminExtras = function () { return discordAdmin() + before(); };
-}
 const okMark = (ok, text, bad, optional) => `<div class="chk ${ok ? 'good' : optional ? 'info' : 'bad'}"><span>${ok ? '✓' : optional ? 'i' : '✗'}</span><div>${text}${!ok && bad ? `<div class="muted small">${esc(bad)}</div>` : ''}</div></div>`;
 function discordAdmin() {
   const st = S.settings, pp = st.partyPost || {}, ap = st.applications || {}, c = UI.dcheck;
   const chans = c ? c.channels : [];
   const selected = pp.channelId;
   const options = [...(selected && !chans.some((x) => x.id === selected) ? [{ id: selected, name: pp.channelName || selected }] : []), ...chans];
-  const allRoles = c ? c.roles : [];
   const mentioned = pp.mentionRoleIds || [];
-  const roleOptions = [...allRoles, ...mentioned.filter((id) => !allRoles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
+  // c is null until the roles have actually been checked (either by hand or by the auto-check below), so a saved
+  // role must not be called "not found" before that - that only means "not found yet", not "this role is gone".
+  const roleOptions = !c ? mentioned.map((id) => ({ id, name: id + ' (checking...)' }))
+    : [...c.roles, ...mentioned.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
   return `<div class="panel"><h3>Discord: bot, party pictures and applications</h3>
     <div class="muted small" style="margin:-6px 0 10px">The bot is the Discord account this app uses. It is a <b>bot user</b> you create for free in the Discord Developer Portal (see the README, "Discord setup"). An ordinary Discord account cannot be used, because Discord forbids that.</div>
     <div class="link-row"><button class="btn" data-act="dcheck">Check the connection</button><span class="muted small">Looks up the bot, your server, its channels and its roles.</span></div>
@@ -889,7 +948,31 @@ function discordAdmin() {
       <button class="btn primary">Save</button></form>
   </div>`;
 }
+// Mercenaries: outside players who help fill a roster for one event. They carry a different Discord role from
+// regular guild members - picking it here is what "Get mercenaries" (on an event) pings when asking for help.
+// Reuses the same channel/role data "Check the connection" above already loaded (UI.dcheck); no separate check.
+function mercenariesAdmin() {
+  const mc = S.settings.mercenaries || {}, c = UI.dcheck;
+  const chans = c ? c.channels : [];
+  const chanOptions = [...(mc.channelId && !chans.some((x) => x.id === mc.channelId) ? [{ id: mc.channelId, name: mc.channelName || mc.channelId }] : []), ...chans];
+  const roles = !c ? (mc.roleId ? [{ id: mc.roleId, name: mc.roleName || (mc.roleId + ' (checking...)') }] : [])
+    : (mc.roleId && !c.roles.some((r) => r.id === mc.roleId) ? [{ id: mc.roleId, name: (mc.roleName || mc.roleId) + ' (not found on the server - a deleted role?)' }] : []).concat(c.roles);
+  return `<div class="panel"><h3>Mercenaries</h3>
+    <div class="muted small" style="margin:-6px 0 10px">Players from other guilds who help fill the roster for one event. They sign in with Discord but are never guild
+      members: they do not appear on the Member page or anywhere else, only in the party board of the event they signed up for, marked "Merc". An officer removes them
+      whenever they like; nothing happens automatically.</div>
+    <form data-form="mercset" class="rules-stack">
+      <div class="rule-field"><label for="mc-ch">Channel to ask in</label><select id="mc-ch" name="channelId"><option value="">${chans.length || mc.channelId ? 'No channel chosen' : 'Press "Check the connection" above to load your channels'}</option>${chanOptions.map((x) => `<option value="${esc(x.id)}" ${x.id === mc.channelId ? 'selected' : ''}>#${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="rule-field"><label for="mc-role">Role to @-mention</label><div class="muted small" style="margin:2px 0 6px">The role your mercenaries carry on this Discord server - not the regular member role.</div><select id="mc-role" name="roleId"><option value="">${roles.length ? 'No role chosen' : 'Press "Check the connection" above to load your roles'}</option>${roles.map((r) => `<option value="${esc(r.id)}" ${r.id === mc.roleId ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></div>
+      <button class="btn primary">Save</button>
+    </form>
+  </div>`;
+}
 ACTIONS['dcheck'] = () => act(async () => { UI.dcheck = await api('/api/admin/discord-check'); }, 'Checked');
+FORMS.mercset = (f, fd) => act(() => api('/api/admin/mercenaries', 'PUT', {
+  channelId: fd.channelId, channelName: f.elements.channelId.selectedOptions[0] ? f.elements.channelId.selectedOptions[0].textContent.replace(/^#/, '') : '',
+  roleId: fd.roleId, roleName: f.elements.roleId.selectedOptions[0] ? f.elements.roleId.selectedOptions[0].textContent : '',
+}), 'Saved');
 FORMS.dpost = (f, fd) => act(() => api('/api/admin/discord', 'PUT', {
   partyPost: {
     channelId: fd.channelId, channelName: f.elements.channelId.selectedOptions[0] ? f.elements.channelId.selectedOptions[0].textContent.replace(/^#/, '') : '',
@@ -905,14 +988,19 @@ FORMS.dapps = (f, fd) => act(() => api('/api/admin/discord', 'PUT', { applicatio
 
 /* ================= "Post to Discord": draw the parties as a picture and send it to a channel ================= */
 let PARTY_IMG = '';
-async function renderPartiesImage(ev) {
+// maxCols caps how many party cards sit side by side. The Discord post (the default, 4) is viewed on a normal
+// screen or can be zoomed in Discord itself; the mobile "View parties" popup instead forces 1 (see ACTIONS
+// below), so each card gets the image's full width and the text stays a readable size once the dialog scales
+// the image down to fit a phone screen - cramming 3-4 narrow columns into a 340px-wide dialog would make the
+// player names and classes too small to read, which defeats the entire point of a mobile-friendly view.
+async function renderPartiesImage(ev, { maxCols = 4 } = {}) {
   if (document.fonts && document.fonts.ready) await document.fonts.ready;
   const css = getComputedStyle(document.documentElement);
   const roleCol = (role) => css.getPropertyValue('--role' + (Math.max(0, S.cfg.roles.indexOf(role)) % 5)).trim() || '#8b95a7';
   const accent = css.getPropertyValue('--accent').trim() || '#ac2d4c';
   const sans = '"Source Sans 3", system-ui, "Segoe UI", Arial, sans-serif', serif = 'Marcellus, Georgia, serif';
   const parties = ev.parties;
-  const cols = Math.min(4, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 46, headH = 42, titleH = 108;
+  const cols = Math.min(maxCols, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 46, headH = 42, titleH = 108;
   const W = pad * 2 + cols * cardW + (cols - 1) * gap;
   const gridRows = Math.ceil(parties.length / cols);
   const cardH = (p) => headH + Math.max(p.members.length, 1) * rowH + 10;
@@ -931,13 +1019,17 @@ async function renderPartiesImage(ev) {
   const fit = (text, max) => { if (g.measureText(text).width <= max) return text; let t = text; while (t.length > 1 && g.measureText(t + '…').width > max) t = t.slice(0, -1); return t + '…'; };
   const rr = (x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
   g.fillStyle = '#130e11'; g.fillRect(0, 0, W, H);
-  // title
+  // title. A single narrow column (the mobile "View parties" popup) has no room to also reserve space for the
+  // guild name on the same line without crushing the title down to a couple of letters - so a narrow canvas
+  // drops the guild name (the app already makes it obvious whose parties these are) and uses a smaller title
+  // font instead, rather than truncating the event's own title into something unreadable.
+  const narrow = cols === 1;
   g.fillStyle = accent; g.fillRect(pad, pad, 52, 4);
-  g.fillStyle = '#ebe5e3'; g.font = `400 34px ${serif}`; g.fillText(fit(ev.title, W - 2 * pad - 200), pad, pad + 46);
+  g.fillStyle = '#ebe5e3'; g.font = `400 ${narrow ? 26 : 34}px ${serif}`; g.fillText(fit(ev.title, W - 2 * pad - (narrow ? 0 : 200)), pad, pad + (narrow ? 38 : 46));
   g.fillStyle = '#a39499'; g.font = `400 17px ${sans}`;
   const total = parties.reduce((a, p) => a + p.members.length, 0);
   g.fillText(`${fmtDate(ev.start)}  ·  ${ev.type}  ·  ${parties.length} ${parties.length === 1 ? 'party' : 'parties'}, ${total} players`, pad, pad + 76);
-  g.textAlign = 'right'; g.fillStyle = '#a39499'; g.font = `400 16px ${sans}`; g.fillText(guildName(), W - pad, pad + 20); g.textAlign = 'left';
+  if (!narrow) { g.textAlign = 'right'; g.fillStyle = '#a39499'; g.font = `400 16px ${sans}`; g.fillText(guildName(), W - pad, pad + 20); g.textAlign = 'left'; }
   // parties
   let y0 = pad + titleH;
   const rowTop = []; rowHeights.forEach((h, i) => { rowTop[i] = y0; y0 += h + gap; });
@@ -972,6 +1064,52 @@ async function renderPartiesImage(ev) {
   return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('the browser could not make the picture'))), 'image/png'));
 }
 const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+// A read-only, single-column picture of the parties - open to every member, not just officers, since this is
+// about being able to actually read the line-up on a phone, not about editing it.
+// "Get mercenaries": one row per role (Tank/Healer/DPS), each with an optional class and a count - 0 means "not
+// needed", so the officer only fills in what actually matters. A separate "any role" count covers "just send
+// warm bodies" without having to split it across roles. Kept to fixed rows (no add/remove-row JS) on purpose -
+// there are only ever three roles, so a dynamic list would be more code for no real benefit here.
+// Each need is its own row (role + class + count), freely repeatable - so "2 healers: 1 Oracle, 1 Seeker" is
+// two separate rows with the same role and different classes, not one row trying to cover both at once.
+const mercNeedRow = (role, cls, count) => `<div class="row merc-need-row" style="align-items:end;margin-bottom:8px">
+  <div class="field" style="flex:1"><label>Role</label><select class="mn-role" aria-label="Role">${opts(S.cfg.roles, role)}</select></div>
+  <div class="field" style="flex:1"><label>Class (optional)</label><select class="mn-cls" aria-label="Class">${opts(S.cfg.classes.map((c) => c.name).sort(), cls, 'Any class')}</select></div>
+  <div class="field" style="flex:0 0 80px"><label>Count</label><input class="mn-count" type="number" min="0" max="20" value="${count}" aria-label="Count"></div>
+  <button type="button" class="btn sm danger" data-act="merc-need-remove" title="Remove this row" aria-label="Remove this row">×</button>
+</div>`;
+ACTIONS['merc-ask'] = (el, d) => {
+  const ev = byId(S.events, d.id), mc = S.settings.mercenaries || {};
+  if (!mc.channelId || !mc.roleId) return toast('Set the mercenary channel and role in Admin first.', true);
+  openDialog(`<form data-form="merc-ask" data-id="${ev.id}"><h2>Get mercenaries for ${esc(ev.title)}</h2>
+    <div class="field"><label for="ma-overall">Just need players, any role</label><input id="ma-overall" name="overall" type="number" min="0" max="50" value="0"></div>
+    <div class="muted small" style="margin:4px 0 10px">Or ask for specific roles and classes below. Add a row for each role and class you need - add the same role twice for two different classes, for example 1 Oracle and 1 Seeker.</div>
+    <div id="merc-needs">${S.cfg.roles.map((r) => mercNeedRow(r, '', 0)).join('')}</div>
+    <button type="button" class="btn sm" data-act="merc-need-add" style="margin-bottom:10px">+ Add another need</button>
+    <div class="field"><label for="ma-note">Note (optional)</label><textarea id="ma-note" name="note" maxlength="300" style="min-height:60px" placeholder="Anything else they should know"></textarea></div>
+    <div class="muted small" style="margin-bottom:10px">Posts in #${esc(mc.channelName || mc.channelId)} and pings ${esc(mc.roleName || 'the mercenary role')}, with a link for them to sign in and join.</div>
+    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Ask for help</button></div></form>`);
+};
+ACTIONS['merc-need-add'] = (el) => { $('#merc-needs').insertAdjacentHTML('beforeend', mercNeedRow(S.cfg.roles[0], '', 1)); };
+ACTIONS['merc-need-remove'] = (el) => { el.closest('.merc-need-row').remove(); };
+FORMS['merc-ask'] = (f, fd, id) => {
+  const needs = [...f.querySelectorAll('.merc-need-row')].map((row) => ({
+    role: row.querySelector('.mn-role').value, cls: row.querySelector('.mn-cls').value, count: Number(row.querySelector('.mn-count').value) || 0,
+  })).filter((n) => n.count > 0);
+  const overall = Number(fd.overall) || 0;
+  if (!overall && !needs.length) return toast('Say how many players you need, or fill in at least one role.', true);
+  act(() => api(`/api/events/${id}/merc-request`, 'POST', { overall, needs, note: fd.note }), 'Asked for mercenaries');
+};
+ACTIONS['parties-view'] = async (el, d) => {
+  const ev = byId(S.events, d.id);
+  if (!ev || !ev.parties.length) return;
+  toast('Drawing the picture...');
+  let img;
+  try { img = await blobToDataUrl(await renderPartiesImage(ev, { maxCols: 1 })); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
+  openDialog(`<h2>${esc(ev.title)}</h2>
+    <img class="post-preview" src="${img}" alt="Parties for ${esc(ev.title)}">
+    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`);
+};
 ACTIONS['parties-post'] = async (el, d) => {
   const ev = byId(S.events, d.id);
   if (!S.cfg.botOn) return toast('The Discord bot is not set up yet. See Admin > Discord.', true);
@@ -1043,6 +1181,11 @@ async function loadAudit() {
   render();
 }
 AFTER_RENDER.push((page) => { if (page === 'auditlog' && UI.auditResult === null) loadAudit(); });
+// Quietly re-check the Discord connection (channels, roles) the moment Admin is opened, rather than only when
+// "Check the connection" is clicked by hand - otherwise a saved @-mention role looks "not found" on every fresh
+// visit until that button is pressed again, even though the role is perfectly fine.
+async function loadDcheck() { try { UI.dcheck = await api('/api/admin/discord-check'); } catch { UI.dcheck = { channels: [], roles: [] }; } render(); }
+AFTER_RENDER.push((page) => { if (page === 'admin' && UI.dcheck === null) loadDcheck(); });
 
 const diffRow = (label, before, after) => `<div><span class="muted">${esc(label)}:</span> ${esc(String(before ?? ''))} <span class="arrow">→</span> <b>${esc(String(after ?? ''))}</b></div>`;
 function auditRow(e) {
@@ -1086,11 +1229,9 @@ CHANGES['audit-to'] = auditRefetch('to');
 ACTIONS['audit-clear'] = () => { UI.auditQ = { user: '', action: '', target: '', from: '', to: '', page: 1 }; loadAudit(); };
 ACTIONS['audit-page'] = (el, d) => { UI.auditQ = { ...UI.auditQ, page: Number(d.p) }; loadAudit(); };
 
-/* ================= Admin: one character per player (clean up duplicates from before this rule existed) ================= */
-{
-  const before = adminExtras;
-  adminExtras = function () { return oneCharAdmin() + before(); };
-}
+/* ================= Admin: one character per player (clean up duplicates from before this rule existed) =================
+   This tool stays in the code (it is reachable again if old data ever needs it) but is no longer shown on the
+   Admin page by request, since every player's data is already down to one character. */
 Object.assign(UI, { dupes: null });
 function oneCharAdmin() {
   const d = UI.dupes;
@@ -1108,4 +1249,24 @@ ACTIONS['dupes-apply'] = () => {
   const n = (UI.dupes || []).reduce((a, g) => a + g.remove.length, 0);
   if (!confirm(`Remove ${n} extra ${n === 1 ? 'character' : 'characters'} across ${UI.dupes.length} ${UI.dupes.length === 1 ? 'player' : 'players'}? Each player keeps their oldest character. This cannot be undone.`)) return;
   act(async () => { const r = await api('/api/admin/enforce-one-character', 'POST', {}); UI.dupes = []; toast(`Removed ${r.removed} extra ${r.removed === 1 ? 'character' : 'characters'}.`); });
+};
+
+/* ================= Admin: the final page, in the order the leadership wants it ================= */
+VIEWS.admin = () => {
+  if (!isOfficer()) return '<div class="empty">Officers only.</div>';
+  return '<div class="page-head"><h1>Admin</h1></div>'
+    + appearanceAdmin()
+    + discordAdmin()
+    + mercenariesAdmin()
+    + adminPlayersList()
+    + noticesAdmin()
+    + tagsAdmin()
+    + complianceAdmin()
+    + adminEventRules()
+    + adminPointsToggle()
+    + approvalRulesAdmin()
+    + accessAdmin()
+    + adminSignIn()
+    + adminBackup()
+    + adminCustomizingText();
 };

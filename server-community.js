@@ -7,7 +7,7 @@
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, appUrl, audit } = ctx;
+  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, findMember, appUrl, audit } = ctx;
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
   const yes = (v) => v === true || v === 'true';
@@ -184,6 +184,81 @@ module.exports = function install(ctx) {
     need(r.ok, 502, r.error || 'Discord did not accept the message.');
     return { ok: true };
   }, { officer: true });
+
+  // ---------------------------------------------------------------- mercenaries: outside help for one event
+  // A mercenary is not a guild member: their character lives in the same members list (so the party board, drag
+  // and drop, and character editing all just work unchanged) but with active:false and mercenary:true, which
+  // hides them from every other page automatically - those already filter by "active" everywhere. They are
+  // only ever shown again on the one event's party board (mercFor), where board() adds them to the pool.
+  route('PUT', '/api/admin/mercenaries', ({ body }) => {
+    const st = db().settings.mercenaries;
+    if (body.channelId !== undefined) { const id = String(body.channelId || ''); need(id === '' || /^\d{15,25}$/.test(id), 400, 'Pick a channel from the list.'); st.channelId = id; if (!id) st.channelName = ''; }
+    if (body.channelName !== undefined) st.channelName = clean(body.channelName, 80);
+    if (body.roleId !== undefined) { const id = String(body.roleId || ''); need(id === '' || /^\d{15,25}$/.test(id), 400, 'Pick a role from the list.'); st.roleId = id; if (!id) st.roleName = ''; }
+    if (body.roleName !== undefined) st.roleName = clean(body.roleName, 80);
+    save();
+    return st;
+  }, { officer: true });
+
+  route('POST', '/api/events/:id/merc-request', async ({ body, user, params }) => {
+    const D = db(), ev = findEvent(params.id), st = D.settings.mercenaries;
+    need(ev, 404, 'Event not found.');
+    need(discord.botEnabled, 400, 'The Discord bot is not set up yet. See Admin > Discord.');
+    need(/^\d{15,25}$/.test(st.channelId), 400, 'Set the mercenary channel in Admin first.');
+    need(/^\d{15,25}$/.test(st.roleId), 400, 'Set the mercenary role in Admin first.');
+    const overall = Math.max(0, Math.round(Number(body.overall) || 0));
+    const needs = (Array.isArray(body.needs) ? body.needs : [])
+      .map((n) => ({ role: clean(n.role, 30), cls: clean(n.cls, 40), count: Math.max(1, Math.round(Number(n.count) || 1)) }))
+      .filter((n) => config.roles.includes(n.role)).slice(0, 10);
+    need(overall > 0 || needs.length > 0, 400, 'Say how many players you need, or which roles/classes.');
+    const note = clean(body.note, 300);
+    const needLine = needs.length ? needs.map((n) => `${n.count}× ${n.role}${n.cls ? ' (' + n.cls + ')' : ''}`).join(', ') : `${overall} player${overall === 1 ? '' : 's'}, any role`;
+    const ts = Math.floor(new Date(ev.start).getTime() / 1000);                 // Discord's own <t:...> tag shows this in each reader's own time zone - better than guessing one for an outside audience
+    const link = `${appUrl()}/#/merc/${ev.id}`;
+    const text = `🗡️ **Mercenaries wanted for ${ev.title}**\n<t:${ts}:F> (<t:${ts}:R>) · ${ev.type}\nLooking for: ${needLine}${note ? `\n${note}` : ''}\n\nJoin: ${link}`;
+    const r = await discord.postMessage(st.channelId, { content: text, mentionRoleIds: [st.roleId] });
+    ev.mercRequest = { at: now(), by: user.name, overall, needs, note, ok: !!r.ok, error: r.error || '' };
+    audit(user, 'mercenaries.request', { type: 'event', id: ev.id, name: ev.title }, `${user.name} asked for mercenaries for "${ev.title}": ${needLine}.`);
+    save();
+    need(r.ok, 502, r.error || 'Discord did not accept the message.');
+    return { ok: true };
+  }, { officer: true });
+
+  // The public, minimal view of an event for someone who is not a guild member and is deciding whether to join
+  // as a mercenary - title, time and type, and what is being asked for, never the full roster, PIN or RSVPs.
+  route('GET', '/api/merc-event/:id', ({ user, params }) => {
+    const D = db(), ev = findEvent(params.id);
+    need(ev, 404, 'That event could not be found. The link may be old.');
+    const mine = D.members.find((m) => m.owner === user.key);
+    return {
+      event: { id: ev.id, title: ev.title, type: ev.type, start: ev.start, mercRequest: ev.mercRequest || null },
+      alreadyMember: !!(mine && !mine.mercenary),
+      character: mine && mine.mercenary ? mine : null,
+    };
+  }, { applicant: true });
+
+  route('POST', '/api/merc-signup/:id', ({ body, user, params }) => {
+    const D = db(), ev = findEvent(params.id);
+    need(ev, 404, 'That event could not be found. The link may be old.');
+    const existing = D.members.find((m) => m.owner === user.key);
+    need(!existing || existing.mercenary, 409, 'This Discord account already belongs to a guild character - sign in as yourself instead of as a mercenary.');
+    const picked = pickMember(body);
+    need(picked.name, 400, 'Enter a name.');
+    need(config.roles.includes(picked.role), 400, 'Pick a role.');
+    if (existing) {
+      // picked.active defaults to true (pickMember assumes a normal character) - reassert false and mercenary
+      // AFTER it, since Object.assign applies arguments left to right and the later ones must win here.
+      Object.assign(existing, picked, { active: false, mercenary: true, mercFor: ev.id });
+      audit(user, 'mercenary.update', { type: 'member', id: existing.id, name: existing.name }, `${existing.name} (mercenary) signed up again, for "${ev.title}".`);
+      save();
+      return existing;
+    }
+    const m = { id: newId(), owner: user.key, joinedAt: now(), builds: [], questlogs: [], ...picked, mercenary: true, active: false, mercFor: ev.id };
+    D.members.push(m);
+    audit(user, 'mercenary.create', { type: 'member', id: m.id, name: m.name }, `${m.name} signed up as a mercenary for "${ev.title}".`);
+    save();
+    return m;
+  }, { applicant: true });
 
   return { applicantState, extraState, latestFor };
 };

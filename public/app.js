@@ -175,6 +175,18 @@ function showLogin() {
   const dc = S.cfg.authMode === 'discord';
   $('#login-discord').classList.toggle('hidden', !dc); $('#login-passcode').classList.toggle('hidden', dc);
   const an = $('#login-apply-note'); if (an) an.classList.toggle('hidden', !S.cfg.applicationsOpen);
+  // Someone who followed a mercenary-signup link in Discord lands here too, before they have signed in. Send
+  // them through a marked version of the same Discord sign-in that is let through even when general guild
+  // applications (a different thing) are switched off, and swap the note so it does not say "send us an
+  // application" to someone who is not trying to become a guild member at all.
+  const merc = /^#\/merc\/\d+$/.test(location.hash);
+  const dLink = $('#login-discord a.discord'); if (dLink) dLink.href = merc ? '/auth/discord?merc=1' : '/auth/discord';
+  const mn = $('#login-merc-note'); if (mn) mn.classList.toggle('hidden', !merc);
+  if (an && merc) an.classList.add('hidden');
+  // The Discord round trip (this app -> Discord -> /auth/discord/callback -> this app again) is a full page
+  // reload through a different path, which drops the #/merc/... hash along the way - save it here, before the
+  // person leaves for Discord, and start() below restores it once they are actually signed in.
+  if (merc) localStorage.setItem('gh_pending_hash', location.hash);
   const q = new URLSearchParams(location.search);
   if (q.get('loginError')) { $('#login-err').textContent = q.get('loginError'); history.replaceState(null, '', location.pathname + location.hash); }
   applyBranding();
@@ -220,7 +232,7 @@ const NAV = [
 ];
 const hiddenFromMembers = (key) => (S.settings.hiddenSections || []).includes(key);
 function canSee(page) {
-  if (S.user && S.user.role === 'applicant') return page === 'apply';       // somebody who has not been accepted only gets the application
+  if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc';       // not accepted: only the application, or a mercenary signup link they followed
   if (page === 'apply') return false;
   const n = NAV.find((x) => x.key === page);
   if (!n) return page === 'roster';
@@ -236,7 +248,7 @@ function renderNav(page) {
 function render() {
   let { page, id } = route();
   if (page === 'roster') page = 'member';
-  if (S.user.role === 'applicant') page = 'apply';
+  if (S.user.role === 'applicant' && page !== 'merc') page = 'apply';
   if (!canSee(page) || !VIEWS[page]) page = 'dashboard';
   applyBranding();
   renderNav(page);
@@ -445,15 +457,20 @@ function viewRoster() {
     <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ui="rosterInactive" ${UI.rosterInactive ? 'checked' : ''}> Show inactive</label>
   </div>
   ${list.length ? `<div class="tbl-wrap"><table>
-    <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th class="num">Gear score</th><th class="num">Lvl</th><th>Rank</th><th>Discord</th>${isOfficer() ? '<th>Tags</th>' : ''}<th></th></tr></thead>
-    <tbody>${list.map((m) => `<tr class="${m.active ? '' : 'dim'}">
-      <td><b>${esc(m.name)}</b>${m.owner === S.user.key ? '<span class="you">yours</span>' : ''}${isOfficer() && onLeaveAt(m.owner, Date.now()) ? '<span class="type-pill" style="margin-left:6px">On leave</span>' : ''}<div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div>${isOfficer() && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m, '<br>')}</div></details>` : ''}</td>
+    <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th class="num">Gear score</th><th class="num">Lvl</th><th>Rank</th><th>Discord</th>${isOfficer() ? '<th>Standing</th><th>Tags</th>' : ''}<th></th></tr></thead>
+    <tbody>${list.map((m) => { const wn = isOfficer() ? activeWarn(m.owner) : [], onLeave = isOfficer() && onLeaveAt(m.owner, Date.now()), a = isOfficer() && m.active ? attendanceStats(m.id) : null; return `<tr class="${m.active ? '' : 'dim'}">
+      <td><b>${esc(m.name)}</b>${m.owner === S.user.key ? '<span class="you">yours</span>' : ''}${onLeave ? '<span class="type-pill" style="margin-left:6px">On leave</span>' : ''}<div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div>${isOfficer() && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m, '<br>')}</div></details>` : ''}</td>
       <td>${roleChip(m.role)}</td><td class="wpn">${weaponLine(m)}${(m.builds || []).length ? `<div class="muted small">Also: ${m.builds.map((b) => esc(buildLabel(b))).join(' · ')}</div>` : ''}${m.mode && m.mode !== 'PvE' ? `<span class="type-pill" style="margin-left:6px">${esc(m.mode)}</span>` : ''}</td>
       <td class="num">${m.gearScore || '-'}</td><td class="num">${m.level || '-'}</td>
       <td>${esc(m.rank)}</td><td>${esc(m.discord)}</td>
-      ${isOfficer() ? `<td class="tagcell">${tagsOf(m.owner).map(tagChip).join('')}<button class="btn sm" data-act="tags-edit" data-key="${esc(m.owner)}" aria-label="Edit tags of ${esc(ownerName(m.owner))}">Tags</button></td>` : ''}
+      ${isOfficer() ? `<td><a href="#/profile/${enc(m.owner)}" class="plain standing-cell">
+          ${wn.length ? `<span class="standing-flag warn">⚠ ${wn.length} ${wn.length === 1 ? 'warning' : 'warnings'}</span>` : ''}
+          ${a && a.of ? `<span class="standing-flag ${a.pct < 60 ? 'low' : ''}">${a.pct}% attendance</span>` : ''}
+          ${!wn.length && !onLeave && (!a || !a.of) ? '<span class="muted small">-</span>' : ''}
+        </a></td>
+        <td class="tagcell">${tagsOf(m.owner).map(tagChip).join('')}<button class="btn sm" data-act="tags-edit" data-key="${esc(m.owner)}" aria-label="Edit tags of ${esc(ownerName(m.owner))}">Tags</button></td>` : ''}
       <td>${canEdit(m) ? `<button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button>` : ''}</td>
-    </tr>`).join('')}</tbody></table></div>`
+    </tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">No characters match. ${S.members.length ? 'Clear the filters to see everyone.' : 'Add the first one with "Add character".'}</div>`}`;
 }
 
@@ -612,11 +629,15 @@ function eventDetail(ev) {
   </div>
 
   <div class="panel"><div class="ev-title"><h3>Parties</h3>
-    ${isOfficer() ? `<span class="seg">
+    <span class="seg">
+      ${ev.parties.length ? `<button class="btn sm" data-act="parties-view" data-id="${ev.id}" title="Shows the parties as one readable picture - handy on a phone">View parties</button>` : ''}
+      ${isOfficer() ? `
       <button class="btn sm" data-act="parties-build" data-id="${ev.id}">Auto-build from going</button>
       ${S.presets.length ? `<select data-act="preset-load" data-ev="${ev.id}" aria-label="Load a party preset"><option value="">Load preset</option>${S.presets.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
       ${S.presets.length ? `<select data-act="preset-forever" data-ev="${ev.id}" aria-label="Use a preset for all upcoming ${esc(ev.type)} events"><option value="">Preset for all ${esc(ev.type)}…</option>${S.presets.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
-      ${ev.parties.length ? `<button class="btn sm" data-act="preset-from-event" data-id="${ev.id}">Save as preset</button><button class="btn sm discord-btn" data-act="parties-post" data-id="${ev.id}" title="Draws the parties as a picture and posts it in a Discord channel">Post to Discord</button>` : ''}</span>` : ''}</div>
+      ${ev.parties.length ? `<button class="btn sm" data-act="preset-from-event" data-id="${ev.id}">Save as preset</button><button class="btn sm discord-btn" data-act="parties-post" data-id="${ev.id}" title="Draws the parties as a picture and posts it in a Discord channel">Post to Discord</button>` : ''}
+      <button class="btn sm discord-btn" data-act="merc-ask" data-id="${ev.id}" title="Asks an outside Discord role for help filling this event's roster">Get mercenaries</button>` : ''}</span></div>
+    ${isOfficer() && ev.mercRequest ? `<div class="muted small" style="margin-top:6px">${ev.mercRequest.ok ? 'Asked' : '<span style="color:var(--danger)">Asking failed</span>'} for ${ev.mercRequest.overall ? `${ev.mercRequest.overall} player${ev.mercRequest.overall === 1 ? '' : 's'}` : (ev.mercRequest.needs || []).map((n) => `${n.count}× ${n.role}${n.cls ? ' (' + n.cls + ')' : ''}`).join(', ')} by ${esc(ev.mercRequest.by)}, ${fmtShort(ev.mercRequest.at)}${ev.mercRequest.ok ? '' : ': ' + esc(ev.mercRequest.error)}.</div>` : ''}
     ${isOfficer() && ev.partyPosts && ev.partyPosts.length ? (() => { const p = ev.partyPosts[ev.partyPosts.length - 1]; return `<div class="muted small" style="margin-top:6px">${p.ok ? 'Posted' : '<span style="color:var(--danger)">Posting failed</span>'} to ${p.channelName ? '#' + esc(p.channelName) : 'Discord'} by ${esc(p.by)}, ${fmtShort(p.at)}${p.ok ? '' : ': ' + esc(p.error)}.</div>`; })() : ''}
     ${(() => { const r = S.presetRules.find((x) => x.type === ev.type), p = r && byId(S.presets, r.presetId); return p ? `<div class="muted small" style="margin-top:6px">Every ${esc(ev.type)} event uses the preset "${esc(p.name)}" (set on the Parties page).</div>` : ''; })()}
     <div style="margin-top:14px">${ev.parties.length || isOfficer() ? board({ kind: 'event', id: ev.id }, ev.parties, ev) : '<div class="muted">No parties posted yet.</div>'}</div>
@@ -744,7 +765,7 @@ function memberRow(m, at, o) {
   const tag = o.ev && o.from === 'pool' ? (o.ev.rsvps[m.id] === 'yes' ? 'going' : '') : '';
   return `<div class="mrow" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}
-    <div class="mtxt"><div class="mname">${esc(m.name)}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${esc(meta) || '&nbsp;'}</div></div>
+    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${esc(meta) || '&nbsp;'}</div></div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
@@ -772,7 +793,11 @@ function board(ctx, parties, ev) {
   const off = isOfficer();
   const used = new Set(parties.flatMap((p) => p.members));
   const total = parties.reduce((a, p) => a + p.members.filter((id) => byId(S.members, id)).length, 0);
-  const active = S.members.filter((m) => m.active);
+  // Mercenaries are not "active" (that is what keeps them off every other page - the member list, loot,
+  // attendance, all of it already filter on active) but they still need to appear here, in the one place they
+  // are relevant: the pool for the specific event they signed up to help with.
+  const mercs = ev ? S.members.filter((m) => m.mercenary && m.mercFor === ev.id) : [];
+  const active = S.members.filter((m) => m.active).concat(mercs);
   const rank = (m) => (ev ? (ev.rsvps[m.id] === 'yes' ? 0 : 1) : 0);
   const pools = S.cfg.roles.map((r) => {
     const all = active.filter((m) => m.role === r);
@@ -799,7 +824,7 @@ function viewParties() {
     ${off ? '<button class="btn primary" data-act="preset-new">+ New preset</button>' : ''}
     ${S.presets.length ? `<select class="preset-select" data-ui="presetId" aria-label="Choose a preset">${S.presets.map((x) => `<option value="${x.id}" ${p && x.id === p.id ? 'selected' : ''}>${esc(x.name)}${off && x.hidden ? ' (hidden)' : ''}</option>`).join('')}</select>` : ''}
     ${off && p ? `<button class="btn" data-act="preset-dup" data-id="${p.id}">Duplicate</button><button class="btn danger" data-act="preset-del" data-id="${p.id}">Delete</button>
-      <select data-act="preset-apply" data-id="${p.id}" style="width:auto" aria-label="Load this preset into an event"><option value="">Load into event</option>${upcoming.map((e) => `<option value="${e.id}">${esc(e.title)} (${fmtShort(e.start)})</option>`).join('')}</select>` : ''}
+      <select data-act="preset-apply" data-id="${p.id}" style="width:auto;max-width:100%" aria-label="Load this preset into an event"><option value="">Load into event</option>${upcoming.map((e) => `<option value="${e.id}">${esc(e.title)} (${fmtShort(e.start)})</option>`).join('')}</select>` : ''}
   </div>
   ${p ? `<div class="panel" style="margin-bottom:16px">
       ${off ? `<input class="preset-name" data-act="preset-rename" data-id="${p.id}" value="${esc(p.name)}" maxlength="60" aria-label="Preset name"><br>
@@ -1100,20 +1125,22 @@ function viewPoints() {
 }
 
 /* ================= admin ================= */
-function viewAdmin() {
-  if (!isOfficer()) return '<div class="empty">Officers only.</div>';
-  const st = S.settings, dc = S.cfg.authMode === 'discord';
-  const owners = [...new Set(S.members.map((m) => m.owner))];
-  const legacy = dc ? owners.filter((o) => !S.users.some((u) => u.id === o)) : [];
-  const hours = (st.reminderMinutes || []).map((m) => Math.round(m / 6) / 10).join(', ');
-  return `
-  <div class="page-head"><h1>Admin</h1></div>
-  <div class="panel"><h3>Sign-in and Discord</h3>
+// Each Admin panel below is its own small function so features.js can put them in whatever order the
+// leadership actually wants, rather than always showing them in this file's own order. "Link old characters
+// to Discord players" (the pre-Discord-sign-in migration helper) is not among them, by request - a guild with
+// nothing left to link does not need to see it. The route it used to call (/api/admin/link-owner) is untouched
+// in server.js in case it is ever needed again; only this page stopped offering a way to reach it.
+function adminSignIn() {
+  const dc = S.cfg.authMode === 'discord';
+  return `<div class="panel"><h3>Sign-in and Discord</h3>
     <p style="margin-top:0">${dc ? 'Members sign in with their Discord account. Officers are the people with an officer role on the Discord server. People outside the guild can apply if you switch that on below.' : '<b>Demo mode:</b> Discord sign-in is not set up, so everybody uses the shared passcodes. See the README, section "Discord setup".'}</p>
     <p class="small muted" style="margin-bottom:10px">Discord bot for direct messages (PINs and reminders): <b>${S.cfg.botOn ? 'on' : 'off'}</b>${S.cfg.botOn ? '' : '. Without it, PINs and reminders are only written to the server log.'}</p>
     <button class="btn" data-act="test-dm">Send me a test message</button>
-  </div>
-  <div class="panel"><h3>Events: sign-ups, attendance PIN and reminders</h3>
+  </div>`;
+}
+function adminEventRules() {
+  const st = S.settings, hours = (st.reminderMinutes || []).map((m) => Math.round(m / 6) / 10).join(', ');
+  return `<div class="panel"><h3>Events: sign-ups, attendance PIN and reminders</h3>
     <form data-form="eventrules" class="rules-grid" style="padding-bottom:0">
       <div class="field"><label for="er-close">Close sign-ups (minutes before start)</label><input id="er-close" name="signupCloseDefault" type="number" min="0" max="10080" value="${st.signupCloseDefault}" required></div>
       <div class="field"><label for="er-off">Create the PIN (minutes after start, negative = before)</label><input id="er-off" name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${st.pinOffsetMinutes}" required></div>
@@ -1123,28 +1150,34 @@ function viewAdmin() {
       <button class="btn primary">Save</button>
     </form>
     <p class="muted small" style="margin:12px 0 0">These are the defaults for new events. Each event can override the sign-up close time and the PIN window in its edit dialog. The PIN is sent by Discord to the leader of every party and to the leadership. Reminders go to players who have not answered Going or Can't with any character; "5, 2" means the first reminder 5 hours before the event and the second 2 hours before.</p>
-  </div>
-  <div class="panel"><h3>Points for attending</h3>
+  </div>`;
+}
+function adminPointsToggle() {
+  return `<div class="panel"><h3>Points for attending</h3>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" data-act="points-toggle" ${pointsOn() ? 'checked' : ''}> Give points when members attend events</label>
     <p class="muted small" style="margin-bottom:0">When this is off, attendance is still recorded (and still counts for loot), but nobody receives points. The points fields disappear and the Points page becomes a plain attendance list. Points already given are kept.</p>
-  </div>
-  <div class="panel"><h3>Players (${dc ? S.users.length : owners.length})</h3>
+  </div>`;
+}
+function adminPlayersList() {
+  const dc = S.cfg.authMode === 'discord', owners = [...new Set(S.members.map((m) => m.owner))];
+  return `<div class="panel"><h3>Players (${dc ? S.users.length : owners.length})</h3>
     ${dc ? (S.users.length ? S.users.slice().sort((a, b) => a.name.localeCompare(b.name)).map((u) => `<div class="rule-row">${avatarImg(u)}<b>${esc(u.name)}</b>${u.role === 'officer' ? '<span class="badge-officer">Officer</span>' : ''}<span class="muted small">${S.members.filter((m) => m.owner === u.id).length} characters</span></div>`).join('') : '<span class="muted">Nobody has signed in yet.</span>')
       : `<p class="muted small" style="margin-top:0">Each player is whoever signed in with that display name.</p><div>${owners.sort().map((o) => `<span class="btn sm" style="display:inline-block;margin:0 6px 6px 0;cursor:default">${esc(o)} · ${S.members.filter((m) => m.owner === o).length}</span>`).join('') || '<span class="muted">No one yet.</span>'}</div>`}
-  </div>
-  ${legacy.length ? `<div class="panel"><h3>Link old characters to Discord players</h3>
-    <p class="muted small" style="margin-top:0">These characters were created before Discord sign-in and belong to a plain name. Pick the Discord player they belong to. Nobody can edit them until you do.</p>
-    ${legacy.map((o, i) => `<div class="link-row"><span style="min-width:140px"><b>${esc(o)}</b> <span class="muted small">(${S.members.filter((m) => m.owner === o).length} characters)</span></span>
-      <select id="lk-${i}" aria-label="Discord player for ${esc(o)}">${S.users.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select>
-      <button class="btn sm" data-act="link-owner" data-from="${esc(o)}" data-i="${i}">Link</button></div>`).join('')}
-  </div>` : ''}
-  <div class="panel"><h3>Backup</h3>
+  </div>`;
+}
+function adminBackup() {
+  return `<div class="panel"><h3>Backup</h3>
     <p class="muted small" style="margin-top:0">Download everything as one file, or restore from a previous download. Restoring replaces all current data.</p>
     <span class="seg"><button class="btn" data-act="export">Download backup</button>
     <label class="btn" style="margin:0;color:var(--text)">Restore from file<input type="file" accept="application/json" data-act="import" class="hidden"></label></span>
-  </div>
-  <div class="panel"><h3>Customizing</h3>
-    <p class="muted small" style="margin:0">Guild name, roles, weapons, the class name for each weapon pair, ranks, event types (with default points and mandatory flag), loot types and the starting loot rules are in <code>config.json</code>. Restart the server after changing it. Colors and fonts are the variables at the top of <code>public/index.html</code>. Discord settings are environment variables (see the README).</p>
+  </div>`;
+}
+// Plain reference text, not a panel: it has no form or button, so it does not need to be collapsible like
+// everything else on this page (see the dropdown-conversion hook in features.js, which only touches .panel
+// elements with an <h3> - this is neither, on purpose).
+function adminCustomizingText() {
+  return `<div class="muted small" style="margin:18px 2px 0;padding-top:14px;border-top:1px solid var(--line)">
+    <b>Customizing:</b> guild name, roles, weapons, the class name for each weapon pair, ranks, event types (with default points and mandatory flag), loot types and the starting loot rules are in <code>config.json</code>. Restart the server after changing it. Colors and fonts are the variables at the top of <code>public/index.html</code>. Discord settings are environment variables (see the README).
   </div>`;
 }
 
@@ -1336,7 +1369,9 @@ async function start() {
   try { await refresh(true); }
   catch { return showLogin(); }
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  if (!location.hash) location.hash = '#/dashboard';
+  const pending = localStorage.getItem('gh_pending_hash');
+  if (pending) { localStorage.removeItem('gh_pending_hash'); location.hash = pending; }
+  else if (!location.hash) location.hash = '#/dashboard';
   render();
 }
 (async () => {
@@ -1352,7 +1387,7 @@ VIEWS.member = () => viewRoster();
 VIEWS.parties = () => viewParties();
 VIEWS.events = (id) => viewEvents(id);
 VIEWS.points = () => viewPoints();
-VIEWS.admin = () => viewAdmin();
+// VIEWS.admin itself is assigned once, in features.js, composing the panel functions above in the agreed order.
 
 /* ================= login notices: cover the whole screen until accepted ================= */
 const linkify = (text) => esc(text).replace(/(https?:\/\/[^\s<&"']+(?:&amp;[^\s<&"']+)*)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
