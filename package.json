@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/recurrence.test.js test/api.test.js test/discord.test.js test/applications.test.js test/check-discord.test.js test/features.test.js test/compliance.test.js test/audit.test.js test/onecharacter.test.js",
+    "test": "node --test test/recurrence.test.js test/api.test.js test/discord.test.js test/applications.test.js test/check-discord.test.js test/features.test.js test/compliance.test.js test/audit.test.js test/audit-cap.test.js test/onecharacter.test.js test/mercenaries.test.js",
     "check-discord": "node check-discord.js"
   },
   "engines": {

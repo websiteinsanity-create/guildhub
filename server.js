@@ -64,6 +64,8 @@ const SETTING_DEFAULTS = {
     deletePrevious: false,        // delete the last party announcement message before posting the new one
     lastMessage: null,            // { channelId, messageId } of the most recent one, so it can be found again to delete
   },
+  // "Get mercenaries": which channel and Discord role to ping when an officer asks for outside help for one event.
+  mercenaries: { channelId: '', channelName: '', roleId: '', roleName: '' },
   compliance: {
     enabled: true,
     windowDays: 30,         // how far back attendance is looked at
@@ -196,6 +198,7 @@ function migrate() {
   db.settings.compliance = { ...SETTING_DEFAULTS.compliance, ...(db.settings.compliance || {}) };
   db.settings.applications = { ...SETTING_DEFAULTS.applications, ...(db.settings.applications || {}) };
   db.settings.partyPost = { ...SETTING_DEFAULTS.partyPost, ...(db.settings.partyPost || {}) };
+  db.settings.mercenaries = { ...SETTING_DEFAULTS.mercenaries, ...(db.settings.mercenaries || {}) };
   db.settings = { ...SETTING_DEFAULTS, ...(db.settings || {}) };
   db.settings.approvals = { ...SETTING_DEFAULTS.approvals, ...(db.settings.approvals || {}) };
   db.settings.branding = { ...SETTING_DEFAULTS.branding, ...(db.settings.branding || {}) };
@@ -909,24 +912,30 @@ http.createServer(async (req, res) => {
   if (url.pathname === '/auth/discord' && req.method === 'GET') {
     if (!discord.loginEnabled) { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent('Discord sign-in is not set up on this server.') }); return res.end(); }
     const state = crypto.randomBytes(16).toString('hex');
-    res.writeHead(302, { Location: discord.authorizeUrl(state), 'Set-Cookie': cookieHeader('gh_oauth', state, 600) });
+    // ?merc=1 (from a mercenary-signup link) is remembered the same way the CSRF state is, across the trip to
+    // Discord and back, so the callback below can let this one sign-in through even if general guild
+    // applications are switched off - joining for one event as a mercenary is a different thing from applying.
+    const cookies = [cookieHeader('gh_oauth', state, 600)];
+    if (url.searchParams.get('merc') === '1') cookies.push(cookieHeader('gh_merc', '1', 600));
+    res.writeHead(302, { Location: discord.authorizeUrl(state), 'Set-Cookie': cookies });
     return res.end();
   }
   if (url.pathname === '/auth/discord/callback' && req.method === 'GET') {
-    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': cookieHeader('gh_oauth', '', 0) }); res.end(); };
+    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': [cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] }); res.end(); };
     try {
       if (!discord.loginEnabled) return fail('Discord sign-in is not set up on this server.');
       if (url.searchParams.get('error')) return fail('Discord sign-in was cancelled.');
       const state = url.searchParams.get('state'), code = url.searchParams.get('code');
       if (!state || !code || !safeEqual(state, cookieOf(req, 'gh_oauth'))) return fail('The sign-in link expired. Please try again.');
+      const merc = cookieOf(req, 'gh_merc') === '1';
       const u = await discord.resolveUser(code);
       const known = db.users[u.id];
       if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
-      if (u.role === 'applicant' && !db.settings.applications.enabled) return fail(u.whyNot);
+      if (u.role === 'applicant' && !merc && !db.settings.applications.enabled) return fail(u.whyNot);
       db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', lastLogin: new Date().toISOString() };
       save();
       const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, discord: true }, 7);
-      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0)] });
+      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
   }

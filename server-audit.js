@@ -27,7 +27,7 @@ module.exports = function install(ctx) {
         before: before && typeof before === 'object' ? before : null,
         after: after && typeof after === 'object' ? after : null,
       });
-      if (D.auditLog.length > 20000) D.auditLog.splice(0, D.auditLog.length - 20000);   // keep the file from growing forever
+      if (D.auditLog.length > 5000) D.auditLog.splice(0, 1000);   // hard cap: once it reaches 5000, drop the oldest 1000 at once (not a rolling trim)
       save();
     } catch { /* logging must never be the reason a real action fails */ }
   }

@@ -25,6 +25,9 @@ no dependencies: just Node 18+ and one JSON file of data.
 - **Requests**: players ask for **Lucent** or an **item** for a specific build. The leadership approves, rejects
   or marks it as handed over (an item then appears in the Loot section with its type).
 - **Tags**: the leadership creates tags (text and colour) in Admin and puts them on players on the Member page.
+- **Standing, at a glance**: the leadership sees a Standing column on the Member page (active warnings, attendance %,
+  coloured when it needs a look) and a full Standing panel on a player's profile (every active warning with its reason,
+  current leave of absence) - so checking someone over does not mean a separate trip to the Warnings and Leave pages first.
   Only the leadership can see them. You can filter the Member list by tag.
 - **Personal dashboard**: everybody can hide and re-order dashboard panels ("Customize"). The leadership sets a
   dashboard announcement, the guild name and tagline, the accent colour, the **guild icon** and a **background picture** in Admin > Appearance.
@@ -201,6 +204,21 @@ Good to know:
   - **Delete the previous announcement**: also in Admin > Discord, an option to remove the last party announcement message right
     before posting a new one, so the channel only ever shows the latest line-up instead of piling up old ones. If that old message
     was already deleted by hand, posting the new one still works normally.
+- **View parties, built for a phone**: next to the parties of every event there is also a **View parties** button open to everyone,
+  not just officers. It draws the same picture as a Discord post would, but as a single readable column instead of several
+  side-by-side cards, since the normal party board (built for dragging people between columns) is hard to read at a phone's width.
+- **Mercenaries**: players from other guilds who help fill the roster for a single event. Set the channel and the Discord role they
+  carry in Admin > Mercenaries (a different role from your regular members), then press **Get mercenaries** on an event to ask for
+  either a plain headcount or specific roles and classes with how many of each, plus an optional note. It posts in that channel,
+  @-mentions the role, and includes a link. Whoever clicks it signs in with Discord (this works even with general guild applications
+  switched off - asking for one-event help is treated separately from applying) and fills in a short character of their own. They are
+  never a guild member: they never appear on the Member page, in attendance, loot or anywhere else that normal characters do, and the
+  leadership is never asked to approve anything about them. The only place they show up is the party board of the event they joined,
+  marked "Merc", there for an officer to drag into a party like anyone else. If they help again for a different event, signing in
+  again finds the same character rather than starting over - an officer removes it whenever it is no longer needed, nothing expires
+  on its own. One current limitation: if someone already has a real guild character under the same Discord account, they cannot also
+  sign up as a mercenary with it (the one-character rule applies here too) - if a mercenary later becomes a full member, an officer
+  should remove their mercenary character first.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the
   officer tools at their next sign-in.
 - If a message cannot be delivered (DMs closed) the event page shows who did not get it.
@@ -359,10 +377,10 @@ GitHub runs the same command.
 - **Upgrading**: existing data is converted automatically (a single Questlog link becomes a list, characters get an empty
   build list). Make a backup first (Admin > Download backup), as always.
 - **Upgrading from before "one character per player"**: existing data is left exactly as it was - nobody loses a character
-  automatically. Going forward, nobody can create a second one. If any player already had more than one, Admin has a
-  **"One character per player"** tool: "Check" lists everyone who still has more than one (keeping their oldest, as a
-  suggestion), and "Remove the extra characters" deletes the rest the same safe way a normal delete does (out of every
-  party, loot entry, points entry and sign-up). Make a backup first, as always with anything that deletes data.
+  automatically. Going forward, nobody can create a second one. The server can still find and clean up anyone who already
+  had more than one (keeping their oldest, the same safe way a normal delete works - out of every party, loot entry,
+  points entry and sign-up), but this is no longer a button in Admin, since most guilds only need it once. Ask if you
+  ever need it run again - a backup first, as always with anything that deletes data.
 - **Approvals cannot be dodged by re-creating a character** if you also switch on "Adding a new character": new
   characters then wait, hidden from other players, until approved.
 - **Pictures**: PNG, JPEG, GIF or WebP only (no SVG, because SVG can carry scripts). They are stored in `data/uploads/`
