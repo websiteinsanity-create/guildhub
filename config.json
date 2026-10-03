@@ -67,7 +67,7 @@
     },
     {
       "key": "level",
-      "label": "Level",
+      "label": "Watermark",
       "default": false
     },
     {
@@ -548,5 +548,6 @@
     "PvE",
     "PvP",
     "Alt build"
-  ]
+  ],
+  "defaultRank": "Member"
 }

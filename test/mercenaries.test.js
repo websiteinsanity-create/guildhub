@@ -88,6 +88,12 @@ test('"Get mercenaries" posts to Discord with the role mention and the structure
   assert.match(post.content, /Mercenaries wanted for Castle siege/);
   assert.match(post.content, /1× Oracle, 2× Crusader/);
   assert.match(post.content, new RegExp(`/#/merc/${ev.id}`));
+  // a Join button alongside the plain link, same reasoning as the reminder DMs - a LINK-style button needs
+  // nothing from the bot beyond what it already does
+  const joinBtn = post.components[0].components[0];
+  assert.equal(joinBtn.style, 5);
+  assert.match(joinBtn.label, /Join/);
+  assert.match(joinBtn.url, new RegExp(`/#/merc/${ev.id}$`));
 
   const seen = (await state('officer')).events.find((e) => e.id === ev.id).mercRequest;
   assert.equal(seen.ok, true);

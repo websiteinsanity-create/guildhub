@@ -35,7 +35,10 @@ no dependencies: just Node 18+ and one JSON file of data.
   as no-show, no reply or missed attendance, there are no reminders, no warnings, and the player is marked "On leave".
   Whether the leadership has to approve it is a setting.
 - **Attendance rules and warnings**: in Admin the leadership sets limits (no-shows, unanswered events, minimum attendance %, over the last N
-  days, mandatory events only). A player over a limit gets a **full-screen pop-up asking for a reason** when they open the site. The pop-up only goes away
+  days, mandatory events only), plus how long after an event starts its attendance is treated as final (default 60 minutes) - this is
+  separate from the PIN entry window itself, which can stay however long it already is. An event is only judged for no-shows and the
+  attendance percentage once that time has passed, not the moment it starts or the moment any single person happens to check in, so nobody
+  still inside their own valid PIN window gets wrongly counted as a no-show. A player over a limit gets a **full-screen pop-up asking for a reason** when they open the site. The pop-up only goes away
   once they typed a reason and sent it for approval; the leadership accepts or rejects it under Approvals (a rejected one asks again, with the
   answer). Too many no-shows or unanswered events also give an **automatic warning**, once per new offence. The **Warnings** page lists them
   (a member only sees their own) and a player's active warnings always show on their dashboard. Warnings end by themselves after N
@@ -112,7 +115,9 @@ no dependencies: just Node 18+ and one JSON file of data.
   of them at once (new events of those types get it automatically).
 - **Class per party**: when a player has extra builds, the leadership can pick which build they play in a party
   (menu "..." on their row > "Class / build in this party"). The row then shows that build's class, role and colour.
-- **Parties board (drag and drop)**: role lists on the left, party cards on the right. Drag members
+- **Parties board (drag and drop)**: role lists on the left, party cards on the right. The role lists only show
+  members who actually said Going for that event - to place someone who never answered, set their RSVP to Going
+  first (on the Attendance or Events page) and they then appear here like anyone else. Drag members
   between parties, back to the role list, or drag a party by its handle to reorder. Every row shows
   the class and specialization, and the "..." menus (leader crown, move to, remove) do the same on
   touch screens. Party names are editable.
@@ -217,7 +222,8 @@ Good to know:
   carry in Admin > Mercenaries (a different role from your regular members), then press **Get mercenaries** on an event to ask for
   either a plain headcount or specific roles and classes with how many of each, plus an optional note. It posts in that channel,
   @-mentions the role, and includes a link. Whoever clicks it signs in with Discord (this works even with general guild applications
-  switched off - asking for one-event help is treated separately from applying) and fills in a short character of their own. They are
+  switched off - asking for one-event help is treated separately from applying) and fills in a short character of their own, or taps
+  the **Join as a mercenary** button posted alongside the link (a Discord link button - opens the same page, nothing more). They are
   never a guild member: they never mix into the Member page, attendance, loot or anywhere else that normal characters do, and the
   leadership is never asked to approve anything about them. They show up in the party board of the event they joined, marked "Merc",
   there for an officer to drag into a party like anyone else, and in a separate "Mercenaries" dropdown at the bottom of the Member
@@ -235,6 +241,8 @@ Good to know:
 - **Loot remembers item names**: typing an item or skillcore name once in the Loot page makes it selectable from then on when adding
   or editing an entry, instead of having to type the exact same name again. It is drawn from your own past entries, not an outside
   catalog, so it only ever lists names your guild has actually used.
+- **Proof of use**: an officer can mark any loot entry as confirmed (who confirmed it and when is remembered), for tracking whether a
+  player actually showed proof the item was used for what it was given for. Click again to undo it if needed.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the
   officer tools at their next sign-in.
 - If a message cannot be delivered (DMs closed) the event page shows who did not get it.

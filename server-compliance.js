@@ -37,7 +37,10 @@ module.exports = function install(ctx) {
   function playerStats(owner, chars, t = Date.now()) {
     const c = cfg(), from = t - c.windowDays * 864e5;
     const ids = chars.map((x) => x.id);
-    const events = db().events.filter((e) => Date.parse(e.start) < t && Date.parse(e.start) >= from && e.attended.length > 0 && (!c.mandatoryOnly || e.mandatory));
+    // An event only counts once its attendance is final - event start plus the configured delay - not merely
+    // once it is in the past. Judging it the moment it starts (or as soon as one person happens to check in)
+    // would catch players still inside their own valid PIN window and wrongly call them a no-show.
+    const events = db().events.filter((e) => Date.parse(e.start) < t - c.finalAfterMinutes * 60000 && Date.parse(e.start) >= from && (!c.mandatoryOnly || e.mandatory));
     const list = [];
     let counted = 0, came = 0, noshow = 0, noreply = 0;
     for (const e of events) {
@@ -225,7 +228,7 @@ module.exports = function install(ctx) {
   route('POST', '/api/admin/compliance/run', () => runChecks(), { officer: true });
   route('PUT', '/api/admin/compliance', ({ body }) => {
     const c = cfg();
-    const ranges = { windowDays: [7, 365], minEvents: [1, 50], minAttendance: [0, 100], noShowLimit: [0, 50], noReplyLimit: [0, 50], expiryDays: [0, 730], quietDays: [0, 730], quietRemove: [0, 50], disqualifyAt: [0, 20] };
+    const ranges = { finalAfterMinutes: [5, 1440], windowDays: [7, 365], minEvents: [1, 50], minAttendance: [0, 100], noShowLimit: [0, 50], noReplyLimit: [0, 50], expiryDays: [0, 730], quietDays: [0, 730], quietRemove: [0, 50], disqualifyAt: [0, 20] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (body[k] === undefined) continue;
       const v = int(body[k]);

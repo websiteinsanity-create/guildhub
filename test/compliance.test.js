@@ -270,3 +270,20 @@ withServer('a backup brings back everything: recurring events, tags, requests, p
   assert.equal(after.warnings.length, 1, 'the warning added after the backup is gone again');
   assert.ok((await s.call('/api/tags', 'POST', { name: 'New one', color: '#000000' }, s.officer)).body.id > Math.max(...after.tags.map((x) => x.id)), 'new ids never collide with restored ones');
 });
+
+withServer('an event only counts toward no-shows and the attendance percentage once its attendance is final, not the instant it starts or the instant one person checks in', async (s) => {
+  const c = await cast(s);
+  assert.equal((await rules(s, { finalAfterMinutes: 60, noShowLimit: 1, windowDays: 30, minEvents: 1, minAttendance: 0 })).status, 200);
+  // Ann said Going and did not come, 30 minutes ago - still inside her own 60-minute grace period
+  const recent = await pastEvent(s, 30 / 1440, { came: [c.bob], yes: [c.ann, c.bob] });
+  await run(s);
+  let ann = await state(s, 'ann');
+  assert.equal(ann.warnings.length, 0, 'too soon to judge - not a no-show yet, even though Bob already checked in for the same event');
+
+  // the same event, 90 minutes after it started - now past the 60-minute cutoff
+  await s.call(`/api/events/${recent.id}`, 'PUT', { title: recent.title, type: recent.type, start: new Date(Date.now() - 90 * 60000).toISOString() }, s.officer);
+  await run(s);
+  ann = await state(s, 'ann');
+  assert.equal(ann.warnings.length, 1, 'now past the grace period, the no-show is counted');
+  assert.match(ann.warnings[0].reason, /1 no-shows/);
+});
