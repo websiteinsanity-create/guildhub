@@ -190,6 +190,27 @@ withServer('loot entries have a type (skillcore, item, shard) that is validated 
   assert.equal((await call('/api/loot/' + s.id, 'PUT', { item: 'Renamed' }, officer)).body.type, 'Shard', 'editing other fields keeps the type');
 });
 
+withServer('loot entries can optionally record why it was given and what it is for, both validated against the configured lists', async ({ call, member, officer }) => {
+  const m = (await call('/api/members', 'POST', { name: 'Reasony', role: 'Healer' }, member)).body;
+  const cfg = (await call('/api/config')).body;
+  assert.deepEqual(cfg.lootReasons, ['Loot council', 'Attendance win', 'Donation', 'Buyout']);
+  assert.deepEqual(cfg.lootPurposes, ['PvE', 'PvP', 'Alt build']);
+
+  const blank = (await call('/api/loot', 'POST', { memberId: m.id, item: 'Plain' }, officer)).body;
+  assert.equal(blank.reason, ''); assert.equal(blank.purpose, '', 'both are optional and blank by default');
+
+  const full = (await call('/api/loot', 'POST', { memberId: m.id, item: 'Ring', reason: 'Loot council', purpose: 'PvE' }, officer)).body;
+  assert.equal(full.reason, 'Loot council'); assert.equal(full.purpose, 'PvE');
+
+  assert.equal((await call('/api/loot', 'POST', { memberId: m.id, item: 'Bad', reason: 'Because I said so' }, officer)).status, 400, 'only the listed reasons are accepted');
+  assert.equal((await call('/api/loot', 'POST', { memberId: m.id, item: 'Bad', purpose: 'Roleplay' }, officer)).status, 400, 'only the listed purposes are accepted');
+
+  const edited = (await call('/api/loot/' + full.id, 'PUT', { reason: 'Buyout', purpose: 'Alt build' }, officer)).body;
+  assert.equal(edited.reason, 'Buyout'); assert.equal(edited.purpose, 'Alt build');
+  const clearedAgain = (await call('/api/loot/' + full.id, 'PUT', { reason: '', purpose: '' }, officer)).body;
+  assert.equal(clearedAgain.reason, ''); assert.equal(clearedAgain.purpose, '', 'can be cleared back to blank');
+});
+
 withServer('a party preset can be tied to an event type, for upcoming and future events', async ({ call, member, officer }) => {
   const a = (await call('/api/members', 'POST', { name: 'Aaa', role: 'Tank' }, member)).body.id;
   const b = (await call('/api/members', 'POST', { name: 'Bbb', role: 'DPS', owner: 'Bbb' }, officer)).body.id;

@@ -869,7 +869,7 @@ FORMS.application = (f, fd) => act(async () => { await api('/api/applications', 
 ACTIONS['app-withdraw'] = (el, d) => { if (confirm('Withdraw your application?')) act(() => api('/api/applications/' + d.id, 'DELETE'), 'Withdrawn'); };
 
 /* ================= Mercenary signup: a non-member who followed a "Get mercenaries" Discord link ================= */
-Object.assign(UI, { mercInfo: null, mercInfoFor: null });
+Object.assign(UI, { mercInfo: null, mercInfoFor: null, mercEditing: false });
 async function loadMercEvent(id) {
   try { UI.mercInfo = await api('/api/merc-event/' + id); } catch (e) { UI.mercInfo = { error: e.message }; }
   UI.mercInfoFor = id; render();
@@ -883,11 +883,25 @@ VIEWS.merc = (id) => {
   if (info.alreadyMember) return `${head}<div class="empty">This Discord account already belongs to one of our guild's characters - no need to sign up as a mercenary too.</div>`;
   const ev = info.event, m = info.character || { name: '', role: S.cfg.roles[0], primaryWeapon: '', secondaryWeapon: '', specialization: '' };
   const r = ev.mercRequest;
-  return `${head}
-  <div class="panel" style="margin-bottom:16px"><h3>${esc(ev.title)}</h3>
+  const eventPanel = `<div class="panel" style="margin-bottom:16px"><h3>${esc(ev.title)}</h3>
     <div class="muted small">${fmtDate(ev.start)} · ${esc(ev.type)}</div>
-    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any role` : (r.needs || []).map((n) => `${n.count}× ${esc(n.role)}${n.cls ? ' (' + esc(n.cls) + ')' : ''}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px">${esc(r.note)}</div>` : ''}` : ''}
-  </div>
+    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any class` : (r.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px">${esc(r.note)}</div>` : ''}` : ''}
+  </div>`;
+  // Already joined this event: a waiting hall instead of the signup form - just their status, and once an
+  // officer places them, just their own party, not the full roster or anyone else's party.
+  if (info.joinedThisEvent && !UI.mercEditing) {
+    return `${head}${eventPanel}
+    <div class="panel"><h3>You're in</h3>
+      <div class="muted small" style="margin:-4px 0 10px">Signed up as <b>${esc(m.name)}</b> (${esc(m.role)}).</div>
+      ${info.myParty ? `
+      <div class="rule-row"><span>Party</span><b>${esc(info.myParty.name)}</b></div>
+      <div class="muted small" style="margin:6px 0 2px">With you:</div>
+      ${info.myParty.members.map((p) => `<div class="rule-row">${p.leader ? '👑 ' : ''}<b>${esc(p.name)}</b><span class="muted small">${esc(p.role)}</span></div>`).join('')}`
+        : `<div class="muted small">Waiting to be placed into a party. Check back here, or watch for a Discord message once parties are posted.</div>`}
+      <button class="btn sm" style="margin-top:12px" data-act="merc-edit-toggle">Change my details</button>
+    </div>`;
+  }
+  return `${head}${eventPanel}
   <div class="panel"><h3>${info.character ? 'Welcome back - confirm your character' : 'Your character for this event'}</h3>
     ${info.character ? '<div class="muted small" style="margin:-4px 0 10px">You signed up with us before. Change anything that is different, or just join as-is.</div>' : ''}
     <form data-form="merc-signup" data-id="${ev.id}">
@@ -899,11 +913,12 @@ VIEWS.merc = (id) => {
       <div class="field"><label>Specialization (optional)</label><input name="specialization" value="${esc(m.specialization || '')}" maxlength="40"></div>
       <div class="row"><div class="field"><label>Gear score</label><input name="gearScore" type="number" min="0" value="${m.gearScore || ''}"></div>
         <div class="field"><label>Level</label><input name="level" type="number" min="0" max="99" value="${m.level || ''}"></div></div>
-      <button class="btn primary">${info.character ? 'Confirm and join' : 'Join this event'}</button>
+      <div class="link-row">${info.joinedThisEvent ? '<button type="button" class="btn" data-act="merc-edit-toggle">Cancel</button>' : ''}<button class="btn primary">${info.character ? 'Confirm and join' : 'Join this event'}</button></div>
     </form>
   </div>`;
 };
-FORMS['merc-signup'] = (f, fd, id) => act(async () => { await api('/api/merc-signup/' + id, 'POST', fd); UI.mercInfoFor = null; }, 'Joined. The officers can see you in the party board now.');
+ACTIONS['merc-edit-toggle'] = () => { UI.mercEditing = !UI.mercEditing; render(); };
+FORMS['merc-signup'] = (f, fd, id) => act(async () => { await api('/api/merc-signup/' + id, 'POST', fd); UI.mercInfoFor = null; UI.mercEditing = false; }, 'Joined. The officers can see you in the party board now.');
 
 /* ================= Admin: the Discord bot, the channel for party pictures, applications ================= */
 UI.dcheck = null;
@@ -968,6 +983,35 @@ function mercenariesAdmin() {
     </form>
   </div>`;
 }
+// Officer status comes from .env (DISCORD_OFFICER_ROLE_IDS / DISCORD_OFFICER_USER_IDS) and is checked once at
+// sign-in. This panel adds two more ways to grant it, without touching .env or restarting the server - a
+// Discord role (reuses the same role data "Check the connection" above loaded) or specific players directly.
+function officersAdmin() {
+  const st = S.settings, roleIds = st.officerRoleIds || [], userIds = st.officerUserIds || [], c = UI.dcheck;
+  const allRoles = !c ? roleIds.map((id) => ({ id, name: id + ' (checking...)' }))
+    : [...c.roles, ...roleIds.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
+  return `<div class="panel"><h3>Officers</h3>
+    <div class="muted small" style="margin:-6px 0 10px">Officer status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
+      server's .env file. A change here applies the next time that person signs in, not immediately to someone already signed in.</div>
+    <form data-form="officers">
+      <label><b>Discord roles that make someone an officer</b></label>
+      ${allRoles.length ? allRoles.map((r) => `<label class="tagpick"><input type="checkbox" name="orole" value="${esc(r.id)}" ${roleIds.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')
+        : '<div class="muted small">Press "Check the connection" above to see your server\'s roles.</div>'}
+      <div class="muted small" style="margin:4px 0 14px">Up to 10. None ticked here just means nothing extra beyond .env.</div>
+      <label><b>Specific players who are always officers</b></label>
+      <div class="muted small" style="margin:2px 0 6px">Only players who have signed in before can be picked.</div>
+      ${playerPickerFor('ouser', userIds)}
+      <button class="btn primary" style="margin-top:10px">Save</button>
+    </form>
+  </div>`;
+}
+// Same idea as playerPicker() (used for login notices), with its own checkbox name so the two never collide if
+// both forms were ever open at once.
+const playerPickerFor = (name, selected = []) => `<div class="pp"><input type="search" class="pp-filter" placeholder="Search players" aria-label="Search players"><div class="scrollbox">${allPlayers().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<label class="tagpick" data-n="${esc(p.name.toLowerCase())}"><input type="checkbox" name="${name}" value="${esc(p.key)}" ${selected.includes(p.key) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('') || '<span class="muted small">No players yet.</span>'}</div></div>`;
+FORMS.officers = (f) => act(() => api('/api/admin/officers', 'PUT', {
+  roleIds: [...f.querySelectorAll('input[name=orole]:checked')].map((i) => i.value),
+  userIds: [...f.querySelectorAll('input[name=ouser]:checked')].map((i) => i.value),
+}), 'Saved');
 ACTIONS['dcheck'] = () => act(async () => { UI.dcheck = await api('/api/admin/discord-check'); }, 'Checked');
 FORMS.mercset = (f, fd) => act(() => api('/api/admin/mercenaries', 'PUT', {
   channelId: fd.channelId, channelName: f.elements.channelId.selectedOptions[0] ? f.elements.channelId.selectedOptions[0].textContent.replace(/^#/, '') : '',
@@ -1072,33 +1116,35 @@ const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(
 // there are only ever three roles, so a dynamic list would be more code for no real benefit here.
 // Each need is its own row (role + class + count), freely repeatable - so "2 healers: 1 Oracle, 1 Seeker" is
 // two separate rows with the same role and different classes, not one row trying to cover both at once.
-const mercNeedRow = (role, cls, count) => `<div class="row merc-need-row" style="align-items:end;margin-bottom:8px">
-  <div class="field" style="flex:1"><label>Role</label><select class="mn-role" aria-label="Role">${opts(S.cfg.roles, role)}</select></div>
-  <div class="field" style="flex:1"><label>Class (optional)</label><select class="mn-cls" aria-label="Class">${opts(S.cfg.classes.map((c) => c.name).sort(), cls, 'Any class')}</select></div>
-  <div class="field" style="flex:0 0 80px"><label>Count</label><input class="mn-count" type="number" min="0" max="20" value="${count}" aria-label="Count"></div>
+// No separate Tank/Healer/DPS picker here - the class name itself (Oracle, Crusader, ...) already says what it
+// is, and there is no reliable "which role is this class" data to filter by anyway, so a second dropdown would
+// just be guesswork dressed up as a filter.
+const mercNeedRow = (cls, count) => `<div class="row merc-need-row" style="align-items:end;margin-bottom:8px">
+  <div class="field" style="flex:1"><label>Class</label><select class="mn-cls" aria-label="Class">${opts(S.cfg.classes.map((c) => c.name).sort(), cls)}</select></div>
+  <div class="field" style="flex:0 0 80px"><label>Count</label><input class="mn-count" type="number" min="1" max="20" value="${count}" aria-label="Count"></div>
   <button type="button" class="btn sm danger" data-act="merc-need-remove" title="Remove this row" aria-label="Remove this row">×</button>
 </div>`;
 ACTIONS['merc-ask'] = (el, d) => {
   const ev = byId(S.events, d.id), mc = S.settings.mercenaries || {};
   if (!mc.channelId || !mc.roleId) return toast('Set the mercenary channel and role in Admin first.', true);
   openDialog(`<form data-form="merc-ask" data-id="${ev.id}"><h2>Get mercenaries for ${esc(ev.title)}</h2>
-    <div class="field"><label for="ma-overall">Just need players, any role</label><input id="ma-overall" name="overall" type="number" min="0" max="50" value="0"></div>
-    <div class="muted small" style="margin:4px 0 10px">Or ask for specific roles and classes below. Add a row for each role and class you need - add the same role twice for two different classes, for example 1 Oracle and 1 Seeker.</div>
-    <div id="merc-needs">${S.cfg.roles.map((r) => mercNeedRow(r, '', 0)).join('')}</div>
-    <button type="button" class="btn sm" data-act="merc-need-add" style="margin-bottom:10px">+ Add another need</button>
+    <div class="field"><label for="ma-overall">Just need players, any class</label><input id="ma-overall" name="overall" type="number" min="0" max="50" value="0"></div>
+    <div class="muted small" style="margin:4px 0 10px">Or ask for specific classes below. Add a row for each class you need.</div>
+    <div id="merc-needs"></div>
+    <button type="button" class="btn sm" data-act="merc-need-add" style="margin-bottom:10px">+ Add a class you need</button>
     <div class="field"><label for="ma-note">Note (optional)</label><textarea id="ma-note" name="note" maxlength="300" style="min-height:60px" placeholder="Anything else they should know"></textarea></div>
     <div class="muted small" style="margin-bottom:10px">Posts in #${esc(mc.channelName || mc.channelId)} and pings ${esc(mc.roleName || 'the mercenary role')}, with a link for them to sign in and join.</div>
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Ask for help</button></div></form>`);
 };
-ACTIONS['merc-need-add'] = (el) => { $('#merc-needs').insertAdjacentHTML('beforeend', mercNeedRow(S.cfg.roles[0], '', 1)); };
+ACTIONS['merc-need-add'] = (el) => { $('#merc-needs').insertAdjacentHTML('beforeend', mercNeedRow(S.cfg.classes[0].name, 1)); };
 ACTIONS['merc-need-remove'] = (el) => { el.closest('.merc-need-row').remove(); };
 FORMS['merc-ask'] = (f, fd, id) => {
   const needs = [...f.querySelectorAll('.merc-need-row')].map((row) => ({
-    role: row.querySelector('.mn-role').value, cls: row.querySelector('.mn-cls').value, count: Number(row.querySelector('.mn-count').value) || 0,
+    cls: row.querySelector('.mn-cls').value, count: Number(row.querySelector('.mn-count').value) || 0,
   })).filter((n) => n.count > 0);
   const overall = Number(fd.overall) || 0;
-  if (!overall && !needs.length) return toast('Say how many players you need, or fill in at least one role.', true);
-  act(() => api(`/api/events/${id}/merc-request`, 'POST', { overall, needs, note: fd.note }), 'Asked for mercenaries');
+  if (!overall && !needs.length) return toast('Say how many players you need, or add at least one class.', true);
+  act(async () => { await api(`/api/events/${id}/merc-request`, 'POST', { overall, needs, note: fd.note }); closeDialog(); }, 'Asked for mercenaries');
 };
 ACTIONS['parties-view'] = async (el, d) => {
   const ev = byId(S.events, d.id);
@@ -1137,8 +1183,31 @@ ACTIONS['parties-post'] = async (el, d) => {
 };
 FORMS.postparties = (f, fd, id) => {
   const sel = f.elements.channelId, name = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.replace(/^#/, '') : '';
-  act(async () => { await api(`/api/events/${id}/post-parties`, 'POST', { image: PARTY_IMG, text: fd.text, channelId: fd.channelId, channelName: name }); closeDialog(); PARTY_IMG = ''; }, `Posted in #${name}`);
+  act(async () => {
+    await api(`/api/events/${id}/post-parties`, 'POST', { image: PARTY_IMG, text: fd.text, channelId: fd.channelId, channelName: name });
+    closeDialog(); PARTY_IMG = '';
+    dmMercsTheirParty(byId(S.events, Number(id)));   // best-effort, does not block or affect the toast above
+  }, `Posted in #${name}`);
 };
+// Every mercenary currently placed in a party gets a DM with just that one party - same picture style as the
+// channel post, cropped to the one party they are actually in. One failed DM (closed DMs, etc.) does not stop
+// the others; each is reported with its own quiet toast rather than one popup for the whole batch.
+async function dmMercsTheirParty(ev) {
+  if (!ev) return;
+  const mercsPlaced = ev.parties.flatMap((p) => p.members).map((id) => byId(S.members, id)).filter((m) => m && m.mercenary);
+  for (const merc of mercsPlaced) {
+    const party = ev.parties.find((p) => p.members.includes(merc.id));
+    // rsvps cleared too: renderPartiesImage also lists everyone "going but not placed" using the full guild's
+    // RSVPs, which has nothing to do with this mercenary's own party and would otherwise leak the rest of the
+    // roster into what is meant to be just their own picture.
+    const cropped = { ...ev, parties: [party], rsvps: {} };
+    try {
+      const img = await blobToDataUrl(await renderPartiesImage(cropped, { maxCols: 1 }));
+      const r = await api(`/api/events/${ev.id}/merc-dm/${merc.id}`, 'POST', { image: img });
+      if (!r.ok) toast(`Could not DM ${merc.name}: ${r.error}`, true);
+    } catch (e) { toast(`Could not DM ${merc.name}: ${e.message}`, true); }
+  }
+}
 
 
 /* ================= Admin: every section is a dropdown ================= */
@@ -1257,6 +1326,7 @@ VIEWS.admin = () => {
   return '<div class="page-head"><h1>Admin</h1></div>'
     + appearanceAdmin()
     + discordAdmin()
+    + officersAdmin()
     + mercenariesAdmin()
     + adminPlayersList()
     + noticesAdmin()

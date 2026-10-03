@@ -70,7 +70,7 @@ function createDiscord(env = process.env) {
       username: me.data.username || '',
       name: String((mem.ok && mem.data.nick) || me.data.global_name || me.data.username || 'Player').slice(0, 40),
       avatar: me.data.avatar || '',
-      inGuild,
+      inGuild, roles,
       role: officer ? 'officer' : member ? 'member' : 'applicant',
       whyNot: member ? '' : inGuild ? 'You do not have the member role on our Discord server yet.' : 'You are not a member of our Discord server, so you cannot sign in.',
     };
@@ -81,7 +81,17 @@ function createDiscord(env = process.env) {
   let chain = Promise.resolve();
   const enqueue = (fn) => { const p = chain.then(fn, fn); chain = p.then(() => sleep(cfg.dmDelayMs), () => sleep(cfg.dmDelayMs)); return p; };
 
-  async function deliver(userId, content) {
+  // Up to 5 link buttons as one row. A LINK-style button (style 5) just opens its url when tapped - Discord
+  // handles that entirely on the user's device, no interaction is ever sent back to the bot, so this needs
+  // nothing beyond the plain REST calls this file already makes (no Gateway connection, no interactions
+  // endpoint - a real limitation of a bot with no public, always-on server to receive those).
+  const linkButtons = (buttons) => [{ type: 1, components: buttons.slice(0, 5).map((b) => ({ type: 2, style: 5, label: b.label, url: b.url })) }];
+
+  // file (optional): { name, type, buffer } - same shape postMessage() already uses for channel pictures. A DM
+  // with a file has to go through the same multipart upload Discord needs for any attachment, so this branch
+  // uses a raw fetch with FormData instead of the plain-JSON api() helper, exactly like postMessage() does.
+  // components (optional): an action-row array, normally built with linkButtons() above.
+  async function deliver(userId, content, file, components) {
     if (!botEnabled) return { ok: false, dry: true, error: 'No bot token set (DISCORD_BOT_TOKEN), so nothing was sent.' };
     if (!isSnowflake(userId)) return { ok: false, error: 'This player has no Discord account linked.' };
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -92,7 +102,17 @@ function createDiscord(env = process.env) {
         if (!r.ok || !r.data.id) return { ok: false, error: (r.data && r.data.message) || `Discord said ${r.status}` };
         ch = r.data.id; dmChannels.set(userId, ch);
       }
-      const m = await api(`/channels/${ch}/messages`, { method: 'POST', bot: true, body: { content, allowed_mentions: { parse: [] } } });
+      let m;
+      if (file) {
+        const fd = new FormData();
+        fd.append('payload_json', JSON.stringify({ content, allowed_mentions: { parse: [] }, attachments: [{ id: 0, filename: file.name }], ...(components ? { components } : {}) }));
+        fd.append('files[0]', new Blob([file.buffer], { type: file.type || 'application/octet-stream' }), file.name);
+        const res = await fetch(`${cfg.apiBase}/channels/${ch}/messages`, { method: 'POST', headers: { Authorization: 'Bot ' + cfg.botToken, 'User-Agent': 'DiscordBot (guild-hall, 1.0)' }, body: fd, signal: AbortSignal.timeout(20000) });
+        const data = await res.json().catch(() => ({}));
+        m = { status: res.status, ok: res.ok, data, retryAfter: Number(res.headers.get('retry-after') || data.retry_after || 0) };
+      } else {
+        m = await api(`/channels/${ch}/messages`, { method: 'POST', bot: true, body: { content, allowed_mentions: { parse: [] }, ...(components ? { components } : {}) } });
+      }
       if (m.status === 429 && attempt === 0) { await sleep(Math.min(10, m.retryAfter || 1) * 1000); continue; }
       if (m.ok) return { ok: true };
       const msg = m.data && m.data.code === 50007 ? 'Cannot message this player (their DMs are closed, or they share no server with the bot).' : (m.data && m.data.message) || `Discord said ${m.status}`;
@@ -100,7 +120,7 @@ function createDiscord(env = process.env) {
     }
     return { ok: false, error: 'Discord is rate limiting the bot. Try again in a minute.' };
   }
-  const sendDM = (userId, content) => enqueue(() => deliver(userId, content).catch((e) => ({ ok: false, error: String(e.message || e) })));
+  const sendDM = (userId, content, file, components) => enqueue(() => deliver(userId, content, file, components).catch((e) => ({ ok: false, error: String(e.message || e) })));
 
   // ---- posting a message with a picture into a channel ----
   const FRIENDLY = {
@@ -185,7 +205,7 @@ function createDiscord(env = process.env) {
 
   const avatarUrl = (u) => (u && u.avatar && isSnowflake(u.id) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '');
 
-  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake };
+  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons };
 }
 
 module.exports = { createDiscord, isSnowflake };

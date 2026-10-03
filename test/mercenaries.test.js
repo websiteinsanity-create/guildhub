@@ -80,18 +80,18 @@ test('"Get mercenaries" posts to Discord with the role mention and the structure
   const bad = await call(`/api/events/${ev.id}/merc-request`, 'POST', {}, 'officer');
   assert.equal(bad.status, 400, 'must ask for something');
 
-  const r = await call(`/api/events/${ev.id}/merc-request`, 'POST', { needs: [{ role: 'Tank', cls: 'Oracle', count: 1 }, { role: 'DPS', count: 2 }] }, 'officer');
+  const r = await call(`/api/events/${ev.id}/merc-request`, 'POST', { needs: [{ cls: 'Oracle', count: 1 }, { cls: 'Crusader', count: 2 }] }, 'officer');
   assert.equal(r.status, 200);
   const post = fake.state.posts.at(-1);
   assert.deepEqual(post.mentions, [MERC_ROLE]);
   assert.match(post.content, /<@&900000000000000099>/);
   assert.match(post.content, /Mercenaries wanted for Castle siege/);
-  assert.match(post.content, /1× Tank \(Oracle\), 2× DPS/);
+  assert.match(post.content, /1× Oracle, 2× Crusader/);
   assert.match(post.content, new RegExp(`/#/merc/${ev.id}`));
 
   const seen = (await state('officer')).events.find((e) => e.id === ev.id).mercRequest;
   assert.equal(seen.ok, true);
-  assert.deepEqual(seen.needs, [{ role: 'Tank', cls: 'Oracle', count: 1 }, { role: 'DPS', cls: '', count: 2 }]);
+  assert.deepEqual(seen.needs, [{ cls: 'Oracle', count: 1 }, { cls: 'Crusader', count: 2 }]);
 
   const a = (await call('/api/admin/audit', 'GET', null, 'officer')).body;
   assert.ok(a.entries.some((e) => e.action === 'mercenaries.request' && /Castle siege/.test(e.description)));
@@ -157,4 +157,29 @@ test('a real guild member cannot also sign up as a mercenary with the same Disco
   await call('/api/members', 'POST', { name: 'RealChar', role: 'DPS' }, 'member');     // the member needs an actual character for this to be a meaningful check
   const r = await call(`/api/merc-signup/${ev.id}`, 'POST', { name: 'Nope', role: 'DPS' }, 'member');
   assert.equal(r.status, 409);
+});
+
+// ---------------------------------------------------------------- DMing a mercenary their own party
+test('an officer can DM a mercenary a picture of their own party, and it fails cleanly for a non-mercenary or a bad picture', async () => {
+  const tinyPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(300, 2)]).toString('base64');
+  const ev = (await call('/api/events', 'POST', { title: 'DM test event', type: 'Castle Siege', start: inMinutes(400) }, 'officer')).body;
+  const merc3 = '100000000000000070';
+  sessions.merc3 = (await discordLogin(merc3, [])).cookie;
+  const signed = (await call(`/api/merc-signup/${ev.id}`, 'POST', { name: 'Dagger', role: 'DPS' }, 'merc3')).body;
+
+  assert.equal((await call(`/api/events/${ev.id}/merc-dm/${signed.id}`, 'POST', { image: tinyPng }, 'member')).status, 403, 'members cannot send this');
+
+  fake.state.posts.length = 0;
+  const r = await call(`/api/events/${ev.id}/merc-dm/${signed.id}`, 'POST', { image: tinyPng }, 'officer');
+  assert.equal(r.status, 200); assert.equal(r.body.ok, true);
+  const dm = fake.state.dms.at(-1);
+  assert.equal(dm.to, merc3, "sent to the mercenary's own Discord account");
+  assert.match(dm.content, /DM test event/);
+  assert.ok(dm.file && dm.file.png, 'the picture is actually attached');
+
+  const realMember = (await call('/api/members', 'POST', { name: 'RealOne', role: 'Tank' }, 'member')).body;
+  assert.equal((await call(`/api/events/${ev.id}/merc-dm/${realMember.id}`, 'POST', { image: tinyPng }, 'officer')).status, 404, 'only a mercenary can be DMed this way');
+
+  const badPic = await call(`/api/events/${ev.id}/merc-dm/${signed.id}`, 'POST', { image: 'not-a-real-png' }, 'officer');
+  assert.equal(badPic.status, 400);
 });

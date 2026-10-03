@@ -417,6 +417,7 @@ function viewRoster() {
   const avgGs = active.length ? Math.round(active.reduce((a, m) => a + m.gearScore, 0) / active.length) : 0;
   const q = UI.rosterQ.toLowerCase();
   let list = S.members.filter((m) =>
+    !m.mercenary &&
     (UI.rosterInactive || m.active) &&
     (!UI.rosterRole || m.role === UI.rosterRole) &&
     (!UI.rosterWeapon || m.primaryWeapon === UI.rosterWeapon || m.secondaryWeapon === UI.rosterWeapon || (m.builds || []).some((b) => b.primaryWeapon === UI.rosterWeapon || b.secondaryWeapon === UI.rosterWeapon)) &&
@@ -471,7 +472,25 @@ function viewRoster() {
         <td class="tagcell">${tagsOf(m.owner).map(tagChip).join('')}<button class="btn sm" data-act="tags-edit" data-key="${esc(m.owner)}" aria-label="Edit tags of ${esc(ownerName(m.owner))}">Tags</button></td>` : ''}
       <td>${canEdit(m) ? `<button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button>` : ''}</td>
     </tr>`; }).join('')}</tbody></table></div>`
-    : `<div class="empty">No characters match. ${S.members.length ? 'Clear the filters to see everyone.' : 'Add the first one with "Add character".'}</div>`}`;
+    : `<div class="empty">No characters match. ${S.members.length ? 'Clear the filters to see everyone.' : 'Add the first one with "Add character".'}</div>`}
+  ${isOfficer() ? mercenariesSection() : ''}`;
+}
+// Mercenaries never mix into the roster above (not even with "show inactive" ticked) - they get their own
+// dropdown here instead, so the regular Member list stays about guild members only.
+function mercenariesSection() {
+  const mercs = S.members.filter((m) => m.mercenary);
+  if (!mercs.length) return '';
+  return `<details class="fold" style="margin-top:20px;border-top:1px solid var(--line)"><summary>Mercenaries (${mercs.length})</summary>
+    <div class="fold-body"><div class="tbl-wrap"><table>
+      <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th>For event</th><th></th></tr></thead>
+      <tbody>${mercs.map((m) => { const ev = byId(S.events, m.mercFor); return `<tr>
+        <td><b>${esc(m.name)}</b> <span class="tag merc">Merc</span><div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div></td>
+        <td>${roleChip(m.role)}</td><td class="wpn">${weaponLine(m)}</td>
+        <td>${ev ? `<a href="#/events/${ev.id}">${esc(ev.title)}</a>` : '<span class="muted small">Event no longer exists</span>'}</td>
+        <td><button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button></td>
+      </tr>`; }).join('')}</tbody>
+    </table></div></div>
+  </details>`;
 }
 
 const qlRow = (l) => `<div class="ql-row"><input name="ql_label" value="${esc(l.label || '')}" maxlength="30" placeholder="Label (optional)" aria-label="Link label"><input name="ql_url" type="url" value="${esc(l.url || '')}" maxlength="300" placeholder="https://..." aria-label="Link"><button type="button" class="x" data-act="ql-remove" aria-label="Remove link">×</button></div>`;
@@ -637,7 +656,7 @@ function eventDetail(ev) {
       ${S.presets.length ? `<select data-act="preset-forever" data-ev="${ev.id}" aria-label="Use a preset for all upcoming ${esc(ev.type)} events"><option value="">Preset for all ${esc(ev.type)}…</option>${S.presets.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
       ${ev.parties.length ? `<button class="btn sm" data-act="preset-from-event" data-id="${ev.id}">Save as preset</button><button class="btn sm discord-btn" data-act="parties-post" data-id="${ev.id}" title="Draws the parties as a picture and posts it in a Discord channel">Post to Discord</button>` : ''}
       <button class="btn sm discord-btn" data-act="merc-ask" data-id="${ev.id}" title="Asks an outside Discord role for help filling this event's roster">Get mercenaries</button>` : ''}</span></div>
-    ${isOfficer() && ev.mercRequest ? `<div class="muted small" style="margin-top:6px">${ev.mercRequest.ok ? 'Asked' : '<span style="color:var(--danger)">Asking failed</span>'} for ${ev.mercRequest.overall ? `${ev.mercRequest.overall} player${ev.mercRequest.overall === 1 ? '' : 's'}` : (ev.mercRequest.needs || []).map((n) => `${n.count}× ${n.role}${n.cls ? ' (' + n.cls + ')' : ''}`).join(', ')} by ${esc(ev.mercRequest.by)}, ${fmtShort(ev.mercRequest.at)}${ev.mercRequest.ok ? '' : ': ' + esc(ev.mercRequest.error)}.</div>` : ''}
+    ${isOfficer() && ev.mercRequest ? `<div class="muted small" style="margin-top:6px">${ev.mercRequest.ok ? 'Asked' : '<span style="color:var(--danger)">Asking failed</span>'} for ${ev.mercRequest.overall ? `${ev.mercRequest.overall} player${ev.mercRequest.overall === 1 ? '' : 's'}` : (ev.mercRequest.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')} by ${esc(ev.mercRequest.by)}, ${fmtShort(ev.mercRequest.at)}${ev.mercRequest.ok ? '' : ': ' + esc(ev.mercRequest.error)}.</div>` : ''}
     ${isOfficer() && ev.partyPosts && ev.partyPosts.length ? (() => { const p = ev.partyPosts[ev.partyPosts.length - 1]; return `<div class="muted small" style="margin-top:6px">${p.ok ? 'Posted' : '<span style="color:var(--danger)">Posting failed</span>'} to ${p.channelName ? '#' + esc(p.channelName) : 'Discord'} by ${esc(p.by)}, ${fmtShort(p.at)}${p.ok ? '' : ': ' + esc(p.error)}.</div>`; })() : ''}
     ${(() => { const r = S.presetRules.find((x) => x.type === ev.type), p = r && byId(S.presets, r.presetId); return p ? `<div class="muted small" style="margin-top:6px">Every ${esc(ev.type)} event uses the preset "${esc(p.name)}" (set on the Parties page).</div>` : ''; })()}
     <div style="margin-top:14px">${ev.parties.length || isOfficer() ? board({ kind: 'event', id: ev.id }, ev.parties, ev) : '<div class="muted">No parties posted yet.</div>'}</div>
@@ -1037,16 +1056,23 @@ function viewLoot() {
   const list = S.loot.filter((l) => (!UI.lootPlayer || l.memberId === Number(UI.lootPlayer)) && (!UI.lootType || l.type === UI.lootType) && (!q || `${l.item} ${nameOf(l.memberId)}`.toLowerCase().includes(q)))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
   const active = S.members.filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name));
+  // No outside item catalog - just everything typed in here before, so a name only ever needs typing once and
+  // the next entry can pick it from the list instead of risking a slightly different spelling.
+  const itemNames = [...new Set(S.loot.map((l) => l.item).filter(Boolean))].sort();
+  const itemDatalist = `<datalist id="item-names">${itemNames.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>`;
   return `
+  ${itemDatalist}
   <div class="page-head"><div><h1>Loot</h1><div class="muted">Who received which item, and on which day. The dashboard reads its "items received" numbers from this list.${isOfficer() ? '' : ' You only see your own loot.'}</div></div></div>
   ${off ? `<div class="panel" style="margin-bottom:16px"><h3>Give out loot</h3>
     ${active.length ? `<form data-form="loot" class="loot-form">
       <div class="field"><label for="lf-m">Player</label><select id="lf-m" name="memberId" required>${active.map((m) => `<option value="${m.id}" ${Number(UI.lootMember) === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
       <div class="field"><label for="lf-t">Type</label><select id="lf-t" name="type" data-act="loot-type">${S.cfg.lootTypes.map((t) => `<option ${(UI.lootFormType || S.cfg.lootDefaultType) === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
       ${(() => { const lu = (UI.lootFormType || S.cfg.lootDefaultType) === 'Lucent'; return `
-      <div class="field wide slidefield ${lu ? 'off' : ''}" id="lf-item-field"><label for="lf-i">Item</label><input id="lf-i" name="item" ${lu ? '' : 'required'} maxlength="120" placeholder="Item name" autocomplete="off"></div>
+      <div class="field wide slidefield ${lu ? 'off' : ''}" id="lf-item-field"><label for="lf-i">Item</label><input id="lf-i" name="item" ${lu ? '' : 'required'} maxlength="120" placeholder="Item name" autocomplete="off" list="item-names"></div>
       <div class="field wide slidefield ${lu ? '' : 'off'}" id="lf-amt-field"><label for="lf-a">Amount of Lucent</label><input id="lf-a" name="amount" type="number" min="1" ${lu ? 'required' : ''} placeholder="For example 1500" autocomplete="off"></div>`; })()}
       <div class="field"><label for="lf-d">Given out on</label><input id="lf-d" name="date" type="date" value="${esc(UI.lootDate || todayTz())}" required></div>
+      <div class="field"><label for="lf-r">Decision (optional)</label><select id="lf-r" name="reason"><option value="">-</option>${S.cfg.lootReasons.map((r) => `<option>${esc(r)}</option>`).join('')}</select></div>
+      <div class="field"><label for="lf-p">Purpose (optional)</label><select id="lf-p" name="purpose"><option value="">-</option>${S.cfg.lootPurposes.map((p) => `<option>${esc(p)}</option>`).join('')}</select></div>
       <button class="btn primary">Add</button>
     </form>` : '<div class="muted">Add characters on the Member page first.</div>'}</div>` : ''}
   <div class="toolbar">
@@ -1058,7 +1084,7 @@ function viewLoot() {
   ${list.length ? `<div class="tbl-wrap"><table>
     <thead><tr><th>Given out</th><th>Player</th><th>Type</th><th>Item</th><th></th></tr></thead>
     <tbody>${list.map((l) => { const m = byId(S.members, l.memberId); return `<tr>
-      <td class="nowrap">${fmtLootDate(l.date)}</td><td><b>${esc(nameOf(l.memberId))}</b> ${m ? roleChip(m.role) : ''}</td><td><span class="type-pill t-${esc(l.type)}">${esc(l.type || 'Item')}</span></td><td>${l.type === 'Lucent' ? `<b>${Number(l.amount).toLocaleString()}</b> Lucent` : esc(l.item)}${l.fromRequest ? ' <span class="muted small">(from a request)</span>' : ''}</td>
+      <td class="nowrap">${fmtLootDate(l.date)}</td><td><b>${esc(nameOf(l.memberId))}</b> ${m ? roleChip(m.role) : ''}</td><td><span class="type-pill t-${esc(l.type)}">${esc(l.type || 'Item')}</span></td><td>${l.type === 'Lucent' ? `<b>${Number(l.amount).toLocaleString()}</b> Lucent` : esc(l.item)}${l.fromRequest ? ' <span class="muted small">(from a request)</span>' : ''}${l.reason || l.purpose ? `<div class="muted small">${[l.reason, l.purpose].filter(Boolean).join(' · ')}</div>` : ''}</td>
       <td>${off ? `<button class="btn sm" data-act="loot-edit" data-id="${l.id}">Edit</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">${S.loot.length ? 'Nothing matches your search.' : 'No loot has been given out yet.' + (off ? ' Use the form above to add the first entry.' : '')}</div>`}`;
 }
@@ -1070,9 +1096,11 @@ function lootDialog(l) {
     <h2>Edit loot entry</h2>
     <div class="field"><label>Player</label><select name="memberId">${players.map((m) => `<option value="${m.id}" ${m.id === l.memberId ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
     <div class="row"><div class="field"><label>Type</label><select name="type" data-act="loot-type-edit">${S.cfg.lootTypes.map((t) => `<option ${l.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
-      <div class="field" style="flex:2"><div id="le-item" class="${l.type === 'Lucent' ? 'hidden' : ''}"><label>Item</label><input name="item" value="${esc(l.item)}" ${l.type === 'Lucent' ? '' : 'required'} maxlength="120"></div>
+      <div class="field" style="flex:2"><div id="le-item" class="${l.type === 'Lucent' ? 'hidden' : ''}"><label>Item</label><input name="item" value="${esc(l.item)}" ${l.type === 'Lucent' ? '' : 'required'} maxlength="120" list="item-names"></div>
         <div id="le-amt" class="${l.type === 'Lucent' ? '' : 'hidden'}"><label>Amount of Lucent</label><input name="amount" type="number" min="1" value="${l.amount || ''}" ${l.type === 'Lucent' ? 'required' : ''}></div></div></div>
     <div class="field"><label>Given out on</label><input name="date" type="date" value="${esc(l.date)}" required></div>
+    <div class="row"><div class="field"><label>Decision (optional)</label><select name="reason"><option value="">-</option>${S.cfg.lootReasons.map((r) => `<option ${l.reason === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>
+      <div class="field"><label>Purpose (optional)</label><select name="purpose"><option value="">-</option>${S.cfg.lootPurposes.map((p) => `<option ${l.purpose === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></div></div>
     <div class="dlg-actions"><button type="button" class="btn danger left" data-act="loot-delete" data-id="${l.id}">Delete</button>
       <button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
   </form>`);

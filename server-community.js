@@ -185,11 +185,48 @@ module.exports = function install(ctx) {
     return { ok: true };
   }, { officer: true });
 
+  // After "Post to Discord" (above) succeeds, the officer's browser calls this once per mercenary currently
+  // placed in a party for this event, with a picture it already drew showing just that one party - the same
+  // renderer as the channel post, just cropped to one party instead of all of them. Sent as a DM, so only that
+  // one player ever sees it; nothing is posted anywhere public for this.
+  route('POST', '/api/events/:id/merc-dm/:memberId', async ({ body, params }) => {
+    const ev = findEvent(params.id), m = findMember(params.memberId);
+    need(ev, 404, 'Event not found.');
+    need(m && m.mercenary, 404, 'That mercenary could not be found.');
+    need(discord.botEnabled, 400, 'The Discord bot is not set up yet (DISCORD_BOT_TOKEN). See Admin > Discord.');
+    const buf = Buffer.from(String(body.image || '').replace(/^data:[^,]*,/, ''), 'base64');
+    need(buf.length > 200 && buf.subarray(0, 8).equals(PNG_SIGNATURE), 400, 'The picture is not a PNG.');
+    need(buf.length <= 8e6, 413, 'The picture is too large (8 MB at most).');
+    const r = await discord.sendDM(m.owner, `🗡️ **Your party for ${ev.title}**`, { name: 'my-party.png', type: 'image/png', buffer: buf });
+    return { ok: !!r.ok, error: r.error || '' };
+  }, { officer: true });
+
   // ---------------------------------------------------------------- mercenaries: outside help for one event
   // A mercenary is not a guild member: their character lives in the same members list (so the party board, drag
   // and drop, and character editing all just work unchanged) but with active:false and mercenary:true, which
   // hides them from every other page automatically - those already filter by "active" everywhere. They are
   // only ever shown again on the one event's party board (mercFor), where board() adds them to the pool.
+  // Extra officers, editable here instead of .env - a Discord role (besides DISCORD_OFFICER_ROLE_IDS) and/or
+  // specific players. Takes effect the next time that person signs in (officer status, like everything else
+  // about who someone is, is decided once at sign-in and kept for the 7-day session, not re-checked live).
+  route('PUT', '/api/admin/officers', ({ body }) => {
+    const st = db().settings;
+    if (body.roleIds !== undefined) {
+      const ids = Array.isArray(body.roleIds) ? body.roleIds : [];
+      need(ids.length <= 10, 400, 'Pick up to 10 roles.');
+      const clean_ids = [...new Set(ids.map((id) => String(id)))];
+      need(clean_ids.every((id) => /^\d{15,25}$/.test(id)), 400, 'That does not look like a Discord role.');
+      st.officerRoleIds = clean_ids;
+    }
+    if (body.userIds !== undefined) {
+      const ids = Array.isArray(body.userIds) ? body.userIds : [];
+      need(ids.length <= 50, 400, 'That is a lot of individually-chosen officers - double check the list.');
+      st.officerUserIds = [...new Set(ids.map((id) => clean(id, 40)).filter(Boolean))];
+    }
+    save();
+    return st;
+  }, { officer: true });
+
   route('PUT', '/api/admin/mercenaries', ({ body }) => {
     const st = db().settings.mercenaries;
     if (body.channelId !== undefined) { const id = String(body.channelId || ''); need(id === '' || /^\d{15,25}$/.test(id), 400, 'Pick a channel from the list.'); st.channelId = id; if (!id) st.channelName = ''; }
@@ -207,12 +244,15 @@ module.exports = function install(ctx) {
     need(/^\d{15,25}$/.test(st.channelId), 400, 'Set the mercenary channel in Admin first.');
     need(/^\d{15,25}$/.test(st.roleId), 400, 'Set the mercenary role in Admin first.');
     const overall = Math.max(0, Math.round(Number(body.overall) || 0));
+    // Just the class name itself (Oracle, Crusader, ...) - no separate role, since there is no reliable way to
+    // say which role a class belongs to (several flex between roles depending on build) and the name alone
+    // already tells anyone who plays this game what it is.
     const needs = (Array.isArray(body.needs) ? body.needs : [])
-      .map((n) => ({ role: clean(n.role, 30), cls: clean(n.cls, 40), count: Math.max(1, Math.round(Number(n.count) || 1)) }))
-      .filter((n) => config.roles.includes(n.role)).slice(0, 10);
-    need(overall > 0 || needs.length > 0, 400, 'Say how many players you need, or which roles/classes.');
+      .map((n) => ({ cls: clean(n.cls, 40), count: Math.max(1, Math.round(Number(n.count) || 1)) }))
+      .filter((n) => n.cls).slice(0, 10);
+    need(overall > 0 || needs.length > 0, 400, 'Say how many players you need, or which classes.');
     const note = clean(body.note, 300);
-    const needLine = needs.length ? needs.map((n) => `${n.count}× ${n.role}${n.cls ? ' (' + n.cls + ')' : ''}`).join(', ') : `${overall} player${overall === 1 ? '' : 's'}, any role`;
+    const needLine = needs.length ? needs.map((n) => `${n.count}× ${n.cls}`).join(', ') : `${overall} player${overall === 1 ? '' : 's'}, any class`;
     const ts = Math.floor(new Date(ev.start).getTime() / 1000);                 // Discord's own <t:...> tag shows this in each reader's own time zone - better than guessing one for an outside audience
     const link = `${appUrl()}/#/merc/${ev.id}`;
     const text = `🗡️ **Mercenaries wanted for ${ev.title}**\n<t:${ts}:F> (<t:${ts}:R>) · ${ev.type}\nLooking for: ${needLine}${note ? `\n${note}` : ''}\n\nJoin: ${link}`;
@@ -230,10 +270,19 @@ module.exports = function install(ctx) {
     const D = db(), ev = findEvent(params.id);
     need(ev, 404, 'That event could not be found. The link may be old.');
     const mine = D.members.find((m) => m.owner === user.key);
+    // Once a mercenary is placed into a party, that is the one thing they see here - their own party, not the
+    // rest of the roster. No party yet just means "still waiting" below.
+    let myParty = null;
+    if (mine && mine.mercenary && mine.mercFor === ev.id) {
+      const p = ev.parties.find((p) => p.members.includes(mine.id));
+      if (p) myParty = { name: p.name, members: p.members.map((id) => findMember(id)).filter(Boolean).map((m) => ({ name: m.name, role: m.role, leader: p.leader === m.id })) };
+    }
     return {
       event: { id: ev.id, title: ev.title, type: ev.type, start: ev.start, mercRequest: ev.mercRequest || null },
       alreadyMember: !!(mine && !mine.mercenary),
       character: mine && mine.mercenary ? mine : null,
+      joinedThisEvent: !!(mine && mine.mercenary && mine.mercFor === ev.id),
+      myParty,
     };
   }, { applicant: true });
 
