@@ -63,7 +63,21 @@ function startFakeDiscord() {
       if (req.method === 'POST' && cm && isBot) {
         const to = state.channels[cm[1]];
         if (state.failDM.has(to)) return send(403, { code: 50007, message: 'Cannot send messages to this user' });
-        state.dms.push({ to, content: JSON.parse(body).content }); return send(200, { id: String(state.dms.length) });
+        const out = { channel: cm[1], to, content: '', file: null, components: null };
+        if (/^multipart\/form-data/.test(req.headers['content-type'] || '')) {
+          // same parsing as the channel-messages multipart handler above - a DM with a picture attached (used to
+          // send a mercenary a screenshot of just their own party) goes through the exact same Discord upload
+          // shape as a normal channel post, just to a DM channel instead of a guild one.
+          const boundary = /boundary=(.+)$/.exec(req.headers['content-type'])[1], parts = raw.toString('latin1').split('--' + boundary).slice(1, -1);
+          for (const p of parts) {
+            const [head, ...rest] = p.split('\r\n\r\n'), data = rest.join('\r\n\r\n').replace(/\r\n$/, '');
+            if (/name="payload_json"/.test(head)) { const pl = JSON.parse(Buffer.from(data, 'latin1').toString('utf8')); out.content = pl.content; out.components = pl.components || null; }
+            if (/name="files\[0\]"/.test(head)) { const buf = Buffer.from(data, 'latin1'); out.file = { name: /filename="([^"]+)"/.exec(head)[1], size: buf.length, png: buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), base64: buf.toString('base64') }; }
+          }
+        } else {
+          const pl = JSON.parse(body); out.content = pl.content; out.components = pl.components || null;
+        }
+        state.dms.push(out); return send(200, { id: String(state.dms.length) });
       }
       send(404, { message: 'not found ' + req.method + ' ' + path });
     });

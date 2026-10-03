@@ -66,6 +66,9 @@ const SETTING_DEFAULTS = {
   },
   // "Get mercenaries": which channel and Discord role to ping when an officer asks for outside help for one event.
   mercenaries: { channelId: '', channelName: '', roleId: '', roleName: '' },
+  // Extra ways to become an officer, on top of DISCORD_OFFICER_ROLE_IDS / DISCORD_OFFICER_USER_IDS in .env -
+  // editable here instead of needing a server restart. Checked at sign-in, same as the .env ones.
+  officerRoleIds: [], officerUserIds: [],
   compliance: {
     enabled: true,
     windowDays: 30,         // how far back attendance is looked at
@@ -126,6 +129,25 @@ function readToken(token) {
     return u;
   } catch { return null; }
 }
+// One-tap RSVP links for reminder DMs: short, signed, no session or login needed - the token itself is the
+// proof of who it is for. Deliberately NOT a full session token (makeToken/readToken above): this is good for
+// exactly one thing, expires with sign-ups for the event, and carries no identity beyond "this Discord account,
+// this event, this answer".
+function makeRsvpToken(eventId, owner, answer, expiresAt) {
+  const body = Buffer.from(JSON.stringify({ e: eventId, o: owner, a: answer, exp: expiresAt })).toString('base64url');
+  return `${body}.${sign(body)}`;
+}
+function readRsvpToken(token) {
+  const [body, sig] = String(token || '').split('.');
+  if (!body || !sig) return null;
+  const expected = sign(body);
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const t = JSON.parse(Buffer.from(body, 'base64url').toString());
+    if (!(t.exp > Date.now())) return null;
+    return t;
+  } catch { return null; }
+}
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a)).digest();
   const hb = crypto.createHash('sha256').update(String(b)).digest();
@@ -146,6 +168,8 @@ const LEADERSHIP = config.leadershipRanks || ['Guild Master', 'Officer'];
 const DUTY_STATUSES = ['todo', 'doing', 'done'];
 const LOOT_TYPES = config.lootTypes || ['Skillcore', 'Item', 'Shard'];
 const LOOT_DEFAULT_TYPE = config.lootDefaultType || (LOOT_TYPES.includes('Item') ? 'Item' : LOOT_TYPES[0]);
+const LOOT_REASONS = config.lootReasons || [];     // how it was decided: loot council, attendance win, donation, buyout...
+const LOOT_PURPOSES = config.lootPurposes || [];   // what it is for: PvE, PvP, an alt build...
 const clean = (v, max = 200) => String(v ?? '').trim().slice(0, max);
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
@@ -581,7 +605,12 @@ function pickLoot(b, existing) {
   else need(item, 400, 'Type the item that was given out.');
   const date = String(b.date ?? existing?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
   need(/^\d{4}-\d{2}-\d{2}$/.test(date) && !isNaN(new Date(date + 'T00:00:00')), 400, 'Pick a valid date.');
-  return { memberId: m.id, item, date, type, amount };
+  // Both optional - how it was decided, and what it is for. Blank is a valid choice for either.
+  const reason = clean(b.reason ?? existing?.reason, 40);
+  need(!reason || LOOT_REASONS.includes(reason), 400, 'Pick one of the listed reasons, or leave it blank.');
+  const purpose = clean(b.purpose ?? existing?.purpose, 40);
+  need(!purpose || LOOT_PURPOSES.includes(purpose), 400, 'Pick one of the listed purposes, or leave it blank.');
+  return { memberId: m.id, item, date, type, amount, reason, purpose };
 }
 route('POST', '/api/loot', ({ body, user }) => {
   const l = { id: newId(), ...pickLoot(body), by: user.name, at: new Date().toISOString() };
@@ -782,13 +811,20 @@ async function runReminders(ev, now) {
   const number = offsets.indexOf(latest) + 1;
   const people = reminderRecipients(ev);
   const failed = [];
+  const closeMs = closeAt(ev);
   for (const r of people) {
     const text = [
       `⏰ **Reminder ${number}/${offsets.length}:** you have not answered for **${ev.title}** yet.`,
-      `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeAt(ev) / 1000)}:R>.`,
-      `Please say Going or Can't here: ${appUrl()}/#/events/${ev.id}`,
+      `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeMs / 1000)}:R>.`,
+      `Tap a button below, or open the event here: ${appUrl()}/#/events/${ev.id}`,
     ].join('\n');
-    const res = await discord.sendDM(r.id, text);
+    // One-tap buttons alongside the link, for anyone who would rather not open the site at all right now. Both
+    // point at the signed /rsvp/ page (see the request handler), which expires along with sign-ups.
+    const buttons = discord.linkButtons([
+      { label: '✅ Can come', url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'yes', closeMs)}` },
+      { label: "❌ Can't come", url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'no', closeMs)}` },
+    ]);
+    const res = await discord.sendDM(r.id, text, null, buttons);
     if (!res.ok) failed.push({ id: r.id, name: r.name, error: res.error });
   }
   ev.reminderLog.push({ number, minutesBefore: latest, at: new Date().toISOString(), sent: people.length - failed.length, failed });
@@ -931,6 +967,10 @@ http.createServer(async (req, res) => {
       const u = await discord.resolveUser(code);
       const known = db.users[u.id];
       if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
+      // Officer status can also be granted in Admin > Officers, without editing .env or restarting the server -
+      // by a specific Discord role (on top of DISCORD_OFFICER_ROLE_IDS) or a specific player directly.
+      const { officerRoleIds: xRoles, officerUserIds: xUsers } = db.settings;
+      if (u.role !== 'officer' && (xUsers.includes(u.id) || (u.roles || []).some((r) => xRoles.includes(r)))) u.role = 'officer';
       if (u.role === 'applicant' && !merc && !db.settings.applications.enabled) return fail(u.whyNot);
       db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', lastLogin: new Date().toISOString() };
       save();
@@ -938,6 +978,34 @@ http.createServer(async (req, res) => {
       res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
+  }
+
+  // A tap from the "Can come" / "Can't come" buttons on a reminder DM - no login, the token is the proof. A
+  // small standalone page, not the app shell, since the whole point is not needing to open the website.
+  if (url.pathname.startsWith('/rsvp/') && req.method === 'GET') {
+    const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const page = (title, body) => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>${title}</title><style>body{background:#0e0a0c;color:#ebe5e3;font:17px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
+      .card{max-width:420px}h1{font-size:22px;margin:0 0 10px}p{color:#a39499;margin:0 0 6px}a{color:#e7879a}</style></head>
+      <body><div class="card"><h1>${title}</h1>${body}</div></body></html>`);
+    };
+    const t = readRsvpToken(url.pathname.slice('/rsvp/'.length));
+    if (!t) { page('This link has expired', '<p>Reminder links stop working once sign-ups close for that event. Open the site to answer instead.</p>'); return; }
+    const ev = findEvent(t.e);
+    if (!ev) { page('Event not found', '<p>This event may have been deleted.</p>'); return; }
+    const m = db.members.find((x) => x.owner === t.o && x.active);
+    if (!m) { page('Character not found', '<p>We could not find your character. Open the site to answer instead.</p>'); return; }
+    if (Date.now() >= closeAt(ev)) { page('Sign-ups are closed', `<p>Sign-ups for <b>${escHtml(ev.title)}</b> already closed.</p>`); return; }
+    if (t.a === 'yes' && ev.maxSignups) {
+      const going = Object.entries(ev.rsvps).filter(([id, s]) => s === 'yes' && Number(id) !== m.id).length;
+      if (going >= ev.maxSignups) { page('This event is full', `<p><b>${escHtml(ev.title)}</b> has no open spots left. Open the site to see where you stand.</p>`); return; }
+    }
+    ev.rsvps[m.id] = t.a;
+    save();
+    page(t.a === 'yes' ? "You're marked as Going" : "You're marked as Can't come", `<p><b>${escHtml(m.name)}</b> for <b>${escHtml(ev.title)}</b>. Changed your mind? <a href="${appUrl()}/#/events/${ev.id}">Open the event</a> any time.</p>`);
+    return;
   }
   if (url.pathname === '/api/logout' && req.method === 'POST') {
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(SESSION_COOKIE, '', 0) });

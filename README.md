@@ -97,7 +97,13 @@ no dependencies: just Node 18+ and one JSON file of data.
     whether sign-in is **not activated yet** (with the time it opens), **open** (with the input and the time it closes), or **too late**. Five wrong tries lock a player
     out for that event, and officers can always mark attendance by hand, send the PIN again, or create a new one.
   - **Reminders**: players who have not answered get a Discord message at editable times before the event
-    (default 5 h and 2 h). Reminders stop when sign-ups close, and can be switched off per event.
+    (default 5 h and 2 h). Reminders stop when sign-ups close, and can be switched off per event. The message
+    includes two one-tap buttons, **Can come** / **Can't come**, for anyone who would rather not open the site
+    right now - tapping one answers immediately and shows a small "got it" confirmation, no sign-in needed. These
+    are Discord link buttons: tapping one just opens a page, the same as tapping a normal link, so they work with
+    nothing more than what this bot already does (no Gateway connection, no public interactions endpoint, neither
+    of which this project asks a self-hosted server to run). Each button stops working once sign-ups close for
+    that event, same as the reminder itself.
 - **Going chart**: every event shows how many are going, not going and have not answered, per role (Tank, Healer, DPS), as bars or as rings.
   People on leave are shown separately instead of as "no reply".
 - **Hidden presets**: the leadership can hide a party preset from normal members. The "use for several events" panel on the Parties page is a
@@ -212,13 +218,23 @@ Good to know:
   either a plain headcount or specific roles and classes with how many of each, plus an optional note. It posts in that channel,
   @-mentions the role, and includes a link. Whoever clicks it signs in with Discord (this works even with general guild applications
   switched off - asking for one-event help is treated separately from applying) and fills in a short character of their own. They are
-  never a guild member: they never appear on the Member page, in attendance, loot or anywhere else that normal characters do, and the
-  leadership is never asked to approve anything about them. The only place they show up is the party board of the event they joined,
-  marked "Merc", there for an officer to drag into a party like anyone else. If they help again for a different event, signing in
-  again finds the same character rather than starting over - an officer removes it whenever it is no longer needed, nothing expires
-  on its own. One current limitation: if someone already has a real guild character under the same Discord account, they cannot also
-  sign up as a mercenary with it (the one-character rule applies here too) - if a mercenary later becomes a full member, an officer
-  should remove their mercenary character first.
+  never a guild member: they never mix into the Member page, attendance, loot or anywhere else that normal characters do, and the
+  leadership is never asked to approve anything about them. They show up in the party board of the event they joined, marked "Merc",
+  there for an officer to drag into a party like anyone else, and in a separate "Mercenaries" dropdown at the bottom of the Member
+  page for officers to review or edit. If they help again for a different event, signing in again finds the same character rather
+  than starting over - an officer removes it whenever it is no longer needed, nothing expires on its own. One current limitation: if
+  someone already has a real guild character under the same Discord account, they cannot also sign up as a mercenary with it (the
+  one-character rule applies here too) - if a mercenary later becomes a full member, an officer should remove their mercenary
+  character first.
+  After signing up, a mercenary lands on a simple waiting-hall page instead of the roster: just their own status, and once an
+  officer places them into a party, just that one party - not anyone else's. When parties are posted to Discord, every mercenary
+  already placed into a party also gets a DM with a picture of just their own party, automatically.
+- **Extra officers from Admin, not only .env**: Admin > Officers can grant officer status to a Discord role or to specific players,
+  on top of whatever DISCORD_OFFICER_ROLE_IDS / DISCORD_OFFICER_USER_IDS already say in .env - no restart needed. Like any other
+  sign-in detail, it takes effect the next time that person signs in, not to an already-open session.
+- **Loot remembers item names**: typing an item or skillcore name once in the Loot page makes it selectable from then on when adding
+  or editing an entry, instead of having to type the exact same name again. It is drawn from your own past entries, not an outside
+  catalog, so it only ever lists names your guild has actually used.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the
   officer tools at their next sign-in.
 - If a message cannot be delivered (DMs closed) the event page shows who did not get it.

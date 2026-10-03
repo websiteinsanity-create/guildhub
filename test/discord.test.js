@@ -213,6 +213,27 @@ test('reminders go only to players who have not answered, at the editable times'
   assert.equal(log.length, 1); assert.equal(log[0].number, 1);
   assert.equal((await state('B')).events.find((e) => e.id === in3h.id).reminderLog, undefined);
 
+  // the reminder also carries two one-tap buttons, each a direct link (no interaction sent to the bot at all -
+  // see linkButtons() in discord.js) to a signed /rsvp/ page that needs no login
+  const dmB = threeH.find((d) => d.to === B);
+  assert.equal(dmB.components.length, 1, 'one action row');
+  const [goBtn, noBtn] = dmB.components[0].components;
+  assert.equal(goBtn.style, 5, 'a LINK-style button, not one that would need an interactions endpoint');
+  assert.match(goBtn.label, /Can come/); assert.match(noBtn.label, /Can't come/);
+  assert.match(goBtn.url, /\/rsvp\//); assert.match(noBtn.url, /\/rsvp\//);
+
+  const r1 = await fetch(goBtn.url);
+  assert.equal(r1.status, 200);
+  const html1 = await r1.text();
+  assert.match(html1, /marked as Going/);
+  assert.equal((await state('A')).events.find((e) => e.id === in3h.id).rsvps[lead.id], 'yes', 'actually recorded, no login involved at all');
+
+  const badToken = await fetch(goBtn.url.slice(0, -3) + 'xyz');
+  assert.equal((await badToken.text()).includes('expired'), true, 'a tampered token is rejected, not silently accepted');
+
+  const closedBtn = (await fetch(`${base}/rsvp/doesnotexist`));
+  assert.match(await closedBtn.text(), /expired/);
+
   // moving the event restarts its reminders; switching them off globally stops everything
   assert.equal((await call('/api/settings', 'PUT', { remindersEnabled: false }, 'A')).status, 200);
   const later = (await call('/api/events', 'POST', { title: 'Reminder test disabled', type: 'Other', start: inMinutes(180) }, 'A')).body;
@@ -440,4 +461,29 @@ test('switching on "delete previous announcement" removes the last one when post
   assert.deepEqual(seenAfterManualDelete.deletedPrevious, { ok: true, error: '' }, 'an already-missing message counts as successfully cleaned up');
 
   await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: false } }, 'A');
+});
+
+// ---------------------------------------------------------------- extra officers granted in Admin, not .env
+test('a Discord role or a specific player can be granted officer status from Admin, on top of .env, taking effect on their next sign-in', async () => {
+  const ADVISOR_ROLE = '900000000000000055', OTHER_PLAYER = '100000000000000061';
+  sessions.plain = (await discordLogin(OTHER_PLAYER, [ADVISOR_ROLE])).cookie;
+  assert.equal((await state('plain')).user.role, 'member', 'an unrecognised role is just a regular member so far');
+
+  assert.equal((await call('/api/admin/officers', 'PUT', { roleIds: [ADVISOR_ROLE] }, 'plain')).status, 403, 'members cannot grant officer status themselves');
+  await call('/api/admin/officers', 'PUT', { roleIds: [ADVISOR_ROLE] }, 'A');
+
+  assert.equal((await state('plain')).user.role, 'member', 'their current 7-day session is unaffected until they sign in again');
+
+  sessions.plain2 = (await discordLogin(OTHER_PLAYER, [ADVISOR_ROLE])).cookie;
+  assert.equal((await state('plain2')).user.role, 'officer', 'the advisor role now grants officer, from the next sign-in onward');
+
+  // a specific player, regardless of role
+  const NO_ROLE_AT_ALL = '100000000000000062';
+  sessions.norole = (await discordLogin(NO_ROLE_AT_ALL, [])).cookie;
+  assert.equal((await state('norole')).user.role, 'member');
+  await call('/api/admin/officers', 'PUT', { userIds: [NO_ROLE_AT_ALL] }, 'A');
+  sessions.norole2 = (await discordLogin(NO_ROLE_AT_ALL, [])).cookie;
+  assert.equal((await state('norole2')).user.role, 'officer', 'a specific player can be made an officer even with no special role at all');
+
+  await call('/api/admin/officers', 'PUT', { roleIds: [], userIds: [] }, 'A');
 });
