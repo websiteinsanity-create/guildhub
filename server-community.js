@@ -76,9 +76,14 @@ module.exports = function install(ctx) {
   // What an applicant is allowed to see: nothing but their own application.
   function applicantState(user) {
     const D = db();
+    // A mercenary is still an "applicant" as far as sign-in is concerned (not a guild member), so the nav needs
+    // this to offer a link to their own mercenary page alongside the application link - otherwise someone who
+    // only ever came to help for one event has no way back to it once they navigate anywhere else.
+    const merc = D.members.find((m) => m.owner === user.key && m.mercenary);
     return {
       user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: 'applicant' },
       application: latestFor(user.key),
+      mercEventId: merc ? merc.mercFor : null,
       members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], requests: [], changes: [], profiles: {}, series: [],
       infoBoard: { title: 'Info', categories: [] }, notices: [], leaves: [], warnings: [], explanations: [], alert: null, tags: [], playerTags: {}, prefs: {}, users: [],
       settings: { branding: D.settings.branding, hiddenSections: [], approvals: {}, compliance: {}, applications: { enabled: D.settings.applications.enabled, intro: D.settings.applications.intro } },
@@ -256,7 +261,10 @@ module.exports = function install(ctx) {
     const ts = Math.floor(new Date(ev.start).getTime() / 1000);                 // Discord's own <t:...> tag shows this in each reader's own time zone - better than guessing one for an outside audience
     const link = `${appUrl()}/#/merc/${ev.id}`;
     const text = `🗡️ **Mercenaries wanted for ${ev.title}**\n<t:${ts}:F> (<t:${ts}:R>) · ${ev.type}\nLooking for: ${needLine}${note ? `\n${note}` : ''}\n\nJoin: ${link}`;
-    const r = await discord.postMessage(st.channelId, { content: text, mentionRoleIds: [st.roleId] });
+    // A Join button alongside the plain link - same reasoning as the reminder DMs: it just opens the page like
+    // the text link already does, so it needs nothing beyond what this bot already does (see linkButtons() in
+    // discord.js for why that matters for a bot with no Gateway connection or public interactions endpoint).
+    const r = await discord.postMessage(st.channelId, { content: text, mentionRoleIds: [st.roleId], components: discord.linkButtons([{ label: '🗡️ Join as a mercenary', url: link }]) });
     ev.mercRequest = { at: now(), by: user.name, overall, needs, note, ok: !!r.ok, error: r.error || '' };
     audit(user, 'mercenaries.request', { type: 'event', id: ev.id, name: ev.title }, `${user.name} asked for mercenaries for "${ev.title}": ${needLine}.`);
     save();

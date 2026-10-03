@@ -81,7 +81,7 @@ FORMS.series = (f, fd, id) => {
 };
 
 /* ================= player profile: about me, characters, builds ================= */
-const FIELD_LABEL = { name: 'Name', role: 'Role', primaryWeapon: 'Primary weapon', secondaryWeapon: 'Secondary weapon', mode: 'Mode', gearScore: 'Gear score', level: 'Level', specialization: 'Specialization', questlogs: 'Questlog links', discord: 'Discord', timezone: 'Time zone', notes: 'Notes', bio: 'Note', availability: 'Availability' };
+const FIELD_LABEL = { name: 'Name', role: 'Role', primaryWeapon: 'Primary weapon', secondaryWeapon: 'Secondary weapon', mode: 'Mode', gearScore: 'Gear score', level: 'Watermark', specialization: 'Specialization', questlogs: 'Questlog links', discord: 'Discord', timezone: 'Time zone', notes: 'Notes', bio: 'Note', availability: 'Availability' };
 const fmtVal = (v) => (Array.isArray(v) ? (v.length ? v.map((x) => (x && x.url ? x.url : x)).map(esc).join(', ') : '(none)') : v === '' || v == null ? '(empty)' : esc(String(v)));
 
 function changeSummary(c) {
@@ -157,7 +157,7 @@ function charCard(m) {
   const canChange = canEdit(m);
   return `<div class="panel char-card ${m.active ? '' : 'dim'}">
     <div class="ev-title"><div><h3 style="margin:0">${esc(m.name)} ${roleChip(m.role)}${m.pendingApproval ? ' <span class="type-pill">waiting for approval</span>' : m.active ? '' : ' <span class="type-pill">inactive</span>'}</h3>
-        <div class="muted small">${esc(m.rank)} · ${esc(m.mode || 'PvE')} · Gear score ${m.gearScore || '-'} · Level ${m.level || '-'}</div></div>
+        <div class="muted small">${esc(m.rank)} · ${esc(m.mode || 'PvE')} · Gear score ${m.gearScore || '-'} · Watermark ${m.level || '-'}</div></div>
       ${canChange ? `<span class="seg"><button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button>${(m.builds || []).length < 6 ? `<button class="btn sm" data-act="build-new" data-m="${m.id}">Add build</button>` : ''}</span>` : ''}</div>
     <div style="margin-top:8px">${weaponLine(m)}</div>
     <div class="small" style="margin-top:6px"><span class="muted">Questlog:</span> ${questlogLinks(m, ' · ')}</div>
@@ -295,7 +295,7 @@ VIEWS.approvals = () => {
   ${apps.length ? `<h3 class="sec">Applications to join the guild</h3>${apps.map((a) => `<div class="panel"><div class="ev-title"><div style="min-width:0">
       <div class="muted small">${avatarImg({ id: a.userKey, avatar: a.avatar })} ${esc(a.name)}${a.username ? ` (${esc(a.username)})` : ''} · ${fmtShort(a.at)}</div>
       <b>${esc(a.character.name)}</b> ${roleChip(a.character.role)} <span class="muted">${esc(classFor(a.character.primaryWeapon, a.character.secondaryWeapon) || [a.character.primaryWeapon, a.character.secondaryWeapon].filter(Boolean).join(' / ') || 'no weapons given')}${a.character.specialization ? ' | ' + esc(a.character.specialization) : ''}</span>
-      <div class="small muted">Gear score ${a.character.gearScore || '-'} · Level ${a.character.level || '-'}${(a.character.questlogs || []).length ? ' · ' + questlogLinks(a.character, ' · ') : ''}</div>
+      <div class="small muted">Gear score ${a.character.gearScore || '-'} · Watermark ${a.character.level || '-'}${(a.character.questlogs || []).length ? ' · ' + questlogLinks(a.character, ' · ') : ''}</div>
       <div style="white-space:pre-wrap;margin-top:6px">${esc(a.about)}</div></div>
       <span class="seg"><button class="btn sm primary" data-act="app-decide" data-id="${a.id}" data-d="accept">Accept</button><button class="btn sm danger" data-act="app-decide" data-id="${a.id}" data-d="reject">Reject</button></span></div></div>`).join('')}` : ''}
   ${reasons.length ? `<h3 class="sec">Reasons for missed events</h3>${reasons.map((x) => `<div class="panel"><div class="ev-title"><div><div class="muted small">${esc(x.name)} · ${fmtShort(x.at)}</div>
@@ -813,6 +813,7 @@ function complianceAdmin() {
   return `<div class="panel"><h3>Attendance rules, warnings and disqualification</h3>
     <div class="muted small" style="margin:-6px 0 10px"><b>Put 0 in any limit below to switch it off.</b> The leadership itself is never judged by any of this.</div>
     <form data-form="compliance" class="rules-stack">
+      ${num('cp-fa', 'finalAfterMinutes', 'Count an event\'s attendance after (minutes)', 5, 1440, 'How long after an event starts its attendance is treated as final and counted for warnings and the attendance percentage. The PIN entry window itself is a separate setting below and is not affected by this.')}
       ${num('cp-w', 'windowDays', 'Attendance window (days)', 7, 365, 'How far back to look when counting no-shows, unanswered events, and the attendance percentage below. Anything older than this does not count.')}
       ${num('cp-ns', 'noShowLimit', 'No-shows that trigger a warning', 0, 50, 'A no-show is saying Going and then not showing up. Once a player reaches this many within the window above, they get the pop-up and an automatic warning.')}
       ${num('cp-nr', 'noReplyLimit', 'Unanswered events that trigger a warning', 0, 50, "Counts events where a player never answered Going or Can't. Once they reach this many within the window above, they get the pop-up and an automatic warning.")}
@@ -860,7 +861,7 @@ VIEWS.apply = () => {
         <div class="field"><label for="ap-s">Secondary weapon</label><select id="ap-s" name="secondaryWeapon">${opts(S.cfg.weapons, '', 'None')}</select></div></div>
       <div class="muted small" id="class-preview" style="margin:-4px 0 10px">Class: pick two different weapons</div>
       <div class="row"><div class="field"><label for="ap-g">Gear score</label><input id="ap-g" name="gearScore" type="number" min="0"></div>
-        <div class="field"><label for="ap-l">Level</label><input id="ap-l" name="level" type="number" min="0" max="99"></div></div>
+        <div class="field"><label for="ap-l">Watermark</label><input id="ap-l" name="level" type="number" min="0" max="99"></div></div>
       <div class="field"><label for="ap-q">Questlog link (optional)</label><input id="ap-q" name="questlog" type="url" maxlength="300" placeholder="https://..."></div>
       <div class="field"><label for="ap-a">About you</label><textarea id="ap-a" name="about" required minlength="10" maxlength="1000" style="min-height:130px" placeholder="Who you are, what you play, how much time you have, why our guild"></textarea></div>
       <button class="btn primary">Send application</button></form></div>`;
@@ -912,7 +913,7 @@ VIEWS.merc = (id) => {
       <div class="muted small" id="class-preview" style="margin:-4px 0 10px">${esc(classPreviewText(m.primaryWeapon, m.secondaryWeapon))}</div>
       <div class="field"><label>Specialization (optional)</label><input name="specialization" value="${esc(m.specialization || '')}" maxlength="40"></div>
       <div class="row"><div class="field"><label>Gear score</label><input name="gearScore" type="number" min="0" value="${m.gearScore || ''}"></div>
-        <div class="field"><label>Level</label><input name="level" type="number" min="0" max="99" value="${m.level || ''}"></div></div>
+        <div class="field"><label>Watermark</label><input name="level" type="number" min="0" max="99" value="${m.level || ''}"></div></div>
       <div class="link-row">${info.joinedThisEvent ? '<button type="button" class="btn" data-act="merc-edit-toggle">Cancel</button>' : ''}<button class="btn primary">${info.character ? 'Confirm and join' : 'Join this event'}</button></div>
     </form>
   </div>`;

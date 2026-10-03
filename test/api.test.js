@@ -57,7 +57,7 @@ withServer('members cannot use officer routes', async ({ call, member, officer }
 withServer('players can only edit their own characters; ranks are officer-only', async ({ call, member, other, officer }) => {
   const c = (await call('/api/members', 'POST', { name: 'Tanky', role: 'Tank' }, member)).body;
   assert.equal((await call('/api/members/' + c.id, 'PUT', { name: 'Hax' }, other)).status, 403);
-  assert.equal((await call('/api/members/' + c.id, 'PUT', { name: 'Tanky', role: 'Tank', rank: 'Officer' }, member)).body.rank, 'Recruit');
+  assert.equal((await call('/api/members/' + c.id, 'PUT', { name: 'Tanky', role: 'Tank', rank: 'Officer' }, member)).body.rank, 'Member');
   assert.equal((await call('/api/members/' + c.id, 'PUT', { name: 'Tanky', role: 'Tank', rank: 'Officer' }, officer)).body.rank, 'Officer');
 });
 
@@ -209,6 +209,27 @@ withServer('loot entries can optionally record why it was given and what it is f
   assert.equal(edited.reason, 'Buyout'); assert.equal(edited.purpose, 'Alt build');
   const clearedAgain = (await call('/api/loot/' + full.id, 'PUT', { reason: '', purpose: '' }, officer)).body;
   assert.equal(clearedAgain.reason, ''); assert.equal(clearedAgain.purpose, '', 'can be cleared back to blank');
+});
+
+withServer('an officer can confirm, and un-confirm, proof of use for a loot entry', async ({ call, member, officer }) => {
+  const m = (await call('/api/members', 'POST', { name: 'Proofy', role: 'Healer' }, member)).body;
+  const l = (await call('/api/loot', 'POST', { memberId: m.id, item: 'Legendary Bow' }, officer)).body;
+  assert.equal(l.proofConfirmed, undefined, 'not confirmed by default');
+
+  assert.equal((await call(`/api/loot/${l.id}/proof`, 'PUT', { confirmed: true }, member)).status, 403, 'members cannot confirm this themselves');
+
+  const on = (await call(`/api/loot/${l.id}/proof`, 'PUT', { confirmed: true }, officer)).body;
+  assert.equal(on.proofConfirmed, true);
+  assert.equal(on.proofConfirmedBy, 'Boss');
+  assert.ok(on.proofConfirmedAt);
+
+  const a = (await call('/api/admin/audit', 'GET', null, officer)).body;
+  assert.ok(a.entries.some((e) => e.action === 'loot.proof' && /confirmed proof of use for "Legendary Bow"/.test(e.description)));
+
+  const off = (await call(`/api/loot/${l.id}/proof`, 'PUT', { confirmed: false }, officer)).body;
+  assert.equal(off.proofConfirmed, false);
+  assert.equal(off.proofConfirmedBy, null);
+  assert.equal(off.proofConfirmedAt, null);
 });
 
 withServer('a party preset can be tied to an event type, for upcoming and future events', async ({ call, member, officer }) => {

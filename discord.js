@@ -134,14 +134,14 @@ function createDiscord(env = process.env) {
   // mentionRoleIds (optional): Discord role ids to @-mention, using Discord's own mention syntax <@&id>.
   // allowed_mentions explicitly whitelists only those role ids, so free-typed text (the announcement text field,
   // an event title) can never accidentally ping @everyone/@here or an unrelated role/user.
-  async function postMessage(channelId, { content, file, mentionRoleIds }) {
+  async function postMessage(channelId, { content, file, mentionRoleIds, components }) {
     if (!botEnabled) return { ok: false, dry: true, error: 'No bot token set (DISCORD_BOT_TOKEN), so nothing was sent.' };
     if (!isSnowflake(channelId)) return { ok: false, error: 'Pick a channel first.' };
     const roles = (mentionRoleIds || []).filter(isSnowflake);
     const full = roles.length ? `${roles.map((id) => `<@&${id}>`).join(' ')}\n${content}` : content;
     for (let attempt = 0; attempt < 2; attempt++) {
       const fd = new FormData();
-      fd.append('payload_json', JSON.stringify({ content: full, allowed_mentions: { parse: [], roles }, ...(file ? { attachments: [{ id: 0, filename: file.name }] } : {}) }));
+      fd.append('payload_json', JSON.stringify({ content: full, allowed_mentions: { parse: [], roles }, ...(file ? { attachments: [{ id: 0, filename: file.name }] } : {}), ...(components ? { components } : {}) }));
       if (file) fd.append('files[0]', new Blob([file.buffer], { type: file.type || 'application/octet-stream' }), file.name);
       const res = await fetch(`${cfg.apiBase}/channels/${channelId}/messages`, { method: 'POST', headers: { Authorization: 'Bot ' + cfg.botToken, 'User-Agent': 'DiscordBot (guild-hall, 1.0)' }, body: fd, signal: AbortSignal.timeout(20000) });
       const data = await res.json().catch(() => ({}));

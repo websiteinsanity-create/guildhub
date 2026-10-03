@@ -301,7 +301,7 @@ test('an application: needs a character and a few words, one at a time; the lead
   const now = await state('X');
   assert.equal(now.user.role, 'member');
   const mine = now.members.filter((m) => m.owner === OUTSIDER);
-  assert.deepEqual(mine.map((m) => [m.name, m.role, m.rank, m.primaryWeapon, m.active]), [['Newbie', 'Healer', 'Recruit', 'Wand & Tome', true]], 'the character is on the roster');
+  assert.deepEqual(mine.map((m) => [m.name, m.role, m.rank, m.primaryWeapon, m.active]), [['Newbie', 'Healer', 'Member', 'Wand & Tome', true]], 'the character is on the roster');
   assert.equal((await call('/api/applications/' + a.id, 'PUT', { decision: 'reject' }, 'A')).status, 409);
   assert.ok((await state('B')).users.some((u) => u.id === OUTSIDER), 'and they are a player now');
   assert.equal(fake.state.roleAdds.length, 0, 'no member role is configured, so no role is given');

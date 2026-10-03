@@ -71,6 +71,8 @@ const SETTING_DEFAULTS = {
   officerRoleIds: [], officerUserIds: [],
   compliance: {
     enabled: true,
+    finalAfterMinutes: 60,  // an event's attendance (and no-shows) is only judged once this long after it started,
+                             // not as soon as one single person checks in - the PIN window itself is unaffected
     windowDays: 30,         // how far back attendance is looked at
     mandatoryOnly: true,    // only mandatory events count
     minEvents: 3,           // fewer events than this: no judgement on the attendance percentage
@@ -168,6 +170,7 @@ const LEADERSHIP = config.leadershipRanks || ['Guild Master', 'Officer'];
 const DUTY_STATUSES = ['todo', 'doing', 'done'];
 const LOOT_TYPES = config.lootTypes || ['Skillcore', 'Item', 'Shard'];
 const LOOT_DEFAULT_TYPE = config.lootDefaultType || (LOOT_TYPES.includes('Item') ? 'Item' : LOOT_TYPES[0]);
+const DEFAULT_RANK = config.ranks.includes(config.defaultRank) ? config.defaultRank : config.ranks[config.ranks.length - 1];   // the rank a new character gets until an officer changes it
 const LOOT_REASONS = config.lootReasons || [];     // how it was decided: loot council, attendance win, donation, buyout...
 const LOOT_PURPOSES = config.lootPurposes || [];   // what it is for: PvE, PvP, an alt build...
 const clean = (v, max = 200) => String(v ?? '').trim().slice(0, max);
@@ -295,7 +298,7 @@ function pickMember(b, existing) {
   };
   need(out.name.length >= 2, 400, 'Character name is required (2+ characters).');
   // Only officers may change ranks.
-  out.rank = m.rank || ranks[ranks.length - 1];
+  out.rank = m.rank || DEFAULT_RANK;
   return out;
 }
 
@@ -623,6 +626,19 @@ route('PUT', '/api/loot/:id', ({ body, params }) => {
   need(l, 404, 'Entry not found.');
   Object.assign(l, pickLoot(body, l));
   save();
+  return l;
+}, { officer: true });
+route('PUT', '/api/loot/:id/proof', ({ body, user, params }) => {
+  const l = findLoot(params.id);
+  need(l, 404, 'Entry not found.');
+  const want = !!body.confirmed;
+  if (want === !!l.proofConfirmed) return l;   // no-op, nothing to log
+  l.proofConfirmed = want;
+  l.proofConfirmedBy = want ? user.name : null;
+  l.proofConfirmedAt = want ? new Date().toISOString() : null;
+  save();
+  const owner = findMember(l.memberId);
+  audit.log(user, 'loot.proof', { type: 'loot', id: l.id, name: l.item || l.type }, `${user.name} ${want ? 'confirmed' : 'removed the confirmation of'} proof of use for "${l.item || l.type}" given to ${owner ? owner.name : '(removed)'}.`);
   return l;
 }, { officer: true });
 route('DELETE', '/api/loot/:id', ({ params }) => {

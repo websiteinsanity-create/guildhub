@@ -216,6 +216,7 @@ function route() { const [, page = 'dashboard', id] = location.hash.split('/'); 
 // hide = the name of a section the leadership can hide from normal members (Admin)
 const NAV = [
   { key: 'apply', label: () => 'My application' },
+  { key: 'merc', label: () => 'My mercenary signup' },
   { key: 'dashboard', label: () => 'Dashboard' },
   { key: 'member', label: () => 'Member', hide: 'member' },
   { key: 'loot', label: () => 'Loot', hide: 'loot' },
@@ -232,7 +233,7 @@ const NAV = [
 ];
 const hiddenFromMembers = (key) => (S.settings.hiddenSections || []).includes(key);
 function canSee(page) {
-  if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc';       // not accepted: only the application, or a mercenary signup link they followed
+  if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc';       // not accepted: only the application, or a mercenary signup link they followed - canSee allows reaching it even before S.mercEventId exists (their very first visit, before they have signed up at all); the nav link itself is shown separately, only once they actually are a mercenary
   if (page === 'apply') return false;
   const n = NAV.find((x) => x.key === page);
   if (!n) return page === 'roster';
@@ -240,9 +241,12 @@ function canSee(page) {
   return isOfficer() || !(n.hide && hiddenFromMembers(n.hide));
 }
 function renderNav(page) {
-  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key)).map((n) => {
+  // "merc" is the one nav entry that needs an id in its link (which event) - shown at all only once someone
+  // actually is a mercenary (S.mercEventId set by applicantState() server-side), not to every applicant.
+  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key) && (n.key !== 'merc' || S.mercEventId)).map((n) => {
     const b = n.badge ? n.badge() : 0;
-    return `<a class="nav ${n.key === page ? 'active' : ''} ${n.gap ? 'gap' : ''}" href="#/${n.key}" data-nav="${n.key}">${esc(n.label())}${b ? `<span class="count">${b}</span>` : ''}</a>`;
+    const href = n.key === 'merc' ? `#/merc/${S.mercEventId}` : `#/${n.key}`;
+    return `<a class="nav ${n.key === page ? 'active' : ''} ${n.gap ? 'gap' : ''}" href="${href}" data-nav="${n.key}">${esc(n.label())}${b ? `<span class="count">${b}</span>` : ''}</a>`;
   }).join('');
 }
 function render() {
@@ -458,7 +462,7 @@ function viewRoster() {
     <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ui="rosterInactive" ${UI.rosterInactive ? 'checked' : ''}> Show inactive</label>
   </div>
   ${list.length ? `<div class="tbl-wrap"><table>
-    <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th class="num">Gear score</th><th class="num">Lvl</th><th>Rank</th><th>Discord</th>${isOfficer() ? '<th>Standing</th><th>Tags</th>' : ''}<th></th></tr></thead>
+    <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th class="num">Gear score</th><th class="num">Watermark</th><th>Rank</th><th>Discord</th>${isOfficer() ? '<th>Standing</th><th>Tags</th>' : ''}<th></th></tr></thead>
     <tbody>${list.map((m) => { const wn = isOfficer() ? activeWarn(m.owner) : [], onLeave = isOfficer() && onLeaveAt(m.owner, Date.now()), a = isOfficer() && m.active ? attendanceStats(m.id) : null; return `<tr class="${m.active ? '' : 'dim'}">
       <td><b>${esc(m.name)}</b>${m.owner === S.user.key ? '<span class="you">yours</span>' : ''}${onLeave ? '<span class="type-pill" style="margin-left:6px">On leave</span>' : ''}<div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div>${isOfficer() && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m, '<br>')}</div></details>` : ''}</td>
       <td>${roleChip(m.role)}</td><td class="wpn">${weaponLine(m)}${(m.builds || []).length ? `<div class="muted small">Also: ${m.builds.map((b) => esc(buildLabel(b))).join(' · ')}</div>` : ''}${m.mode && m.mode !== 'PvE' ? `<span class="type-pill" style="margin-left:6px">${esc(m.mode)}</span>` : ''}</td>
@@ -513,7 +517,7 @@ function memberDialog(m) {
     <div class="field"><label>Specialization (type anything, for example Endurance)</label><input name="specialization" value="${esc(m.specialization || '')}" maxlength="40"></div>
     <div class="row">
       <div class="field"><label>Gear score</label><input name="gearScore" type="number" min="0" value="${m.gearScore}"></div>
-      <div class="field"><label>Level</label><input name="level" type="number" min="0" max="99" value="${m.level}"></div>
+      <div class="field"><label>Watermark</label><input name="level" type="number" min="0" max="99" value="${m.level}"></div>
     </div>
     <div class="row">
       <div class="field"><label>Discord</label><input name="discord" value="${esc(m.discord)}"></div>
@@ -816,11 +820,15 @@ function board(ctx, parties, ev) {
   // attendance, all of it already filter on active) but they still need to appear here, in the one place they
   // are relevant: the pool for the specific event they signed up to help with.
   const mercs = ev ? S.members.filter((m) => m.mercenary && m.mercFor === ev.id) : [];
-  const active = S.members.filter((m) => m.active).concat(mercs);
-  const rank = (m) => (ev ? (ev.rsvps[m.id] === 'yes' ? 0 : 1) : 0);
+  // The pool only ever shows people who actually said Going (plus mercenaries, who join a different way) - not
+  // everyone active. An officer can still place someone who never answered; that just means setting their RSVP
+  // to Going first (on the Attendance or Events page), rather than dragging them in from here regardless of
+  // their answer. Presets have no event at all, so there is no RSVP to filter by - every active member stays
+  // available there, same as always.
+  const active = (ev ? S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes') : S.members.filter((m) => m.active)).concat(mercs);
   const pools = S.cfg.roles.map((r) => {
     const all = active.filter((m) => m.role === r);
-    const free = all.filter((m) => !used.has(m.id)).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+    const free = all.filter((m) => !used.has(m.id)).sort((a, b) => a.name.localeCompare(b.name));
     return `<div class="pool" style="--c:${roleColor(r)}"><div class="pool-head"><span>${esc(r)}</span><span>${free.length}/${all.length}</span></div>
       <div class="pool-list">${free.map((m) => memberRow(m, `data-kind="${ctx.kind}" data-owner="${ctx.id}"`, { from: 'pool', parties, ev })).join('') || '<div class="pempty">Everyone is placed</div>'}</div></div>`;
   }).join('');
@@ -1085,7 +1093,7 @@ function viewLoot() {
     <thead><tr><th>Given out</th><th>Player</th><th>Type</th><th>Item</th><th></th></tr></thead>
     <tbody>${list.map((l) => { const m = byId(S.members, l.memberId); return `<tr>
       <td class="nowrap">${fmtLootDate(l.date)}</td><td><b>${esc(nameOf(l.memberId))}</b> ${m ? roleChip(m.role) : ''}</td><td><span class="type-pill t-${esc(l.type)}">${esc(l.type || 'Item')}</span></td><td>${l.type === 'Lucent' ? `<b>${Number(l.amount).toLocaleString()}</b> Lucent` : esc(l.item)}${l.fromRequest ? ' <span class="muted small">(from a request)</span>' : ''}${l.reason || l.purpose ? `<div class="muted small">${[l.reason, l.purpose].filter(Boolean).join(' · ')}</div>` : ''}</td>
-      <td>${off ? `<button class="btn sm" data-act="loot-edit" data-id="${l.id}">Edit</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+      <td>${off ? `<span class="seg">${l.proofConfirmed ? `<button class="btn sm" data-act="loot-proof" data-id="${l.id}" data-on="0" style="color:#7cc4b8;border-color:#7cc4b8" title="Confirmed by ${esc(l.proofConfirmedBy || '')}, ${l.proofConfirmedAt ? fmtShort(l.proofConfirmedAt) : ''} - click to undo">✓ Proof confirmed</button>` : `<button class="btn sm" data-act="loot-proof" data-id="${l.id}" data-on="1">Confirm proof of use</button>`}<button class="btn sm" data-act="loot-edit" data-id="${l.id}">Edit</button></span>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">${S.loot.length ? 'Nothing matches your search.' : 'No loot has been given out yet.' + (off ? ' Use the form above to add the first entry.' : '')}</div>`}`;
 }
 
@@ -1282,6 +1290,7 @@ document.addEventListener('click', async (e) => {
   else if (a === 'test-dm') act(async () => { const r = await api('/api/admin/test-dm', 'POST', {}); if (!r.ok) throw new Error(r.error || 'The message could not be sent.'); toast('Test message sent. Check your Discord messages.'); });
   else if (a === 'link-owner') act(async () => { const r = await api('/api/admin/link-owner', 'POST', { from: d.from, to: $('#lk-' + d.i).value }); toast(`${r.moved} characters linked`); });
   else if (a === 'pin-send') act(() => api(`/api/events/${d.id}/pin/send`, 'POST', { mode: d.mode }), d.mode === 'new' ? 'New PIN created and sent' : 'PIN sent');
+  else if (a === 'loot-proof') act(() => api(`/api/loot/${d.id}/proof`, 'PUT', { confirmed: d.on === '1' }), d.on === '1' ? 'Proof of use confirmed' : 'Confirmation removed');
   else if (a === 'loot-edit') lootDialog(byId(S.loot, d.id));
   else if (a === 'loot-delete') { if (confirm('Delete this loot entry?')) act(async () => { await api('/api/loot/' + d.id, 'DELETE'); closeDialog(); }, 'Entry deleted'); }
   else if (a === 'm-leader') mutateParties(el, (ps, i) => { ps[i].leader = ps[i].leader === Number(d.m) ? null : Number(d.m); });

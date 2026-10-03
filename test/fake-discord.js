@@ -40,10 +40,10 @@ function startFakeDiscord() {
         if (!state.channelList.some((c) => c.id === pm[1])) return send(404, { code: 10003, message: 'Unknown Channel' });
         if (state.denyChannels.has(pm[1])) return send(403, { code: 50013, message: 'Missing Permissions' });
         const boundary = /boundary=(.+)$/.exec(req.headers['content-type'])[1], parts = raw.toString('latin1').split('--' + boundary).slice(1, -1);
-        const out = { channel: pm[1], content: '', file: null, mentions: [], deleted: false, id: '900000000000' + String(state.posts.length + 1).padStart(6, '0') };   // a realistic snowflake-shaped id (15+ digits), not just "1", "2", ... - real code validates the shape
+        const out = { channel: pm[1], content: '', file: null, mentions: [], deleted: false, components: null, id: '900000000000' + String(state.posts.length + 1).padStart(6, '0') };   // a realistic snowflake-shaped id (15+ digits), not just "1", "2", ... - real code validates the shape
         for (const p of parts) {
           const [head, ...rest] = p.split('\r\n\r\n'), data = rest.join('\r\n\r\n').replace(/\r\n$/, '');
-          if (/name="payload_json"/.test(head)) { const pl = JSON.parse(Buffer.from(data, 'latin1').toString('utf8')); out.content = pl.content; out.mentions = (pl.allowed_mentions && pl.allowed_mentions.roles) || []; out.parseAll = !!(pl.allowed_mentions && pl.allowed_mentions.parse && pl.allowed_mentions.parse.length); }
+          if (/name="payload_json"/.test(head)) { const pl = JSON.parse(Buffer.from(data, 'latin1').toString('utf8')); out.content = pl.content; out.mentions = (pl.allowed_mentions && pl.allowed_mentions.roles) || []; out.parseAll = !!(pl.allowed_mentions && pl.allowed_mentions.parse && pl.allowed_mentions.parse.length); out.components = pl.components || null; }
           if (/name="files\[0\]"/.test(head)) { const buf = Buffer.from(data, 'latin1'); out.file = { name: /filename="([^"]+)"/.exec(head)[1], size: buf.length, png: buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), base64: buf.toString('base64') }; }
         }
         state.posts.push(out); return send(200, { id: out.id });
