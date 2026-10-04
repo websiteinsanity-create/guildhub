@@ -18,6 +18,9 @@ module.exports = function install(ctx) {
   const notify = (owner, text) => { discord.sendDM(owner, text).catch(() => {}); };
   const nameOf = (owner) => (db().users[owner] && db().users[owner].name) || owner;
   const cfg = () => db().settings.compliance;
+  // "Rules switched on" (enabled) is the standing setting; pausedUntil is a temporary one on top of it, for
+  // "turn this off for a while" without anyone having to remember to switch it back on - it just lapses.
+  const rulesActive = (c) => c.enabled && !(c.pausedUntil && Date.now() < Date.parse(c.pausedUntil));
 
   // ---------------------------------------------------------------- people and dates
   const zoneDate = (ms) => isoDate(ms + tzOffsetMinutes(ms, TZ) * 60000);           // calendar day in the guild's own time zone
@@ -69,7 +72,7 @@ module.exports = function install(ctx) {
   // The pop-up: asked for a reason while they are over a limit and have not explained since their latest missed event.
   function alertFor(owner) {
     const D = db(), c = cfg(), chars = players().get(owner);
-    if (!c.enabled || !chars || isLeader(owner, chars)) return null;
+    if (!rulesActive(c) || !chars || isLeader(owner, chars)) return null;
     const s = playerStats(owner, chars), triggers = triggersFor(s);
     if (!triggers.length) return null;
     const miss = lastMiss(s);
@@ -107,7 +110,7 @@ module.exports = function install(ctx) {
         for (const w of act.slice(0, c.quietRemove > 0 ? c.quietRemove : act.length)) { w.status = 'expired'; w.endedAt = now(); w.endedBy = 'quiet'; expired++; }
       }
     }
-    if (c.enabled) {
+    if (rulesActive(c)) {
       for (const [owner, chars] of players()) {
         if (isLeader(owner, chars)) continue;
         const s = playerStats(owner, chars, t);
@@ -225,6 +228,25 @@ module.exports = function install(ctx) {
     save();
     return w;
   }, { officer: true });
+  // Clears every active warning for one player at once, instead of removing them one at a time.
+  route('POST', '/api/warnings/clear/:owner', ({ body, user, params }) => {
+    const D = db(), owner = params.owner, note = clean(body.note, 200);
+    const mine = D.warnings.filter((w) => w.ownerKey === owner && w.status === 'active');
+    need(mine.length, 404, 'This player has no active warnings.');
+    for (const w of mine) { w.status = 'removed'; w.endedAt = now(); w.endedBy = user.name; w.note = note; }
+    save();
+    return { cleared: mine.length };
+  }, { officer: true });
+  // Pauses the pop-ups and automatic warnings for a set number of hours, resuming on its own once that time is
+  // up - "Rules switched on" above still has to be on for any of this to matter in the first place.
+  route('POST', '/api/admin/compliance/pause', ({ body, user }) => {
+    const hours = num(body.hours);
+    need(hours > 0 && hours <= 720, 400, 'Pick between 1 hour and 30 days.');
+    const c = cfg(); c.pausedUntil = new Date(Date.now() + hours * 3600e3).toISOString();
+    save();
+    return { pausedUntil: c.pausedUntil };
+  }, { officer: true });
+  route('POST', '/api/admin/compliance/resume', () => { const c = cfg(); c.pausedUntil = null; save(); return { ok: true }; }, { officer: true });
   route('POST', '/api/admin/compliance/run', () => runChecks(), { officer: true });
   route('PUT', '/api/admin/compliance', ({ body }) => {
     const c = cfg();

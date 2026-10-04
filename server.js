@@ -69,8 +69,13 @@ const SETTING_DEFAULTS = {
   // Extra ways to become an officer, on top of DISCORD_OFFICER_ROLE_IDS / DISCORD_OFFICER_USER_IDS in .env -
   // editable here instead of needing a server restart. Checked at sign-in, same as the .env ones.
   officerRoleIds: [], officerUserIds: [],
+  // Class coaches: a narrower role than officer, granted the same way (a Discord role and/or specific players).
+  // A coach does not get officer permissions from this alone - it only ever matters for VOD review.
+  coachRoleIds: [], coachUserIds: [],
   compliance: {
     enabled: true,
+    pausedUntil: null,      // a temporary pause on top of "enabled" (Admin can set one for a number of hours),
+                             // resuming on its own once that time passes rather than needing to be switched back on by hand
     finalAfterMinutes: 60,  // an event's attendance (and no-shows) is only judged once this long after it started,
                              // not as soon as one single person checks in - the PIN window itself is unaffected
     windowDays: 30,         // how far back attendance is looked at
@@ -166,6 +171,7 @@ function tooManyFailures(ip) {
 
 // ---------- helpers ----------
 const isOfficer = (u) => u.role === 'officer';
+const isCoach = (u) => !!u.coach || isOfficer(u);   // officers can do anything a coach can
 const LEADERSHIP = config.leadershipRanks || ['Guild Master', 'Officer'];
 const DUTY_STATUSES = ['todo', 'doing', 'done'];
 const LOOT_TYPES = config.lootTypes || ['Skillcore', 'Item', 'Shard'];
@@ -218,7 +224,7 @@ function migrate() {
   db.loot = db.loot || [];
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
-  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog']) db[k] = db[k] || [];
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots']) db[k] = db[k] || [];
   for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
   db.infoBoard = db.infoBoard && Array.isArray(db.infoBoard.categories) ? db.infoBoard : { categories: [] };
   db.infoBoard.title = db.infoBoard.title || 'Info';
@@ -916,7 +922,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
 
 // ---------- more features (approvals, profiles, builds, requests, tags, recurring events, branding) ----------
 require('./server-features')({
-  route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, canEditMember, findMember, findEvent, normParties, applyPresetRule,
+  route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
   LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log,
   get db() { return db; },
@@ -985,12 +991,15 @@ http.createServer(async (req, res) => {
       if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
       // Officer status can also be granted in Admin > Officers, without editing .env or restarting the server -
       // by a specific Discord role (on top of DISCORD_OFFICER_ROLE_IDS) or a specific player directly.
-      const { officerRoleIds: xRoles, officerUserIds: xUsers } = db.settings;
+      const { officerRoleIds: xRoles, officerUserIds: xUsers, coachRoleIds, coachUserIds } = db.settings;
       if (u.role !== 'officer' && (xUsers.includes(u.id) || (u.roles || []).some((r) => xRoles.includes(r)))) u.role = 'officer';
+      // A coach is a separate, narrower flag, not a role - someone can be a normal member and a coach, or an
+      // officer and a coach, at the same time.
+      const isCoach = coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r));
       if (u.role === 'applicant' && !merc && !db.settings.applications.enabled) return fail(u.whyNot);
-      db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', lastLogin: new Date().toISOString() };
+      db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, lastLogin: new Date().toISOString() };
       save();
-      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, discord: true }, 7);
+      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 7);
       res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }

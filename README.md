@@ -42,8 +42,11 @@ no dependencies: just Node 18+ and one JSON file of data.
   once they typed a reason and sent it for approval; the leadership accepts or rejects it under Approvals (a rejected one asks again, with the
   answer). Too many no-shows or unanswered events also give an **automatic warning**, once per new offence. The **Warnings** page lists them
   (a member only sees their own) and a player's active warnings always show on their dashboard. Warnings end by themselves after N
-  days, or when there was no new warning for N quiet days (the oldest few or all of them vanish), or when the leadership removes them.
-  With N active warnings a player is **disqualified from loot** for as long as they have them. The leadership itself is never judged.
+  days, or when there was no new warning for N quiet days (the oldest few or all of them vanish), or when the leadership removes them
+  one at a time, or **all at once** for a player with the "Clear all" button on the Warnings page. With N active warnings a player is
+  **disqualified from loot** for as long as they have them. The leadership itself is never judged. In Admin, the whole system can also
+  be **paused for a set number of hours** - a temporary pause on top of the usual on/off switch, for things like a planned break with
+  no events, resuming on its own once that time is up rather than needing anyone to remember to switch it back on.
 - **Login notices**: the leadership writes a notice in Admin (title and text) and sends it to **everybody or only to chosen players** (with a
   search box for the player list). It covers the whole screen when a player opens
   the app and only goes away when they press "I have read this and accept". Several notices queue up ("Message 1 of 2").
@@ -241,6 +244,20 @@ Good to know:
 - **Loot remembers item names**: typing an item or skillcore name once in the Loot page makes it selectable from then on when adding
   or editing an entry, instead of having to type the exact same name again. It is drawn from your own past entries, not an outside
   catalog, so it only ever lists names your guild has actually used.
+- **Class coaches and VOD review**: Admin > Coaches grants coach status (a Discord role and/or specific players, the same mechanism as
+  extra officers) and links each coach to the students they review. A coach sees their linked students' full profile - questlog links,
+  notes, loot and points included - the same as the student sees their own, not the stripped-down view a normal member gets of anyone
+  else. Anyone can post a VOD (a YouTube link) for themselves on the **VODs** page; a coach can also post one for a student they are
+  linked to. Each VOD's name is always built automatically from its type, the date it was recorded, and (for types where it applies -
+  Wargame, Stonefight, GvG Boss) the enemy guild - never typed by hand. A VOD is private by default (the owner, their coach, and
+  officers only); only a coach or an officer can share it more widely, with everyone or with a specific class - never the owner
+  themselves. VODs are grouped into one folder per player, named with their current class.
+  Opening a VOD plays it with the normal YouTube controls, plus a **Fullscreen** button, a free-hand **drawing overlay** open to anyone
+  watching (for a coach to sketch over the video while talking it through on Discord voice - nothing here is saved on its own), and, for
+  coaches and officers only, a **Screenshot** button that only works once fullscreen - that is what guarantees a screenshot can only
+  ever capture the video itself, never the rest of the page. It flattens the paused frame and whatever is drawn on it into one picture,
+  labelled with the player's name and the VOD's name, saved in its own **Screenshots** folder on the VODs page, separate from the VOD
+  list itself.
 - **Proof of use**: an officer can mark any loot entry as confirmed (who confirmed it and when is remembered), for tracking whether a
   player actually showed proof the item was used for what it was given for. Click again to undo it if needed.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the

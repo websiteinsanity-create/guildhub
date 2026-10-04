@@ -287,3 +287,47 @@ withServer('an event only counts toward no-shows and the attendance percentage o
   assert.equal(ann.warnings.length, 1, 'now past the grace period, the no-show is counted');
   assert.match(ann.warnings[0].reason, /1 no-shows/);
 });
+
+withServer('every active warning for a player can be cleared at once, instead of one at a time', async (s) => {
+  await cast(s);
+  await s.call('/api/warnings', 'POST', { ownerKey: 'Ann', reason: 'First' }, s.officer);
+  await s.call('/api/warnings', 'POST', { ownerKey: 'Ann', reason: 'Second' }, s.officer);
+  await s.call('/api/warnings', 'POST', { ownerKey: 'Bob', reason: 'Not Ann' }, s.officer);
+  assert.equal((await state(s, 'ann')).warnings.length, 2);
+
+  assert.equal((await s.call('/api/warnings/clear/Ann', 'POST', {}, s.ann)).status, 403, 'members cannot clear warnings');
+  const r = await s.call('/api/warnings/clear/Ann', 'POST', { note: 'Talked it through' }, s.officer);
+  assert.equal(r.status, 200); assert.equal(r.body.cleared, 2);
+
+  // the list itself holds every warning a player has ever had, any status - "cleared" means none of them are
+  // still active, not that the history disappears
+  const annAfter = await state(s, 'ann');
+  assert.equal(annAfter.warnings.filter((w) => w.status === 'active').length, 0, "none of Ann's warnings are active any more");
+  assert.equal(annAfter.warnings.length, 2, 'the history itself is kept, just no longer active');
+  const bobAfter = await state(s, 'bob');
+  assert.equal(bobAfter.warnings.filter((w) => w.status === 'active').length, 1, "Bob's own warning is untouched");
+
+  assert.equal((await s.call('/api/warnings/clear/Ann', 'POST', {}, s.officer)).status, 404, 'nothing left to clear the second time');
+});
+
+withServer('the attendance rules can be paused for a set number of hours and resume on their own, or be resumed early by hand', async (s) => {
+  const c = await cast(s);
+  assert.equal((await rules(s, { noShowLimit: 1, windowDays: 30, minEvents: 1, minAttendance: 0 })).status, 200);
+
+  assert.equal((await s.call('/api/admin/compliance/pause', 'POST', { hours: 4 }, s.ann)).status, 403);
+  assert.equal((await s.call('/api/admin/compliance/pause', 'POST', { hours: 0 }, s.officer)).status, 400, 'at least 1 hour');
+  assert.equal((await s.call('/api/admin/compliance/pause', 'POST', { hours: 1000 }, s.officer)).status, 400, 'at most 30 days');
+  const p = await s.call('/api/admin/compliance/pause', 'POST', { hours: 4 }, s.officer);
+  assert.equal(p.status, 200);
+  assert.ok(Date.parse(p.body.pausedUntil) > Date.now());
+
+  // a no-show that would normally trigger a warning does not, while paused
+  await pastEvent(s, 2, { came: [c.bob], yes: [c.ann, c.bob] });
+  await run(s);
+  assert.equal((await state(s, 'ann')).warnings.length, 0, 'paused, so no warning even though Ann no-showed');
+
+  const resumed = await s.call('/api/admin/compliance/resume', 'POST', {}, s.officer);
+  assert.equal(resumed.status, 200);
+  await run(s);
+  assert.equal((await state(s, 'ann')).warnings.length, 1, 'resumed by hand, so the same no-show is caught on the next check');
+});
