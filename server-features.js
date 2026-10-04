@@ -23,6 +23,7 @@ module.exports = function install(ctx) {
   const MODES = config.buildModes || ['PvE'];
   const notify = (ownerKey, text) => { discord.sendDM(ownerKey, text).catch(() => {}); };   // best effort, never blocks a request
   const community = require('./server-community')(ctx);                                       // applications and the Discord tools
+  const coaching = require('./server-coaching')(ctx);                                         // class coaches, student VODs and screenshots
   const compliance = require('./server-compliance')(ctx);                                   // leave of absence, warnings, the event chart
 
   // ============================================================ who sees what
@@ -45,6 +46,11 @@ module.exports = function install(ctx) {
     const D = db(), off = isOfficer(user), hidden = new Set(D.settings.hiddenSections || []);
     const hide = (k) => !off && hidden.has(k);
     const own = new Set(D.members.filter((m) => m.owner === user.key).map((m) => m.id));
+    // A coach sees their own linked students' profiles in full (questlog links, notes, loot and points included),
+    // the same as they would see their own - not the stripped-down view a normal member gets of anyone else.
+    const coachedOwners = new Set(coaching.studentsOf(user.key));
+    const coachedIds = new Set(D.members.filter((m) => coachedOwners.has(m.owner)).map((m) => m.id));
+    const ownOrCoached = (id) => own.has(id) || coachedIds.has(id);
     const P = compliance.players();
     const events = D.events.map((e) => {
       const out = eventFor(e, user);
@@ -55,26 +61,27 @@ module.exports = function install(ctx) {
     });
     return {
       user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: user.role },
-      members: D.members.filter((m) => off || !m.pendingApproval || own.has(m.id)).map((m) => (off || own.has(m.id) ? m : { ...m, questlogs: [] })),     // Questlog links: the leadership and the owner only
+      members: D.members.filter((m) => off || !m.pendingApproval || own.has(m.id)).map((m) => (off || ownOrCoached(m.id) ? m : { ...m, questlogs: [] })),     // Questlog links: the leadership, the owner, and their coach
       events,
-      points: off ? D.points : hide('points') ? [] : D.points.filter((p) => own.has(p.memberId)),
+      points: off ? D.points : hide('points') ? [] : D.points.filter((p) => ownOrCoached(p.memberId)),
       duties: off ? D.duties : [],                          // the tasks are for the leadership only
       presets: hide('parties') ? [] : D.presets.filter((p) => off || !p.hidden),
       presetRules: hide('parties') ? [] : D.presetRules.filter((r) => off || !(D.presets.find((p) => p.id === r.presetId) || {}).hidden),
-      loot: off ? D.loot : hide('loot') ? [] : D.loot.filter((l) => own.has(l.memberId)),
+      loot: off ? D.loot : hide('loot') ? [] : D.loot.filter((l) => ownOrCoached(l.memberId)),
       requests: off ? D.requests : hide('requests') ? [] : D.requests.filter((r) => own.has(r.memberId)),
       changes: off ? D.changes : D.changes.filter((c) => c.ownerKey === user.key),
-      profiles: off ? D.profiles : (D.profiles[user.key] ? { [user.key]: D.profiles[user.key] } : {}),
+      profiles: off ? D.profiles : Object.fromEntries([user.key, ...coachedOwners].filter((k) => D.profiles[k]).map((k) => [k, D.profiles[k]])),
       series: D.series,
       infoBoard: D.infoBoard,
       notices: noticesFor(user),
       ...compliance.extraState(user),
       ...community.extraState(user),
+      ...(() => { const c = coaching.coachingState(user); return (off || c.isCoach || !hide('vods')) ? c : { ...c, vods: [], screenshots: [] }; })(),
       tags: off ? D.tags : [],
       playerTags: off ? D.playerTags : {},
       prefs: D.prefs[user.key] || {},
       settings: D.settings,
-      users: Object.values(D.users).filter((u) => !u.applicant).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role })),
+      users: Object.values(D.users).filter((u) => !u.applicant).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role, coach: !!u.coach })),
       now: Date.now(),
     };
   }

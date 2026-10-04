@@ -786,7 +786,7 @@ VIEWS.warnings = () => {
     ${off ? '<button class="btn" data-act="warn-run">Check attendance now</button>' : ''}</div>
   <div class="panel" style="margin-bottom:16px"><h3>How it works</h3><div class="small">${esc(rulesText())}</div></div>
   ${!off ? `<div class="panel" style="margin-bottom:16px"><h3>Your status</h3><div><b>${mineActive}</b> active ${mineActive === 1 ? 'warning' : 'warnings'}${isDisqualified(S.user.key) ? ' <span class="qtag warn">Disqualified from loot</span>' : c.disqualifyAt > 0 ? ` <span class="muted small">(disqualified from ${c.disqualifyAt})</span>` : ''}</div></div>` : ''}
-  ${off ? `<div class="panel" style="margin-bottom:16px"><h3>Players with active warnings</h3>${perPlayer.length ? perPlayer.map((p) => `<div class="rule-row"><b>${esc(p.name)}</b><span>${p.n} active</span>${isDisqualified(p.k) ? '<span class="qtag warn">Disqualified from loot</span>' : ''}</div>`).join('') : '<div class="muted small">Nobody has an active warning.</div>'}</div>
+  ${off ? `<div class="panel" style="margin-bottom:16px"><h3>Players with active warnings</h3>${perPlayer.length ? perPlayer.map((p) => `<div class="rule-row"><b>${esc(p.name)}</b><span>${p.n} active</span>${isDisqualified(p.k) ? '<span class="qtag warn">Disqualified from loot</span>' : ''}<button class="btn sm" data-act="warn-clear-all" data-owner="${esc(p.k)}" data-name="${esc(p.name)}">Clear all</button></div>`).join('') : '<div class="muted small">Nobody has an active warning.</div>'}</div>
     <div class="panel" style="margin-bottom:16px"><h3>Give a warning</h3><form data-form="warn-new" class="loot-form">
       <div class="field"><label for="wn-p">Player</label><select id="wn-p" name="ownerKey">${allPlayers().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('')}</select></div>
       <div class="field wide"><label for="wn-r">Reason</label><input id="wn-r" name="reason" required maxlength="300" placeholder="What happened"></div><button class="btn primary">Give warning</button></form></div>` : ''}
@@ -803,6 +803,11 @@ VIEWS.warnings = () => {
 };
 FORMS['warn-new'] = (f, fd) => act(async () => { await api('/api/warnings', 'POST', fd); f.reset(); }, 'Warning given. The player gets a Discord message.');
 ACTIONS['warn-remove'] = (el, d) => { const note = prompt('Why is it removed? (optional)', ''); if (note === null) return; act(() => api('/api/warnings/' + d.id, 'PUT', { note }), 'Warning removed'); };
+ACTIONS['warn-clear-all'] = (el, d) => {
+  if (!confirm(`Clear every active warning for ${d.name}?`)) return;
+  const note = prompt('Why are they all being cleared? (optional)', '') || '';
+  act(async () => { const r = await api(`/api/warnings/clear/${encodeURIComponent(d.owner)}`, 'POST', { note }); toast(`Cleared ${r.cleared} ${r.cleared === 1 ? 'warning' : 'warnings'} for ${d.name}.`); }, null);
+};
 ACTIONS['warn-run'] = () => act(async () => { const r = await api('/api/admin/compliance/run', 'POST', {}); toast(`Checked. ${r.issued} new ${r.issued === 1 ? 'warning' : 'warnings'}, ${r.expired} ended.`); });
 
 /* ================= Admin: attendance rules ================= */
@@ -827,8 +832,18 @@ function complianceAdmin() {
       ${check('loaNeedsApproval', 'Leave of absence needs approval', "When on, a player's requested leave of absence has to be approved by an officer before it excuses them from these rules. When off, leave is approved automatically.")}
       ${check('enabled', 'Rules switched on', 'Turns this whole system on or off. When off, nothing on this page does anything: no pop-ups, no automatic warnings, no disqualification.')}
       <button class="btn primary">Save rules</button>
-    </form></div>`;
+    </form>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      ${c.pausedUntil && Date.parse(c.pausedUntil) > Date.now()
+        ? `<div class="rule-row"><span>Paused until <b>${fmtShort(c.pausedUntil)}</b> - resumes on its own, or now:</span><button class="btn sm" data-act="warn-resume">Resume now</button></div>`
+        : `<form data-form="warn-pause" class="link-row"><label for="cp-pause-h" class="muted small" style="margin:0">Pause everything above for</label>
+            <input id="cp-pause-h" name="hours" type="number" min="1" max="720" value="24" style="max-width:90px"><span class="muted small">hours</span>
+            <button class="btn sm">Pause</button></form>
+           <div class="muted small" style="margin-top:4px">Resumes on its own once that time is up - no need to remember to switch it back on.</div>`}
+    </div></div>`;
 }
+FORMS['warn-pause'] = (f, fd) => act(() => api('/api/admin/compliance/pause', 'POST', { hours: fd.hours }), 'Paused');
+ACTIONS['warn-resume'] = () => act(() => api('/api/admin/compliance/resume', 'POST', {}), 'Resumed');
 FORMS.compliance = (f, fd) => {
   const body = { ...fd, mandatoryOnly: f.elements.mandatoryOnly.checked, loaNeedsApproval: f.elements.loaNeedsApproval.checked, enabled: f.elements.enabled.checked };
   act(() => api('/api/admin/compliance', 'PUT', body), 'Saved');
@@ -1006,6 +1021,48 @@ function officersAdmin() {
     </form>
   </div>`;
 }
+// A coach is a narrower role than officer: granted the same way (role or specific player), but only ever
+// matters for VOD review - linking a coach to the students they review happens right below it, since the two
+// settings are only ever useful together.
+function coachesAdmin() {
+  const st = S.settings, roleIds = st.coachRoleIds || [], userIds = st.coachUserIds || [], c = UI.dcheck;
+  const allRoles = !c ? roleIds.map((id) => ({ id, name: id + ' (checking...)' }))
+    : [...c.roles, ...roleIds.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
+  const coaches = (S.users || []).filter((u) => u.coach).sort((a, b) => a.name.localeCompare(b.name));
+  const activeMembers = S.members.filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name));
+  const links = st_coachLinks();
+  return `<div class="panel"><h3>Coaches</h3>
+    <div class="muted small" style="margin:-6px 0 10px">Coach status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
+      server's .env file. A change here applies the next time that person signs in, not immediately to someone already signed in. A coach does not get officer
+      permissions from this alone - it only ever matters for reviewing the VODs of the students linked to them below.</div>
+    <form data-form="coaches">
+      <label><b>Discord roles that make someone a coach</b></label>
+      ${allRoles.length ? allRoles.map((r) => `<label class="tagpick"><input type="checkbox" name="crole" value="${esc(r.id)}" ${roleIds.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')
+        : '<div class="muted small">Press "Check the connection" above (in the Discord panel) to see your server\'s roles.</div>'}
+      <div class="muted small" style="margin:4px 0 14px">Up to 10. None ticked here just means nothing extra beyond .env.</div>
+      <label><b>Specific players who are always coaches</b></label>
+      <div class="muted small" style="margin:2px 0 6px">Only players who have signed in before can be picked.</div>
+      ${playerPickerFor('cuser', userIds)}
+      <button class="btn primary" style="margin-top:10px">Save</button>
+    </form>
+    <div class="muted small" style="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--line)"><b>Who each coach reviews</b></div>
+    ${coaches.length ? `<form data-form="coach-link" class="link-row">
+      <select name="coach" aria-label="Coach">${coaches.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select>
+      <select name="student" aria-label="Student">${activeMembers.map((m) => `<option value="${esc(m.owner)}">${esc(ownerName(m.owner))}</option>`).join('') || '<option value="">No active players yet</option>'}</select>
+      <button class="btn sm primary">Link</button>
+    </form>` : '<div class="muted small">No coaches yet - grant coach status above first.</div>'}
+    ${links.length ? links.map((l) => `<div class="rule-row"><span><b>${esc(nameOfUser(l.coach))}</b> coaches <b>${esc(ownerName(l.student))}</b></span><button class="btn sm danger" data-act="coach-unlink" data-id="${l.id}">Remove</button></div>`).join('')
+      : (coaches.length ? '<div class="muted small">No students linked yet.</div>' : '')}
+  </div>`;
+}
+const st_coachLinks = () => S.coachLinks || [];
+const nameOfUser = (id) => { const u = (S.users || []).find((x) => x.id === id); return u ? u.name : id; };
+FORMS.coaches = (f) => act(() => api('/api/admin/coaches', 'PUT', {
+  roleIds: [...f.querySelectorAll('input[name=crole]:checked')].map((i) => i.value),
+  userIds: [...f.querySelectorAll('input[name=cuser]:checked')].map((i) => i.value),
+}), 'Saved');
+FORMS['coach-link'] = (f, fd) => act(() => api('/api/admin/coach-links', 'POST', { coach: fd.coach, student: fd.student }), 'Linked');
+ACTIONS['coach-unlink'] = (el, d) => act(() => api(`/api/admin/coach-links/${d.id}`, 'DELETE'), 'Removed');
 // Same idea as playerPicker() (used for login notices), with its own checkbox name so the two never collide if
 // both forms were ever open at once.
 const playerPickerFor = (name, selected = []) => `<div class="pp"><input type="search" class="pp-filter" placeholder="Search players" aria-label="Search players"><div class="scrollbox">${allPlayers().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<label class="tagpick" data-n="${esc(p.name.toLowerCase())}"><input type="checkbox" name="${name}" value="${esc(p.key)}" ${selected.includes(p.key) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('') || '<span class="muted small">No players yet.</span>'}</div></div>`;
@@ -1328,6 +1385,7 @@ VIEWS.admin = () => {
     + appearanceAdmin()
     + discordAdmin()
     + officersAdmin()
+    + coachesAdmin()
     + mercenariesAdmin()
     + adminPlayersList()
     + noticesAdmin()

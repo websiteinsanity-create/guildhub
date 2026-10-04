@@ -220,6 +220,7 @@ const NAV = [
   { key: 'dashboard', label: () => 'Dashboard' },
   { key: 'member', label: () => 'Member', hide: 'member' },
   { key: 'loot', label: () => 'Loot', hide: 'loot' },
+  { key: 'vods', label: () => 'VODs', hide: 'vods' },
   { key: 'events', label: () => 'Events' },
   { key: 'parties', label: () => 'Parties', hide: 'parties' },
   { key: 'points', label: () => (pointsOn() ? 'Points' : 'Attendance'), hide: 'points' },
@@ -1420,6 +1421,217 @@ async function start() {
 
 VIEWS.dashboard = () => viewDashboard();
 VIEWS.loot = () => viewLoot();
+function viewVods() {
+  const vods = S.vods || [];
+  // One folder per player who has posted at least one VOD, labelled with their current class so a coach can
+  // tell at a glance who plays what - sorted by name, newest VOD first within each folder.
+  const folders = {};
+  for (const v of vods) (folders[v.owner] ??= []).push(v);
+  const folderList = Object.entries(folders).map(([owner, list]) => ({ owner, list: list.slice().sort((a, b) => b.recordedDate.localeCompare(a.recordedDate) || b.id - a.id) }))
+    .sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
+  return `
+  <div class="page-head"><div><h1>VODs</h1><div class="muted">Post a YouTube link for a coach to review live over Discord, or browse what has been shared with you.</div></div></div>
+  <button class="btn primary" style="margin-bottom:16px" data-act="vod-post-open">+ Post a VOD</button>
+  ${S.isCoach ? vodScreenshotsFolder() : ''}
+  ${folderList.length ? folderList.map((f) => vodFolder(f.owner, f.list)).join('') : '<div class="empty">No VODs yet.</div>'}`;
+}
+// Kept separate from the VOD folders above, not nested inside them - a screenshot is tied to one VOD, but
+// coaches think of "what have I captured lately" as its own list, across whichever players and VODs it came
+// from, not something to go digging for one player-folder at a time.
+function vodScreenshotsFolder() {
+  const shots = (S.screenshots || []).slice().sort((a, b) => b.takenAt.localeCompare(a.takenAt));
+  if (!shots.length) return '';
+  return `<details class="fold" style="margin-bottom:16px"><summary>Screenshots <span class="muted small">(${shots.length})</span></summary>
+    <div class="fold-body vod-shots-grid">${shots.map((s) => `
+      <div class="vod-shot-card">
+        <a href="#/vods/${s.vodId}"><img src="/uploads/${esc(s.file)}" alt="${esc(s.label)}" loading="lazy"></a>
+        <div class="muted small">${esc(s.label)}</div>
+        <div class="muted small">${esc(s.takenBy)} · ${fmtShort(s.takenAt)}</div>
+        <button type="button" class="btn sm danger" data-act="vod-shot-delete" data-id="${s.id}">Delete</button>
+      </div>`).join('')}</div>
+  </details>`;
+}
+ACTIONS['vod-shot-delete'] = (el, d) => { if (confirm('Delete this screenshot?')) act(() => api('/api/vod-screenshots/' + d.id, 'DELETE'), 'Deleted'); };
+function vodFolder(owner, list) {
+  const m = S.members.find((x) => x.owner === owner && x.active);
+  const cls = m ? classFor(m.primaryWeapon, m.secondaryWeapon) : '';
+  return `<details class="fold" style="margin-bottom:12px"><summary>${esc(ownerName(owner))}${cls ? ` (${esc(cls)})` : ''} <span class="muted small">(${list.length})</span></summary>
+    <div class="fold-body">${list.map((v) => vodRow(v)).join('')}</div>
+  </details>`;
+}
+function vodPostDialog() {
+  const coach = S.isCoach, students = S.myStudents || [];
+  const postFor = coach ? [{ key: S.user.key, label: 'Myself' }, ...students.map((k) => ({ key: k, label: ownerName(k) }))] : null;
+  const defType = S.cfg.vodTypes[0], needsEnemy = S.cfg.vodTypesWithEnemy.includes(defType);
+  openDialog(`<form data-form="vod-post"><h2>Post a VOD</h2>
+      ${coach ? `<div class="field"><label for="vf-for">For</label><select id="vf-for" name="owner">${postFor.map((o) => `<option value="${esc(o.key)}">${esc(o.label)}</option>`).join('')}</select></div>` : ''}
+      <div class="field"><label for="vf-url">YouTube link</label><input id="vf-url" name="url" placeholder="https://youtu.be/..." required></div>
+      <div class="row">
+        <div class="field"><label for="vf-type">Type</label><select id="vf-type" name="type" data-act="vod-type">${opts(S.cfg.vodTypes, defType)}</select></div>
+        <div class="field"><label for="vf-date">Date of recording</label><input id="vf-date" name="recordedDate" type="date" required value="${esc(todayTz())}"></div>
+      </div>
+      <div class="field slidefield ${needsEnemy ? '' : 'off'}" id="vf-enemy-field"><label for="vf-enemy">Enemy guild</label><input id="vf-enemy" name="enemyGuild" maxlength="60"></div>
+      <div class="field"><label for="vf-note">Note (optional)</label><textarea id="vf-note" name="note" maxlength="500" placeholder="Anything worth pointing out"></textarea></div>
+      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Post</button></div>
+    </form>`);
+}
+ACTIONS['vod-post-open'] = () => vodPostDialog();
+function viewVodReview(id) {
+  const v = (S.vods || []).find((x) => x.id === Number(id));
+  if (!v) return `<div class="page-head"><h1>VOD not found</h1></div><div class="empty">This VOD may have been deleted, or you may not have access to it.</div>`;
+  const visText = v.visibility === 'everyone' ? 'Shared with everyone' : v.visibility === 'class' ? `Shared with ${esc(v.visibleClass)}` : 'Private';
+  return `
+  <div class="page-head"><div><h1>${esc(v.title)}</h1><div class="muted">${esc(ownerName(v.owner))}${v.note ? ' · ' + esc(v.note) : ''} · ${visText}</div></div>
+    <a href="#/vods" class="btn sm">← Back to VODs</a></div>
+  <div class="panel">
+    <div id="vod-player-wrap" class="vod-player-wrap">
+      <div id="vod-yt-player"></div>
+      <canvas id="vod-draw-canvas" class="vod-draw-canvas"></canvas>
+      <div class="vod-toolbar">
+        <span class="vod-colors" id="vod-colors">${['#e2685c', '#e8c468', '#7cc4b8', '#ebe5e3'].map((c, i) => `<button type="button" class="vod-color ${i === 0 ? 'active' : ''}" data-act="vod-color" data-color="${c}" style="background:${c}" aria-label="Draw in this colour"></button>`).join('')}</span>
+        <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn">✏️ Draw</button>
+        <button type="button" class="btn sm" data-act="vod-draw-clear">🗑️ Clear</button>
+        <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">⛶ Fullscreen</button>
+        ${S.isCoach ? `<button type="button" class="btn sm" data-act="vod-screenshot" data-id="${v.id}" id="vod-shot-btn" disabled title="Go fullscreen first - that is what keeps a screenshot to just the video, never the rest of the page">📸 Screenshot</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+// A transparent canvas sitting over the player - open to anyone watching, for sketching over the paused video
+// while talking it through on Discord voice. Nothing here is saved on its own; it only becomes permanent if a
+// coach or officer takes a screenshot (a separate, later control), and otherwise resets whenever the page is
+// left or the player is resized (entering/exiting fullscreen), which is fine since it was never meant to last.
+let vodDraw = null;   // { ctx, drawing, color }
+function setupVodDrawing() {
+  const canvas = $('#vod-draw-canvas'), wrap = $('#vod-player-wrap');
+  if (!canvas || !wrap) return;
+  const resize = () => {
+    const r = wrap.getBoundingClientRect(), ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(r.width * ratio); canvas.height = Math.round(r.height * ratio);
+    const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 4;
+    ctx.strokeStyle = vodDraw ? vodDraw.color : '#e2685c';
+    vodDraw = { ctx, drawing: false, color: ctx.strokeStyle };
+  };
+  resize();
+  new ResizeObserver(resize).observe(wrap);
+  let lastX = 0, lastY = 0;
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  canvas.addEventListener('pointerdown', (e) => { if (!vodDraw) return; vodDraw.drawing = true; [lastX, lastY] = pos(e); canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!vodDraw || !vodDraw.drawing) return;
+    const [x, y] = pos(e);
+    vodDraw.ctx.beginPath(); vodDraw.ctx.moveTo(lastX, lastY); vodDraw.ctx.lineTo(x, y); vodDraw.ctx.stroke();
+    lastX = x; lastY = y;
+  });
+  const stop = () => { if (vodDraw) vodDraw.drawing = false; };
+  canvas.addEventListener('pointerup', stop); canvas.addEventListener('pointercancel', stop);
+}
+ACTIONS['vod-draw-toggle'] = (el) => {
+  const canvas = $('#vod-draw-canvas'), on = !canvas.classList.contains('active');
+  canvas.classList.toggle('active', on);
+  el.classList.toggle('primary', on);
+  el.textContent = on ? '✏️ Drawing (on)' : '✏️ Draw';
+};
+ACTIONS['vod-draw-clear'] = () => { if (vodDraw) vodDraw.ctx.clearRect(0, 0, $('#vod-draw-canvas').width, $('#vod-draw-canvas').height); };
+ACTIONS['vod-color'] = (el) => {
+  if (!vodDraw) return;
+  vodDraw.ctx.strokeStyle = el.dataset.color; vodDraw.color = el.dataset.color;
+  $('#vod-colors').querySelectorAll('.vod-color').forEach((b) => b.classList.toggle('active', b === el));
+};
+// Fullscreen is the whole wrap (the player plus its toolbar, not just the YouTube iframe), so whatever gets
+// added on top later - the drawing canvas, a screenshot button - comes along into fullscreen with it rather
+// than being left behind outside the fullscreened element. It also happens to be exactly what makes a later
+// screenshot capture just the video: once this is the only thing on screen, "capture this tab" naturally
+// cannot include anything else, with no cropping logic needed.
+ACTIONS['vod-fullscreen'] = () => {
+  const wrap = $('#vod-player-wrap');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else wrap.requestFullscreen().catch(() => toast('Your browser blocked fullscreen for this page.', true));
+};
+document.addEventListener('fullscreenchange', () => {
+  const btn = $('#vod-fs-btn'); if (!btn) return;
+  btn.textContent = document.fullscreenElement ? '⤢ Exit fullscreen' : '⛶ Fullscreen';
+  const shot = $('#vod-shot-btn');
+  if (shot) {
+    shot.disabled = !document.fullscreenElement;
+    shot.title = document.fullscreenElement ? '' : 'Go fullscreen first - that is what keeps a screenshot to just the video, never the rest of the page';
+  }
+});
+// A screenshot is the paused video plus whatever is drawn on it, flattened into one picture - exactly like
+// taking a normal OS screenshot would, just without leaving the page. Cross-origin YouTube pixels cannot be
+// read onto a canvas directly (the browser blocks that for any site, not just this one), so this instead asks
+// for a one-off capture of what is actually on screen via getDisplayMedia - which is also why fullscreen is
+// required first: with nothing else rendered, there is nothing else that capture could possibly include.
+ACTIONS['vod-screenshot'] = async (el, d) => {
+  if (!document.fullscreenElement) return toast('Go fullscreen first.', true);
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return toast('Your browser does not support taking a screenshot this way.', true);
+  let stream;
+  try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: false }); }
+  catch { return; }   // the person cancelled the share picker - not an error, just nothing to do
+  try {
+    const track = stream.getVideoTracks()[0];
+    const video = document.createElement('video'); video.srcObject = stream; video.muted = true;
+    await video.play();
+    await new Promise((r) => { if (video.readyState >= 2) r(); else video.onloadeddata = r; });
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    track.stop();   // only ever need the one frame - stop sharing immediately rather than leave the browser's "sharing this tab" indicator up
+    const dataUrl = canvas.toDataURL('image/png');
+    await act(() => api(`/api/vods/${d.id}/screenshot`, 'POST', { image: dataUrl }), 'Screenshot saved');
+  } finally {
+    stream.getTracks().forEach((t) => t.stop());
+  }
+};
+// The YouTube IFrame API is loaded once, lazily, the first time a VOD is actually opened - no reason to pull
+// in an external script on every page load for guilds that never watch a VOD.
+let ytApiPromise = null;
+function loadYouTubeApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (ytApiPromise) return ytApiPromise;
+  ytApiPromise = new Promise((resolve) => {
+    window.onYouTubeIframeAPIReady = resolve;
+    const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+  });
+  return ytApiPromise;
+}
+let ytPlayer = null;
+AFTER_RENDER.push(async (page) => {
+  if (page !== 'vods') return;
+  const { id } = route();
+  if (!id) return;
+  const v = (S.vods || []).find((x) => x.id === Number(id));
+  const wrap = $('#vod-yt-player');
+  if (!v || !wrap) return;
+  setupVodDrawing();   // works regardless of whether the YouTube embed itself loads below
+  const timedOut = await Promise.race([loadYouTubeApi().then(() => false), new Promise((r) => setTimeout(() => r(true), 10000))]);
+  if (!$('#vod-yt-player')) return;    // the page may have been navigated away from while the API was loading
+  if (timedOut) { $('#vod-yt-player').outerHTML = '<div class="empty" style="height:100%;display:grid;place-items:center">Could not load the YouTube player. Check your connection and reload.</div>'; return; }
+  ytPlayer = new YT.Player('vod-yt-player', { videoId: v.videoId, playerVars: { playsinline: 1, rel: 0 } });
+});
+function vodRow(v) {
+  const visBadge = v.visibility === 'everyone' ? '<span class="type-pill">Everyone</span>' : v.visibility === 'class' ? `<span class="type-pill">${esc(v.visibleClass)}</span>` : '<span class="muted small">Private</span>';
+  return `<div class="rule-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
+    <div style="flex:1;min-width:220px">
+      <a href="#/vods/${v.id}" class="plain"><b>${esc(v.title)}</b></a>
+      <a href="${esc(v.url)}" target="_blank" rel="noopener" class="muted small" style="margin-left:6px">Open on YouTube ↗</a>
+      <div class="muted small">${esc(ownerName(v.owner))}${v.note ? ' · ' + esc(v.note) : ''}</div>
+    </div>
+    <div style="align-self:center">${visBadge}</div>
+    ${v.canPromote ? `<form data-form="vod-vis" data-id="${v.id}" class="seg" style="align-items:center">
+      <select name="visibility" data-act="vod-vis">
+        <option value="private" ${v.visibility === 'private' ? 'selected' : ''}>Private</option>
+        <option value="everyone" ${v.visibility === 'everyone' ? 'selected' : ''}>Everyone</option>
+        <option value="class" ${v.visibility === 'class' ? 'selected' : ''}>A class</option>
+      </select>
+      <select name="visibleClass" id="vv-cls-${v.id}" class="${v.visibility === 'class' ? '' : 'hidden'}">${opts(S.cfg.classes.map((c) => c.name), v.visibleClass)}</select>
+      <button class="btn sm">Save</button>
+    </form>` : ''}
+    ${v.canManage ? `<button class="btn sm danger" data-act="vod-delete" data-id="${v.id}">Delete</button>` : ''}
+  </div>`;
+}
+VIEWS.vods = (id) => id ? viewVodReview(id) : viewVods();
 VIEWS.member = () => viewRoster();
 VIEWS.parties = () => viewParties();
 VIEWS.events = (id) => viewEvents(id);
@@ -1445,6 +1657,11 @@ document.addEventListener('DOMContentLoaded', () => { const box = $('#notice'); 
 ACTIONS['notice-accept'] = (el, d) => act(() => api(`/api/notices/${d.id}/ack`, 'POST', {}));
 
 // Lucent is an amount, everything else is a named item: the item field slides away and the amount field grows into its place.
+CHANGES['vod-type'] = (el) => { $('#vf-enemy-field').classList.toggle('off', !S.cfg.vodTypesWithEnemy.includes(el.value)); };
+CHANGES['vod-vis'] = (el) => { const cls = el.closest('form').querySelector('[name=visibleClass]'); cls.classList.toggle('hidden', el.value !== 'class'); };
+FORMS['vod-post'] = (f, fd) => act(async () => { await api('/api/vods', 'POST', fd); closeDialog(); }, 'Posted');
+FORMS['vod-vis'] = (f, fd, id) => act(() => api(`/api/vods/${id}`, 'PUT', { visibility: fd.visibility, visibleClass: fd.visibleClass }), 'Saved');
+ACTIONS['vod-delete'] = (el, d) => { if (confirm('Delete this VOD? This also removes any saved screenshots from it.')) act(() => api('/api/vods/' + d.id, 'DELETE'), 'Deleted'); };
 CHANGES['loot-type'] = (el) => {
   const lu = el.value === 'Lucent', item = $('#lf-item-field'), amt = $('#lf-amt-field');
   item.classList.toggle('off', lu); amt.classList.toggle('off', !lu);

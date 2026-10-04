@@ -124,6 +124,10 @@
     {
       "key": "leadership",
       "label": "Dashboard: Leadership tasks"
+    },
+    {
+      "key": "vods",
+      "label": "VODs page"
     }
   ],
   "partySize": 6,
@@ -549,5 +553,18 @@
     "PvP",
     "Alt build"
   ],
-  "defaultRank": "Member"
+  "defaultRank": "Member",
+  "vodTypes": [
+    "Wargame",
+    "BG",
+    "Siege",
+    "Stonefight",
+    "GvG Boss",
+    "Testing"
+  ],
+  "vodTypesWithEnemy": [
+    "Wargame",
+    "Stonefight",
+    "GvG Boss"
+  ]
 }
