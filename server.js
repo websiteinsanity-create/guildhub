@@ -226,6 +226,7 @@ function migrate() {
   db.presetRules = db.presetRules || [];
   for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots']) db[k] = db[k] || [];
   for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
+  db.partyBuilderNote = typeof db.partyBuilderNote === 'string' ? db.partyBuilderNote : '';
   db.infoBoard = db.infoBoard && Array.isArray(db.infoBoard.categories) ? db.infoBoard : { categories: [] };
   db.infoBoard.title = db.infoBoard.title || 'Info';
   db.settings.compliance = { ...SETTING_DEFAULTS.compliance, ...(db.settings.compliance || {}) };
@@ -550,6 +551,11 @@ route('DELETE', '/api/points/:id', ({ params, user }) => {
 }, { officer: true });
 
 // Guild-wide settings (officers only).
+route('PUT', '/api/party-builder-note', ({ body }) => {
+  db.partyBuilderNote = clean(body.note, 2000);
+  save();
+  return { note: db.partyBuilderNote };
+}, { officer: true });
 route('PUT', '/api/settings', ({ body, user }) => {
   const st = db.settings, int = (v) => Math.round(Number(v));
   const touchedKeys = Object.keys(body).filter((k) => st[k] !== undefined);

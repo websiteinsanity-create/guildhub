@@ -296,3 +296,20 @@ withServer('event title is optional and defaults to the type', async ({ call, of
   assert.equal(ev.title, 'Tax delivery');
   assert.equal((await call('/api/events', 'POST', { type: 'Tax delivery', start: '2026-10-01T18:00:00Z', title: 'Custom' }, officer)).body.title, 'Custom');
 });
+
+withServer('the party-builder note is officer-only, and the same note is returned everywhere it is shown (not tied to one event or preset)', async ({ call, member, officer }) => {
+  assert.equal((await call('/api/state', 'GET', null, member)).body.partyBuilderNote, undefined, 'a plain member never receives the note content at all');
+  assert.equal((await call('/api/party-builder-note', 'PUT', { note: 'Bob is away this week' }, member)).status, 403);
+
+  const r = await call('/api/party-builder-note', 'PUT', { note: 'Bob is away this week' }, officer);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.note, 'Bob is away this week');
+
+  // the same single note, regardless of which page asked for it
+  assert.equal((await call('/api/state', 'GET', null, officer)).body.partyBuilderNote, 'Bob is away this week');
+
+  const r2 = await call('/api/party-builder-note', 'PUT', { note: 'Bob is back, Sam is out instead' }, officer);
+  assert.equal(r2.body.note, 'Bob is back, Sam is out instead');
+  assert.equal((await call('/api/state', 'GET', null, officer)).body.partyBuilderNote, 'Bob is back, Sam is out instead', 'updating it anywhere updates it everywhere');
+  assert.equal((await call('/api/state', 'GET', null, member)).body.partyBuilderNote, undefined, 'still never sent to a plain member');
+});

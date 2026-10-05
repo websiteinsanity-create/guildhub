@@ -30,7 +30,14 @@ async function startServer() {
 const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { s.stop(); } });
 const state = async (s, who) => (await s.call('/api/state', 'GET', null, s[who])).body;
 const inDays = (n) => new Date(Date.now() + n * 864e5).toISOString();
-const dateOf = (n) => inDays(n).slice(0, 10);
+// The server judges "today" (zoneDate() in server-compliance.js) in the guild's own configured time zone
+// (Europe/Berlin by default - see config.json), not plain UTC. Slicing a UTC ISO string, as this used to do,
+// agrees with the server except for the stretch of each day where UTC has not yet rolled over to the next date
+// but Berlin already has (Berlin is ahead of UTC) - a real, if narrow, window where this test would see
+// different "todays" than the server it is calling, and fail for a reason that has nothing to do with the
+// actual leave-of-absence logic being tested. Intl.DateTimeFormat with that same time zone matches the server
+// exactly, DST included, without having to reimplement its offset math here.
+const dateOf = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + n * 864e5));
 
 // three players with one character each
 async function cast(s) {

@@ -465,7 +465,7 @@ function viewRoster() {
   ${list.length ? `<div class="tbl-wrap"><table>
     <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th class="num">Gear score</th><th class="num">Watermark</th><th>Rank</th><th>Discord</th>${isOfficer() ? '<th>Standing</th><th>Tags</th>' : ''}<th></th></tr></thead>
     <tbody>${list.map((m) => { const wn = isOfficer() ? activeWarn(m.owner) : [], onLeave = isOfficer() && onLeaveAt(m.owner, Date.now()), a = isOfficer() && m.active ? attendanceStats(m.id) : null; return `<tr class="${m.active ? '' : 'dim'}">
-      <td><b>${esc(m.name)}</b>${m.owner === S.user.key ? '<span class="you">yours</span>' : ''}${onLeave ? '<span class="type-pill" style="margin-left:6px">On leave</span>' : ''}<div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div>${isOfficer() && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m, '<br>')}</div></details>` : ''}</td>
+      <td><b>${esc(m.name)}</b>${m.owner === S.user.key ? '<span class="you">yours</span>' : ''}${onLeave ? '<span class="type-pill" style="margin-left:6px">On leave</span>' : ''}<div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div>${(isOfficer() || (S.myStudents || []).includes(m.owner)) && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m, '<br>')}</div></details>` : ''}</td>
       <td>${roleChip(m.role)}</td><td class="wpn">${weaponLine(m)}${(m.builds || []).length ? `<div class="muted small">Also: ${m.builds.map((b) => esc(buildLabel(b))).join(' · ')}</div>` : ''}${m.mode && m.mode !== 'PvE' ? `<span class="type-pill" style="margin-left:6px">${esc(m.mode)}</span>` : ''}</td>
       <td class="num">${m.gearScore || '-'}</td><td class="num">${m.level || '-'}</td>
       <td>${esc(m.rank)}</td><td>${esc(m.discord)}</td>
@@ -664,6 +664,7 @@ function eventDetail(ev) {
     ${isOfficer() && ev.mercRequest ? `<div class="muted small" style="margin-top:6px">${ev.mercRequest.ok ? 'Asked' : '<span style="color:var(--danger)">Asking failed</span>'} for ${ev.mercRequest.overall ? `${ev.mercRequest.overall} player${ev.mercRequest.overall === 1 ? '' : 's'}` : (ev.mercRequest.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')} by ${esc(ev.mercRequest.by)}, ${fmtShort(ev.mercRequest.at)}${ev.mercRequest.ok ? '' : ': ' + esc(ev.mercRequest.error)}.</div>` : ''}
     ${isOfficer() && ev.partyPosts && ev.partyPosts.length ? (() => { const p = ev.partyPosts[ev.partyPosts.length - 1]; return `<div class="muted small" style="margin-top:6px">${p.ok ? 'Posted' : '<span style="color:var(--danger)">Posting failed</span>'} to ${p.channelName ? '#' + esc(p.channelName) : 'Discord'} by ${esc(p.by)}, ${fmtShort(p.at)}${p.ok ? '' : ': ' + esc(p.error)}.</div>`; })() : ''}
     ${(() => { const r = S.presetRules.find((x) => x.type === ev.type), p = r && byId(S.presets, r.presetId); return p ? `<div class="muted small" style="margin-top:6px">Every ${esc(ev.type)} event uses the preset "${esc(p.name)}" (set on the Parties page).</div>` : ''; })()}
+    ${partyBuilderNotePanel()}
     <div style="margin-top:14px">${ev.parties.length || isOfficer() ? board({ kind: 'event', id: ev.id }, ev.parties, ev) : '<div class="muted">No parties posted yet.</div>'}</div>
   </div>
 
@@ -813,6 +814,16 @@ function partyCard(ctx, parties, p, i, ev) {
 }
 
 // Officers get role lists on the left (drag from there, or back to it to unassign) and the party grid on the right.
+// One shared scratchpad for whoever is building parties - the same note on the Presets page and on every
+// event's board, synced through the normal state refresh since it is just one more field in /api/state.
+// Officer-only: the server never even sends its content to anyone else, not just hides it here.
+function partyBuilderNotePanel() {
+  if (!isOfficer()) return '';
+  return `<details class="panel fold" style="margin-bottom:16px" data-fold="party-note" ${(UI.fold && UI.fold['party-note']) ? 'open' : ''}>
+    <summary>Notes for whoever is building parties <span class="muted small">(officers only, shared everywhere parties are built)</span></summary>
+    <textarea data-act="party-note-save" rows="3" maxlength="2000" placeholder="Anything worth remembering while building parties - who's away, who needs a specific role, reminders for next time...">${esc(S.partyBuilderNote || '')}</textarea>
+  </details>`;
+}
 function board(ctx, parties, ev) {
   const off = isOfficer();
   const used = new Set(parties.flatMap((p) => p.members));
@@ -861,7 +872,8 @@ function viewParties() {
         : `<h2>${esc(p.name)}</h2>${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}`}
     </div>
     ${off ? presetRulesPanel(p) : ''}
-    <div class="panel boardwrap">${board({ kind: 'preset', id: p.id }, p.parties, null)}</div>`
+    ${partyBuilderNotePanel()}
+    <div class="boardwrap">${board({ kind: 'preset', id: p.id }, p.parties, null)}</div>`
     : `<div class="empty">No presets yet.${off ? ' Click "+ New preset", or build parties on an event and choose "Save as preset".' : ''}</div>`}`;
 }
 
@@ -1335,6 +1347,7 @@ document.addEventListener('change', (e) => {
   }
   else if (el.dataset.act === 'preset-rename') act(() => api('/api/presets/' + el.dataset.id, 'PUT', { name: el.value }));
   else if (el.dataset.act === 'preset-desc') act(() => api('/api/presets/' + el.dataset.id, 'PUT', { description: el.value }));
+  else if (el.dataset.act === 'party-note-save') act(() => api('/api/party-builder-note', 'PUT', { note: el.value }));
   else if (el.name === 'primaryWeapon' || el.name === 'secondaryWeapon') {
     const f = el.form, c = classFor(f.elements.primaryWeapon.value, f.elements.secondaryWeapon.value);
     $('#class-preview').textContent = classPreviewText(f.elements.primaryWeapon.value, f.elements.secondaryWeapon.value);
@@ -1432,26 +1445,10 @@ function viewVods() {
   return `
   <div class="page-head"><div><h1>VODs</h1><div class="muted">Post a YouTube link for a coach to review live over Discord, or browse what has been shared with you.</div></div></div>
   <button class="btn primary" style="margin-bottom:16px" data-act="vod-post-open">+ Post a VOD</button>
-  ${S.isCoach ? vodScreenshotsFolder() : ''}
+
   ${folderList.length ? folderList.map((f) => vodFolder(f.owner, f.list)).join('') : '<div class="empty">No VODs yet.</div>'}`;
 }
-// Kept separate from the VOD folders above, not nested inside them - a screenshot is tied to one VOD, but
-// coaches think of "what have I captured lately" as its own list, across whichever players and VODs it came
-// from, not something to go digging for one player-folder at a time.
-function vodScreenshotsFolder() {
-  const shots = (S.screenshots || []).slice().sort((a, b) => b.takenAt.localeCompare(a.takenAt));
-  if (!shots.length) return '';
-  return `<details class="fold" style="margin-bottom:16px"><summary>Screenshots <span class="muted small">(${shots.length})</span></summary>
-    <div class="fold-body vod-shots-grid">${shots.map((s) => `
-      <div class="vod-shot-card">
-        <a href="#/vods/${s.vodId}"><img src="/uploads/${esc(s.file)}" alt="${esc(s.label)}" loading="lazy"></a>
-        <div class="muted small">${esc(s.label)}</div>
-        <div class="muted small">${esc(s.takenBy)} · ${fmtShort(s.takenAt)}</div>
-        <button type="button" class="btn sm danger" data-act="vod-shot-delete" data-id="${s.id}">Delete</button>
-      </div>`).join('')}</div>
-  </details>`;
-}
-ACTIONS['vod-shot-delete'] = (el, d) => { if (confirm('Delete this screenshot?')) act(() => api('/api/vod-screenshots/' + d.id, 'DELETE'), 'Deleted'); };
+
 function vodFolder(owner, list) {
   const m = S.members.find((x) => x.owner === owner && x.active);
   const cls = m ? classFor(m.primaryWeapon, m.secondaryWeapon) : '';
@@ -1492,7 +1489,6 @@ function viewVodReview(id) {
         <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn">✏️ Draw</button>
         <button type="button" class="btn sm" data-act="vod-draw-clear">🗑️ Clear</button>
         <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">⛶ Fullscreen</button>
-        ${S.isCoach ? `<button type="button" class="btn sm" data-act="vod-screenshot" data-id="${v.id}" id="vod-shot-btn" disabled title="Go fullscreen first - that is what keeps a screenshot to just the video, never the rest of the page">📸 Screenshot</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -1544,46 +1540,20 @@ ACTIONS['vod-color'] = (el) => {
 // than being left behind outside the fullscreened element. It also happens to be exactly what makes a later
 // screenshot capture just the video: once this is the only thing on screen, "capture this tab" naturally
 // cannot include anything else, with no cropping logic needed.
+// Safari (desktop and iOS) and some older mobile browsers only understand the webkit-prefixed fullscreen API,
+// not the standard unprefixed one - this fell back to nothing before, which is the likely reason fullscreen
+// silently did not work for anyone on one of those.
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+const fsRequest = (el) => (el.requestFullscreen ? el.requestFullscreen() : el.webkitRequestFullscreen ? Promise.resolve(el.webkitRequestFullscreen()) : Promise.reject(new Error('not supported')));
+const fsExit = () => (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen ? document.webkitExitFullscreen() : null);
 ACTIONS['vod-fullscreen'] = () => {
   const wrap = $('#vod-player-wrap');
-  if (document.fullscreenElement) document.exitFullscreen();
-  else wrap.requestFullscreen().catch(() => toast('Your browser blocked fullscreen for this page.', true));
+  if (fsElement()) fsExit();
+  else fsRequest(wrap).catch(() => toast('Your browser does not support fullscreen here.', true));
 };
-document.addEventListener('fullscreenchange', () => {
-  const btn = $('#vod-fs-btn'); if (!btn) return;
-  btn.textContent = document.fullscreenElement ? '⤢ Exit fullscreen' : '⛶ Fullscreen';
-  const shot = $('#vod-shot-btn');
-  if (shot) {
-    shot.disabled = !document.fullscreenElement;
-    shot.title = document.fullscreenElement ? '' : 'Go fullscreen first - that is what keeps a screenshot to just the video, never the rest of the page';
-  }
-});
-// A screenshot is the paused video plus whatever is drawn on it, flattened into one picture - exactly like
-// taking a normal OS screenshot would, just without leaving the page. Cross-origin YouTube pixels cannot be
-// read onto a canvas directly (the browser blocks that for any site, not just this one), so this instead asks
-// for a one-off capture of what is actually on screen via getDisplayMedia - which is also why fullscreen is
-// required first: with nothing else rendered, there is nothing else that capture could possibly include.
-ACTIONS['vod-screenshot'] = async (el, d) => {
-  if (!document.fullscreenElement) return toast('Go fullscreen first.', true);
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return toast('Your browser does not support taking a screenshot this way.', true);
-  let stream;
-  try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: false }); }
-  catch { return; }   // the person cancelled the share picker - not an error, just nothing to do
-  try {
-    const track = stream.getVideoTracks()[0];
-    const video = document.createElement('video'); video.srcObject = stream; video.muted = true;
-    await video.play();
-    await new Promise((r) => { if (video.readyState >= 2) r(); else video.onloadeddata = r; });
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    track.stop();   // only ever need the one frame - stop sharing immediately rather than leave the browser's "sharing this tab" indicator up
-    const dataUrl = canvas.toDataURL('image/png');
-    await act(() => api(`/api/vods/${d.id}/screenshot`, 'POST', { image: dataUrl }), 'Screenshot saved');
-  } finally {
-    stream.getTracks().forEach((t) => t.stop());
-  }
-};
+const onFsChange = () => { const btn = $('#vod-fs-btn'); if (btn) btn.textContent = fsElement() ? '⤢ Exit fullscreen' : '⛶ Fullscreen'; };
+document.addEventListener('fullscreenchange', onFsChange);
+document.addEventListener('webkitfullscreenchange', onFsChange);
 // The YouTube IFrame API is loaded once, lazily, the first time a VOD is actually opened - no reason to pull
 // in an external script on every page load for guilds that never watch a VOD.
 let ytApiPromise = null;

@@ -81,6 +81,10 @@ module.exports = function install(ctx) {
       playerTags: off ? D.playerTags : {},
       prefs: D.prefs[user.key] || {},
       settings: D.settings,
+      // A single shared scratchpad for whoever is building parties - the same note on the Presets page and on
+      // every event's board, officer-only. Kept separate from the settings object above (which is sent to
+      // everyone) so the note's actual content never reaches a non-officer, not just hidden from their view.
+      partyBuilderNote: off ? (D.partyBuilderNote || '') : undefined,
       users: Object.values(D.users).filter((u) => !u.applicant).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role, coach: !!u.coach })),
       now: Date.now(),
     };

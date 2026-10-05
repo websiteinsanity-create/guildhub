@@ -1,7 +1,7 @@
 // Class coaches: a role granted in Admin (by Discord role or specific player, same mechanism as extra
 // officers), linked to the students they coach, who post or receive YouTube VODs reviewed live over Discord
 // voice. This file covers everything the server actually owns: the role, the links, the VODs and their
-// visibility rules, and the coach/officer-only screenshot "folder".
+// visibility rules.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
@@ -138,29 +138,6 @@ test('a non-YouTube link is refused, and only the owner, their coach or an offic
   assert.equal(ok.owner, STUDENT);
 });
 
-test('screenshots: only coaches and officers can save one, each is labelled with the player and the VOD title, and the folder is separate from the VOD list', async () => {
-  const v = (await call('/api/vods', 'POST', { url: 'https://www.youtube.com/watch?v=bbbbbbbbbbb', type: 'BG', recordedDate: '2026-08-10' }, 'student')).body;
-  const tinyPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(300, 1)]).toString('base64');
-
-  assert.equal((await call(`/api/vods/${v.id}/screenshot`, 'POST', { image: tinyPng }, 'student')).status, 403, 'a plain member cannot save a screenshot, even of their own VOD');
-
-  const shot = (await call(`/api/vods/${v.id}/screenshot`, 'POST', { image: tinyPng }, 'coach')).body;
-  assert.equal(shot.label, 'StudentChar - BG 10.08.2026');
-  assert.equal(shot.takenBy, (await state('coach')).user.name);
-  // saved to disk is not the same as actually reachable through the browser - the /uploads/ route only serves
-  // filenames matching a specific shape, so this checks the real URL actually works, not just that a file exists
-  const fetched = await fetch(`${base}/uploads/${shot.file}`);
-  assert.equal(fetched.status, 200, 'the screenshot file is actually reachable at its URL, not just saved to disk');
-  assert.equal(fetched.headers.get('content-type'), 'image/png');
-
-  const coachSt = await state('coach');
-  assert.ok(coachSt.screenshots.some((s) => s.id === shot.id));
-  assert.equal((await state('student')).screenshots.length, 0, 'a plain member gets an empty screenshots folder, never anyone else\'s saved shots');
-
-  assert.equal((await call(`/api/vod-screenshots/${shot.id}`, 'DELETE', null, 'student')).status, 403);
-  assert.equal((await call(`/api/vod-screenshots/${shot.id}`, 'DELETE', null, 'coach')).status, 200);
-});
-
 test("a coach sees their linked student's full profile - questlog links, notes, loot and points - the same as the student sees their own, and an unrelated player still sees none of it", async () => {
   const studentId = (await state('student')).members.find((m) => m.owner === STUDENT).id;
   await call(`/api/members/${studentId}`, 'PUT', { name: 'StudentChar', role: 'DPS', questlogs: [{ label: 'Main', url: 'https://questlog.example/student' }] }, 'student');
@@ -183,11 +160,3 @@ test("a coach sees their linked student's full profile - questlog links, notes, 
   assert.ok(!otherSt.loot.some((l) => l.memberId === studentId));
 });
 
-test('deleting a VOD also removes its screenshots', async () => {
-  const v = (await call('/api/vods', 'POST', { url: 'https://www.youtube.com/watch?v=ccccccccccc', type: 'Testing', recordedDate: '2026-08-11' }, 'student')).body;
-  const tinyPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(300, 1)]).toString('base64');
-  const shot = (await call(`/api/vods/${v.id}/screenshot`, 'POST', { image: tinyPng }, 'coach')).body;
-  await call(`/api/vods/${v.id}`, 'DELETE', null, 'student');
-  const coachSt = await state('coach');
-  assert.ok(!coachSt.screenshots.some((s) => s.id === shot.id));
-});

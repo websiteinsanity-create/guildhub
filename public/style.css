@@ -69,7 +69,7 @@ nav.rail { background: var(--panel); border-right: 1px solid var(--line); paddin
 .rail a.nav.active { background: var(--panel-2); border-left-color: var(--accent); }
 .rail .who { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .badge-officer { color: var(--gold); border: 1px solid var(--gold); border-radius: 20px; padding: 0 8px; font-size: 12px; margin-left: 6px; }
-main { padding: 32px 40px 64px; max-width: 1360px; width: 100%; min-width: 0; }
+main { padding: 32px 40px 64px; max-width: 1800px; width: 100%; min-width: 0; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 
 /* role chips */
@@ -670,7 +670,3 @@ details.fold > summary:hover { color: var(--accent-text); }
 .vod-color { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .vod-color.active { border-color: #fff; }
 
-.vod-shots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.vod-shot-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 6px; display: block; margin-bottom: 6px; background: #000; }
-.vod-shot-card { display: flex; flex-direction: column; gap: 2px; }
-.vod-shot-card .btn { margin-top: 6px; align-self: flex-start; }
