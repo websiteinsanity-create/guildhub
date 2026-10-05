@@ -18,10 +18,22 @@ module.exports = function install(ctx) {
     return hit ? hit.name : null;
   }
 
-  // Everyone this Discord account coaches, and everyone who coaches them - both directions are needed (a coach
-  // looking at their list of students; a student's own VODs showing whose private view they're in).
-  const coachesOf = (ownerKey) => db().coachLinks.filter((l) => l.student === ownerKey).map((l) => l.coach);
-  const studentsOf = (ownerKey) => db().coachLinks.filter((l) => l.coach === ownerKey).map((l) => l.student);
+  // A coach is linked to one or more CLASSES, not to specific players one at a time - whoever is currently
+  // playing that class is automatically "their student", so the list never needs manual upkeep as people join,
+  // leave, or switch classes. Both directions are needed (a coach's own list of students; a player's own VODs
+  // showing whose private view they are in), both computed fresh from the current roster each time.
+  function classesCoachedBy(coachKey) { return db().coachLinks.filter((l) => l.coach === coachKey).map((l) => l.class); }
+  function studentsOf(coachKey) {
+    const classes = classesCoachedBy(coachKey);
+    if (!classes.length) return [];
+    return [...new Set(db().members.filter((m) => m.active && classes.includes(classOf(m))).map((m) => m.owner))];
+  }
+  function coachesOf(ownerKey) {
+    const m = db().members.find((x) => x.owner === ownerKey && x.active);
+    const cls = m ? classOf(m) : null;
+    if (!cls) return [];
+    return [...new Set(db().coachLinks.filter((l) => l.class === cls).map((l) => l.coach))];
+  }
 
   function canSeeVod(user, v) {
     if (isOfficer(user) || v.owner === user.key || v.postedBy === user.key) return true;
@@ -70,15 +82,15 @@ module.exports = function install(ctx) {
   }, { officer: true });
 
   route('POST', '/api/admin/coach-links', ({ body, user }) => {
-    const D = db(), coach = clean(body.coach, 40), student = clean(body.student, 40);
-    need(coach && student && coach !== student, 400, 'Pick a coach and a student.');
+    const D = db(), coach = clean(body.coach, 40), cls = clean(body.class, 40);
+    need(coach && cls, 400, 'Pick a coach and a class.');
     need(D.users[coach], 400, 'The coach has to have signed in with Discord before.');
-    need(D.members.some((m) => m.owner === student && m.active), 400, 'Pick an active player.');
-    need(!D.coachLinks.some((l) => l.coach === coach && l.student === student), 409, 'Already linked.');
-    const link = { id: newId(), coach, student, linkedAt: now() };
+    need((config.classes || []).some((c) => c.name === cls), 400, 'Pick a real class.');
+    need(!D.coachLinks.some((l) => l.coach === coach && l.class === cls), 409, 'Already linked.');
+    const link = { id: newId(), coach, class: cls, linkedAt: now() };
     D.coachLinks.push(link);
     save();
-    audit(user, 'coach.link', { type: 'player', id: student, name: D.users[student] ? D.users[student].name : student }, `${user.name} linked ${D.users[coach].name} as a coach for ${D.users[student] ? D.users[student].name : student}.`);
+    audit(user, 'coach.link', { type: 'class', id: cls, name: cls }, `${user.name} linked ${D.users[coach].name} as a coach for ${cls} players.`);
     return link;
   }, { officer: true });
 
@@ -87,7 +99,7 @@ module.exports = function install(ctx) {
     need(i >= 0, 404, 'Link not found.');
     const [gone] = D.coachLinks.splice(i, 1);
     save();
-    audit(user, 'coach.unlink', { type: 'player', id: gone.student, name: D.users[gone.student] ? D.users[gone.student].name : gone.student }, `${user.name} removed ${D.users[gone.coach] ? D.users[gone.coach].name : gone.coach} as a coach for ${D.users[gone.student] ? D.users[gone.student].name : gone.student}.`);
+    audit(user, 'coach.unlink', { type: 'class', id: gone.class, name: gone.class }, `${user.name} removed ${D.users[gone.coach] ? D.users[gone.coach].name : gone.coach} as a coach for ${gone.class} players.`);
     return { ok: true };
   }, { officer: true });
 

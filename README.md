@@ -123,7 +123,9 @@ no dependencies: just Node 18+ and one JSON file of data.
   first (on the Attendance or Events page) and they then appear here like anyone else. Drag members
   between parties, back to the role list, or drag a party by its handle to reorder. Every row shows
   the class and specialization, and the "..." menus (leader crown, move to, remove) do the same on
-  touch screens. Party names are editable.
+  touch screens. Party names are editable. Loading a preset carries over whoever was in the line-up when it
+  was saved, not whoever has actually confirmed for this particular event - anyone still unconfirmed shows
+  dimmed, set apart under their own party rather than looking the same as someone who is really coming.
 - **Parties page (presets)**: saved line-ups. Create one from scratch or use "Save as preset" on an
   event, then load a preset into any upcoming event. Events use the same board. A preset can also be tied to an
   **event type**, for example "use this for every Wargames": it is copied into all upcoming events of that type and
@@ -247,9 +249,11 @@ Good to know:
   or editing an entry, instead of having to type the exact same name again. It is drawn from your own past entries, not an outside
   catalog, so it only ever lists names your guild has actually used.
 - **Class coaches and VOD review**: Admin > Coaches grants coach status (a Discord role and/or specific players, the same mechanism as
-  extra officers) and links each coach to the students they review. A coach sees their linked students' full profile - questlog links,
-  notes, loot and points included - the same as the student sees their own, not the stripped-down view a normal member gets of anyone
-  else. Anyone can post a VOD (a YouTube link) for themselves on the **VODs** page; a coach can also post one for a student they are
+  extra officers) and links each coach to one or more **classes**, not to specific players - whoever is currently playing a linked
+  class is automatically that coach's student, so the list never needs updating by hand as people join, leave, or switch classes.
+  A coach sees their students' full profile - questlog links, notes, loot and points included - the same as the student sees their own,
+  not the stripped-down view a normal member gets of anyone else. Anyone can post a VOD (a YouTube link) for themselves on the **VODs**
+  page; a coach can also post one for a student they are
   linked to. Each VOD's name is always built automatically from its type, the date it was recorded, and (for types where it applies -
   Wargame, Stonefight, GvG Boss) the enemy guild - never typed by hand. A VOD is private by default (the owner, their coach, and
   officers only); only a coach or an officer can share it more widely, with everyone or with a specific class - never the owner
