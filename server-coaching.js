@@ -77,6 +77,18 @@ module.exports = function install(ctx) {
       need(ids.length <= 100, 400, 'That is a lot of individually-chosen coaches - double check the list.');
       st.coachUserIds = [...new Set(ids.map((id) => clean(id, 40)).filter(Boolean))];
     }
+
+    // Keep already-signed-in users in sync with the Admin setting. The session token is
+    // deliberately short-lived state, so without this update a player selected here
+    // would not become a coach until their next Discord sign-in.
+    const D = db();
+    if (body.userIds !== undefined) {
+      const selected = new Set(st.coachUserIds);
+      for (const u of Object.values(D.users)) {
+        if (!u) continue;
+        u.coach = selected.has(u.id) || (u.discordRoles || []).some((r) => st.coachRoleIds.includes(r));
+      }
+    }
     save();
     return st;
   }, { officer: true });

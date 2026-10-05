@@ -1003,7 +1003,7 @@ http.createServer(async (req, res) => {
       // officer and a coach, at the same time.
       const isCoach = coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r));
       if (u.role === 'applicant' && !merc && !db.settings.applications.enabled) return fail(u.whyNot);
-      db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, lastLogin: new Date().toISOString() };
+      db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, discordRoles: Array.isArray(u.roles) ? u.roles : (known?.discordRoles || []), lastLogin: new Date().toISOString() };
       save();
       const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 7);
       res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] });
@@ -1053,6 +1053,12 @@ http.createServer(async (req, res) => {
         const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
         user = readToken(bearer || cookieOf(req, SESSION_COOKIE));
         need(user, 401, 'Please sign in.');
+        // Keep session flags in sync with the persisted user record. Admin coach assignments can
+        // change while someone is already signed in, so the signed session must not retain a stale
+        // `coach` value until the next Discord login.
+        if (user.key && db.users[user.key]) {
+          user.coach = !!db.users[user.key].coach;
+        }
         // Somebody whose application was accepted since they signed in is a member from now on, without signing in again.
         if (user.role === 'applicant' && db.users[user.key] && db.users[user.key].accepted) user.role = 'member';
         if (!bearer && req.method !== 'GET') {           // cookie sessions: block requests that other websites could trigger
