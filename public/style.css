@@ -273,6 +273,13 @@ td.wpn { min-width: 340px; }
 .mrow[draggable=true] { cursor: grab; }
 .mrow.dragging { opacity: .35; }
 .mrow.before { box-shadow: inset 0 3px 0 var(--accent-text); }
+/* A party loaded from a preset can include people who have not actually confirmed Going for this particular
+   event - shown dimmed and set apart, under their own party, rather than looking identical to someone who is
+   really coming. */
+.mrow.not-attending { opacity: .5; background: var(--panel); border-left-color: var(--line); }
+.mrow.not-attending:hover { opacity: .8; }
+.pnotattending { border-top: 1px dashed var(--line); margin-top: 2px; }
+.pnotattending > .muted.small { padding: 5px 8px 3px; }
 .mtxt { flex: 1; min-width: 0; line-height: 1.25; }
 .mname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mmeta { font-size: 13px; color: color-mix(in srgb, var(--text) 72%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

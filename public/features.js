@@ -1033,7 +1033,7 @@ function coachesAdmin() {
   const allRoles = !c ? roleIds.map((id) => ({ id, name: id + ' (checking...)' }))
     : [...c.roles, ...roleIds.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
   const coaches = (S.users || []).filter((u) => u.coach).sort((a, b) => a.name.localeCompare(b.name));
-  const activeMembers = S.members.filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name));
+  const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
   const links = st_coachLinks();
   return `<div class="panel"><h3>Coaches</h3>
     <div class="muted small" style="margin:-6px 0 10px">Coach status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
@@ -1049,14 +1049,15 @@ function coachesAdmin() {
       ${playerPickerFor('cuser', userIds)}
       <button class="btn primary" style="margin-top:10px">Save</button>
     </form>
-    <div class="muted small" style="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--line)"><b>Who each coach reviews</b></div>
+    <div class="muted small" style="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--line)"><b>Which classes each coach reviews</b></div>
+    <div class="muted small" style="margin:-4px 0 10px">Linked by class, not by player - whoever is currently playing that class is automatically that coach's student, so this never needs updating as people join, leave, or switch classes.</div>
     ${coaches.length ? `<form data-form="coach-link" class="link-row">
       <select name="coach" aria-label="Coach">${coaches.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select>
-      <select name="student" aria-label="Student">${activeMembers.map((m) => `<option value="${esc(m.owner)}">${esc(ownerName(m.owner))}</option>`).join('') || '<option value="">No active players yet</option>'}</select>
+      <select name="class" aria-label="Class">${classes.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
       <button class="btn sm primary">Link</button>
     </form>` : '<div class="muted small">No coaches yet - grant coach status above first.</div>'}
-    ${links.length ? links.map((l) => `<div class="rule-row"><span><b>${esc(nameOfUser(l.coach))}</b> coaches <b>${esc(ownerName(l.student))}</b></span><button class="btn sm danger" data-act="coach-unlink" data-id="${l.id}">Remove</button></div>`).join('')
-      : (coaches.length ? '<div class="muted small">No students linked yet.</div>' : '')}
+    ${links.length ? links.map((l) => `<div class="rule-row"><span><b>${esc(nameOfUser(l.coach))}</b> coaches <b>${esc(l.class)}</b> players</span><button class="btn sm danger" data-act="coach-unlink" data-id="${l.id}">Remove</button></div>`).join('')
+      : (coaches.length ? '<div class="muted small">No classes linked yet.</div>' : '')}
   </div>`;
 }
 const st_coachLinks = () => S.coachLinks || [];
@@ -1065,7 +1066,7 @@ FORMS.coaches = (f) => act(() => api('/api/admin/coaches', 'PUT', {
   roleIds: [...f.querySelectorAll('input[name=crole]:checked')].map((i) => i.value),
   userIds: [...f.querySelectorAll('input[name=cuser]:checked')].map((i) => i.value),
 }), 'Saved');
-FORMS['coach-link'] = (f, fd) => act(() => api('/api/admin/coach-links', 'POST', { coach: fd.coach, student: fd.student }), 'Linked');
+FORMS['coach-link'] = (f, fd) => act(() => api('/api/admin/coach-links', 'POST', { coach: fd.coach, class: fd.class }), 'Linked');
 ACTIONS['coach-unlink'] = (el, d) => act(() => api(`/api/admin/coach-links/${d.id}`, 'DELETE'), 'Removed');
 // Same idea as playerPicker() (used for login notices), with its own checkbox name so the two never collide if
 // both forms were ever open at once.

@@ -788,7 +788,7 @@ function memberRow(m, at, o) {
   const cls = classFor(eff.primaryWeapon, eff.secondaryWeapon);
   const meta = [cls, eff.specialization].filter(Boolean).join(' | ') || [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / ');
   const tag = o.ev && o.from === 'pool' ? (o.ev.rsvps[m.id] === 'yes' ? 'going' : '') : '';
-  return `<div class="mrow" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}">
+  return `<div class="mrow ${o.dim ? 'not-attending' : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${o.dim ? ' (not confirmed for this event)' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}
     <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${esc(meta) || '&nbsp;'}</div></div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
@@ -799,6 +799,12 @@ function partyCard(ctx, parties, p, i, ev) {
   const at = `data-kind="${ctx.kind}" data-owner="${ctx.id}" data-i="${i}"`;
   const ms = p.members.map((id) => byId(S.members, id)).filter(Boolean);
   const size = S.cfg.partySize;
+  // A preset carries whoever was in the line-up when it was saved, not whoever actually said Going for THIS
+  // event - so once loaded into an event, anyone in the party who has not confirmed attending (and is not a
+  // mercenary, who was placed here deliberately rather than loaded from a saved line-up) is shown separately,
+  // dimmed, at the bottom of their own party - still visibly part of the plan, but clearly not confirmed.
+  const notAttending = ev ? ms.filter((m) => !m.mercenary && ev.rsvps[m.id] !== 'yes') : [];
+  const attending = ev ? ms.filter((m) => m.mercenary || ev.rsvps[m.id] === 'yes') : ms;
   return `<div class="party" data-party="${i}">
     <div class="phead">
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
@@ -809,7 +815,9 @@ function partyCard(ctx, parties, p, i, ev) {
         <button data-act="p-clear" ${at}>Remove all members</button><button class="danger" data-act="party-del" ${at}>Delete party</button></div></details>` : ''}
     </div>
     <div class="pdrop" ${off ? 'data-drop="party"' : ''} data-i="${i}">
-      ${ms.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev })).join('') || `<div class="pempty">${off ? 'Drop members here' : 'Empty'}</div>`}
+      ${attending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev })).join('') || (notAttending.length ? '' : `<div class="pempty">${off ? 'Drop members here' : 'Empty'}</div>`)}
+      ${notAttending.length ? `<div class="pnotattending"><div class="muted small">Not confirmed for this event</div>
+        ${notAttending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev, dim: true })).join('')}</div>` : ''}
     </div></div>`;
 }
 
