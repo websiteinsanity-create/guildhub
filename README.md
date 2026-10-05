@@ -127,7 +127,9 @@ no dependencies: just Node 18+ and one JSON file of data.
 - **Parties page (presets)**: saved line-ups. Create one from scratch or use "Save as preset" on an
   event, then load a preset into any upcoming event. Events use the same board. A preset can also be tied to an
   **event type**, for example "use this for every Wargames": it is copied into all upcoming events of that type and
-  into every new one you create.
+  into every new one you create. Above every board, a small **notes** panel (officers only) is shared between the
+  Parties page and every event's board - the same note everywhere, for anything worth remembering while building
+  parties, such as who is away this week.
 - **Attendance and points**: one row per player with their **attendance %**, how many events they **came to**, how often
   they said Going but did **not show up** ("no-show"), and how often they **never answered** Going or Can't. Click a row for the
   event-by-event list. Filter by period, mandatory only, role, colour, no-shows or unanswered events; sort by any column. Officers tick who showed up; when points are switched on they are awarded automatically and
@@ -252,12 +254,9 @@ Good to know:
   Wargame, Stonefight, GvG Boss) the enemy guild - never typed by hand. A VOD is private by default (the owner, their coach, and
   officers only); only a coach or an officer can share it more widely, with everyone or with a specific class - never the owner
   themselves. VODs are grouped into one folder per player, named with their current class.
-  Opening a VOD plays it with the normal YouTube controls, plus a **Fullscreen** button, a free-hand **drawing overlay** open to anyone
-  watching (for a coach to sketch over the video while talking it through on Discord voice - nothing here is saved on its own), and, for
-  coaches and officers only, a **Screenshot** button that only works once fullscreen - that is what guarantees a screenshot can only
-  ever capture the video itself, never the rest of the page. It flattens the paused frame and whatever is drawn on it into one picture,
-  labelled with the player's name and the VOD's name, saved in its own **Screenshots** folder on the VODs page, separate from the VOD
-  list itself.
+  Opening a VOD plays it with the normal YouTube controls, plus a **Fullscreen** button and a free-hand **drawing overlay** open to
+  anyone watching, for a coach to sketch over the video while talking it through on Discord voice - nothing here is saved, it is for
+  the moment only.
 - **Proof of use**: an officer can mark any loot entry as confirmed (who confirmed it and when is remembered), for tracking whether a
   player actually showed proof the item was used for what it was given for. Click again to undo it if needed.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the

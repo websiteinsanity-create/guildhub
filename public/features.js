@@ -112,7 +112,11 @@ function profileStanding(key) {
 }
 function viewProfile(key) {
   const off = isOfficer();
-  if (!key || (!off && key !== S.user.key)) key = S.user.key;
+  // A coach can open their own linked student's profile too, not just an officer - this was the actual bug
+  // behind "coaches can't see the full profile": anyone who was neither an officer nor looking at their own
+  // profile was silently sent back to their own, with no exception for a coach looking at their own student.
+  const canOpen = off || (S.myStudents || []).includes(key);
+  if (!key || (!canOpen && key !== S.user.key)) key = S.user.key;
   const own = key === S.user.key, u = S.users.find((x) => x.id === key);
   const name = own ? S.user.name : (u ? u.name : key);
   const profile = S.profiles[key] || {};

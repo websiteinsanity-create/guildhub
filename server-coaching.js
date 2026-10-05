@@ -2,16 +2,10 @@
 // they coach. Students (or their coach) post YouTube VOD links; a coach reviews them live over Discord voice,
 // drawing on a transparent overlay while talking - nothing about that needs this server, since the drawing and
 // the "watching together" both happen in the viewer's own browser and over Discord's own screen share. What
-// this module actually owns: who is a coach, who they coach, the VOD links themselves and who can see each one,
-// and a separate, officer/coach-only "folder" of screenshots coaches save while reviewing (a flattened picture
-// of the paused video plus whatever was drawn on it, captured client-side via the screen-capture permission
-// since a cross-origin YouTube iframe's pixels cannot be read directly - this module only stores the result).
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+// this module actually owns: who is a coach, who they coach, and the VOD links themselves and who can see each one.
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, isOfficer, isCoach, UPLOAD_DIR, audit } = ctx;
+  const { route, need, clean, newId, save, config, isOfficer, isCoach, audit } = ctx;
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
 
@@ -43,16 +37,15 @@ module.exports = function install(ctx) {
   }
 
   // What a signed-in person needs about coaching: their own coach status, who they coach (if anyone), who
-  // coaches them (if anyone, just so their own profile can say so), and the VODs + screenshots they can see.
+  // coaches them (if anyone, just so their own profile can say so), and the VODs they can see.
   function coachingState(user) {
     const D = db(), off = isOfficer(user), coach = isCoach(user);
     const vods = D.vods.filter((v) => canSeeVod(user, v)).map((v) => ({ ...v, canManage: canManageVod(user, v), canPromote: canPromoteVisibility(user, v) }));
-    const screenshots = (off || coach) ? D.vodScreenshots.filter((s) => vods.some((v) => v.id === s.vodId)) : [];
     return {
       isCoach: coach,
       myStudents: coach ? studentsOf(user.key) : [],
       myCoaches: coachesOf(user.key),
-      vods, screenshots,
+      vods,
       coachLinks: off ? D.coachLinks : [],   // the full link list is only useful for the Admin page
     };
   }
@@ -169,45 +162,8 @@ module.exports = function install(ctx) {
     need(i >= 0, 404, 'VOD not found.');
     need(canManageVod(user, D.vods[i]), 403, 'You can only delete your own VODs, or VODs of a player you coach.');
     const [gone] = D.vods.splice(i, 1);
-    D.vodScreenshots = D.vodScreenshots.filter((s) => s.vodId !== gone.id);
     save();
     audit(user, 'vod.delete', { type: 'vod', id: gone.id, name: gone.title }, `${user.name} deleted the VOD "${gone.title}".`);
-    return { ok: true };
-  });
-
-  // ---------------------------------------------------------------- screenshots (coaches and officers only)
-  const sniff = (buf) => (buf.length > 12 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ? 'png' : null;
-
-  route('POST', '/api/vods/:id/screenshot', ({ body, user, params }) => {
-    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
-    need(v, 404, 'VOD not found.');
-    need(isCoach(user), 403, 'Only coaches and officers can save screenshots.');
-    need(canSeeVod(user, v), 403, 'You cannot see this VOD.');
-    const buf = Buffer.from(String(body.image || '').replace(/^data:[^,]*,/, ''), 'base64');
-    need(buf.length > 200, 400, 'That does not look like a picture.');
-    need(buf.length <= 12e6, 413, 'The picture is too large (12 MB at most).');
-    const ext = sniff(buf);
-    need(ext, 400, 'Only PNG screenshots are accepted.');
-    // Matches the exact {kind}-{12 hex chars}.{ext} shape the /uploads/ route's own filename check expects (see
-    // server.js) - a single-word kind (no hyphen inside it) and exactly 12 hex characters, or the saved file
-    // would exist on disk but never actually be reachable through the browser.
-    const name = `vodshot-${crypto.randomBytes(6).toString('hex')}.${ext}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
-    const ownerName = (D.members.find((m) => m.owner === v.owner && m.active) || { name: v.owner }).name;
-    const s = { id: newId(), vodId: v.id, file: name, label: `${ownerName} - ${v.title}`, takenBy: user.name, takenAt: now() };
-    D.vodScreenshots.push(s);
-    save();
-    audit(user, 'vod.screenshot', { type: 'vod', id: v.id, name: v.title }, `${user.name} saved a screenshot from "${v.title}" (${ownerName}).`);
-    return s;
-  });
-
-  route('DELETE', '/api/vod-screenshots/:id', ({ user, params }) => {
-    const D = db(), i = D.vodScreenshots.findIndex((x) => x.id === Number(params.id));
-    need(i >= 0, 404, 'Screenshot not found.');
-    need(isCoach(user), 403, 'Only coaches and officers can manage screenshots.');
-    const [gone] = D.vodScreenshots.splice(i, 1);
-    fs.rmSync(path.join(UPLOAD_DIR, gone.file), { force: true });
-    save();
     return { ok: true };
   });
 
