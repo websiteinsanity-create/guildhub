@@ -72,22 +72,27 @@ test('coach status is granted the same way extra officer status is, and does not
   assert.equal((await call('/api/admin/coaches', 'PUT', { userIds: [] }, 'coach')).status, 403, 'a coach cannot grant coach status to others');
 });
 
-test('an officer links a coach to a student; both directions show up in state; only officers manage links', async () => {
-  assert.equal((await call('/api/admin/coach-links', 'POST', { coach: COACH, student: STUDENT }, 'coach')).status, 403);
-  const link = (await call('/api/admin/coach-links', 'POST', { coach: COACH, student: STUDENT }, 'officer')).body;
+test('an officer links a coach to a class; whoever currently plays that class shows up as a student in both directions; only officers manage links', async () => {
+  assert.equal((await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'coach')).status, 403);
+  const link = (await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer')).body;
   assert.ok(link.id);
-  assert.equal((await call('/api/admin/coach-links', 'POST', { coach: COACH, student: STUDENT }, 'officer')).status, 409, 'no duplicate links');
+  assert.equal((await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer')).status, 409, 'no duplicate links');
+  assert.equal((await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Not a real class' }, 'officer')).status, 400);
 
+  // StudentChar plays Scorpion (Daggers + Crossbow, set up in before()) - linking the class picks them up
+  // automatically, with no student ever chosen by name
   const coachSt = await state('coach');
   assert.deepEqual(coachSt.myStudents, [STUDENT]);
   const studentSt = await state('student');
   assert.deepEqual(studentSt.myCoaches, [COACH]);
+  // OtherChar plays Oracle, a different class, so they are not swept in by this link
+  assert.deepEqual((await state('other')).myCoaches, []);
 
   assert.equal((await call(`/api/admin/coach-links/${link.id}`, 'DELETE', null, 'coach')).status, 403);
 });
 
 test('a VOD is private by default (owner + their coach + officers only); the owner cannot promote its visibility, only a coach or officer can', async () => {
-  await call('/api/admin/coach-links', 'POST', { coach: COACH, student: STUDENT }, 'officer');   // re-link after the previous test's isolated server state
+  await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer');   // re-link after the previous test's isolated server state
   const v = (await call('/api/vods', 'POST', { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', type: 'Siege', recordedDate: '2026-09-26' }, 'student')).body;
   assert.equal(v.visibility, 'private');
   assert.equal(v.videoId, 'dQw4w9WgXcQ');
@@ -136,6 +141,26 @@ test('a non-YouTube link is refused, and only the owner, their coach or an offic
   const ok = (await call('/api/vods', 'POST', { owner: STUDENT, url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', type: 'Siege', recordedDate: '2026-09-26' }, 'coach')).body;
   assert.equal(ok.postedBy, COACH);
   assert.equal(ok.owner, STUDENT);
+});
+
+test('switching classes moves a player in and out of a coach\'s students automatically - nobody has to re-link anything by hand', async () => {
+  await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Oracle' }, 'officer');
+  // OtherChar plays Oracle from the start - already a student of the Oracle coach without any link naming them
+  assert.ok((await state('coach')).myStudents.includes(OTHER));
+
+  // they respec to Crusader - a class this coach is not linked to at all (unlike Scorpion, used by an earlier
+  // test, which would make this ambiguous: still a student there, just via a different link) - so this is the
+  // clean case of actually leaving this coach's roster, not just moving within it
+  const otherMember = (await state('other')).members.find((m) => m.owner === OTHER);
+  // an officer edits directly, so this applies immediately rather than going into the usual approval queue a
+  // player's own weapon change would need - that approval step is a separate concern from what this test covers
+  await call(`/api/members/${otherMember.id}`, 'PUT', { name: 'OtherChar', role: 'Tank', primaryWeapon: 'Greatsword', secondaryWeapon: 'Sword & Shield' }, 'officer');
+  assert.ok(!(await state('coach')).myStudents.includes(OTHER), 'no longer this coach\'s student after switching to an unlinked class');
+  assert.deepEqual((await state('other')).myCoaches, [], 'and they have no coach at all now, with no link to remove by hand');
+
+  // switching back to Oracle picks them back up automatically too
+  await call(`/api/members/${otherMember.id}`, 'PUT', { name: 'OtherChar', role: 'Healer', primaryWeapon: 'Orb', secondaryWeapon: 'Wand & Tome' }, 'officer');
+  assert.ok((await state('coach')).myStudents.includes(OTHER));
 });
 
 test("a coach sees their linked student's full profile - questlog links, notes, loot and points - the same as the student sees their own, and an unrelated player still sees none of it", async () => {
