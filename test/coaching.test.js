@@ -65,7 +65,7 @@ after(stopServer);
 test('coach status is granted the same way extra officer status is, and does not grant officer permissions by itself', async () => {
   assert.equal((await call('/api/admin/coaches', 'PUT', { userIds: [COACH] }, 'student')).status, 403, 'only officers can grant coach status');
   assert.equal((await call('/api/admin/coaches', 'PUT', { userIds: [COACH] }, 'officer')).status, 200);
-  sessions.coach = await discordLogin(COACH, []);   // takes effect on next sign-in, same as officer
+  // The coach was already signed in before the save, so this must work without re-login.
   const st = await state('coach');
   assert.equal(st.isCoach, true);
   assert.equal(st.user.role, 'member', 'being a coach does not make them an officer');

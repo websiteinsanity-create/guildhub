@@ -1012,7 +1012,7 @@ function officersAdmin() {
     : [...c.roles, ...roleIds.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
   return `<div class="panel"><h3>Officers</h3>
     <div class="muted small" style="margin:-6px 0 10px">Officer status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
-      server's .env file. A change here applies the next time that person signs in, not immediately to someone already signed in.</div>
+      server's .env file. Specific-player coach assignments take effect immediately, including for people already signed in. Discord-role assignments are refreshed when Discord sign-in updates their roles.</div>
     <form data-form="officers">
       <label><b>Discord roles that make someone an officer</b></label>
       ${allRoles.length ? allRoles.map((r) => `<label class="tagpick"><input type="checkbox" name="orole" value="${esc(r.id)}" ${roleIds.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')
@@ -1037,7 +1037,7 @@ function coachesAdmin() {
   const links = st_coachLinks();
   return `<div class="panel"><h3>Coaches</h3>
     <div class="muted small" style="margin:-6px 0 10px">Coach status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
-      server's .env file. A change here applies the next time that person signs in, not immediately to someone already signed in. A coach does not get officer
+      server's .env file. Specific-player coach assignments take effect immediately, including for people already signed in. Discord-role assignments are refreshed when Discord sign-in updates their roles. A coach does not get officer
       permissions from this alone - it only ever matters for reviewing the VODs of the students linked to them below.</div>
     <form data-form="coaches">
       <label><b>Discord roles that make someone a coach</b></label>
