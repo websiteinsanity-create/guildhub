@@ -56,7 +56,13 @@ module.exports = function install(ctx) {
       if (attended) { status = 'attended'; came++; } else if (going) { status = 'noshow'; noshow++; } else if (no) status = 'declined'; else status = 'noreply';
       list.push({ ev: e, status, replied });
     }
-    return { counted, came, noshow, noreply, pct: counted ? Math.floor(100 * came / counted) : null, list };
+    // A migration aid: with no real counted events yet, fall back to a starting percentage carried over from
+    // before the guild used Guild Hall, rather than showing nothing at all. The moment there is one real
+    // counted event, this stops being used - counted stays the real (zero) count either way, so nothing here
+    // can trigger a warning off a starting value alone (triggersFor requires counted >= minEvents).
+    const startPct = db().attendanceStarting[owner];
+    const pct = counted ? Math.floor(100 * came / counted) : (startPct === undefined ? null : startPct);
+    return { counted, came, noshow, noreply, pct, list };
   }
 
   function triggersFor(s) {

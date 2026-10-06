@@ -313,3 +313,37 @@ withServer('the party-builder note is officer-only, and the same note is returne
   assert.equal((await call('/api/state', 'GET', null, officer)).body.partyBuilderNote, 'Bob is back, Sam is out instead', 'updating it anywhere updates it everywhere');
   assert.equal((await call('/api/state', 'GET', null, member)).body.partyBuilderNote, undefined, 'still never sent to a plain member');
 });
+
+withServer('in passcode mode, coach status works for a named player and applies live - no persisted user record exists to wait on, so a token issued before the grant still picks it up on its very next request', async ({ call, login, officer }) => {
+  // Zed logs in and gets a token BEFORE being granted coach status
+  const zedToken = await login('Zed', 'm1');
+  assert.equal((await call('/api/state', 'GET', null, zedToken)).body.isCoach, false);
+
+  assert.equal((await call('/api/admin/coaches', 'PUT', { userIds: ['Zed'] }, officer)).status, 200);
+
+  // the SAME, already-issued token now reports coach status on its next request - no re-login needed
+  assert.equal((await call('/api/state', 'GET', null, zedToken)).body.isCoach, true, 'passcode-mode coach status is re-checked live against the setting, not baked into the token');
+
+  // and a brand new login also reflects it immediately
+  const freshToken = await login('Zed', 'm1');
+  assert.equal((await call('/api/state', 'GET', null, freshToken)).body.isCoach, true);
+
+  // removing them from the list revokes it live too, the same way
+  assert.equal((await call('/api/admin/coaches', 'PUT', { userIds: [] }, officer)).status, 200);
+  assert.equal((await call('/api/state', 'GET', null, zedToken)).body.isCoach, false);
+});
+
+withServer('in passcode mode, a coach can actually be linked to a class too - not just granted coach status', async ({ call, login, officer }) => {
+  await call('/api/members', 'POST', { name: 'ZedChar', role: 'DPS', primaryWeapon: 'Daggers', secondaryWeapon: 'Crossbow' }, await login('Zed', 'm1'));
+  assert.equal((await call('/api/admin/coaches', 'PUT', { userIds: ['Zed'] }, officer)).status, 200);
+
+  const r = await call('/api/admin/coach-links', 'POST', { coach: 'Zed', class: 'Scorpion' }, officer);
+  assert.equal(r.status, 200, r.body && r.body.error);
+  assert.equal(r.body.coach, 'Zed'); assert.equal(r.body.class, 'Scorpion');
+
+  // an unknown name is still refused, same as before - this only relaxes the check for real players
+  assert.equal((await call('/api/admin/coach-links', 'POST', { coach: 'NobodyByThisName', class: 'Scorpion' }, officer)).status, 400);
+
+  const unlink = await call(`/api/admin/coach-links/${r.body.id}`, 'DELETE', null, officer);
+  assert.equal(unlink.status, 200);
+});

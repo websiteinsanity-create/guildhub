@@ -338,3 +338,24 @@ withServer('the attendance rules can be paused for a set number of hours and res
   await run(s);
   assert.equal((await state(s, 'ann')).warnings.length, 1, 'resumed by hand, so the same no-show is caught on the next check');
 });
+
+withServer('a starting attendance percentage fills in for a player with no real counted events yet, and stops being used the moment they have one', async (s) => {
+  const c = await cast(s);
+  assert.equal((await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: 85 } }, s.ann)).status, 403, 'members cannot set this');
+  assert.equal((await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: 150 } }, s.officer)).status, 400, 'rejects an out-of-range value');
+
+  const r = await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: 85, Bob: 40 } }, s.officer);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { Ann: 85, Bob: 40 });
+
+  let ann = await state(s, 'ann');
+  assert.equal(ann.attendanceStarting.Ann, 85, 'sent to everyone, not just officers, so a player can see their own fall back correctly');
+
+  // one real counted event for Ann now exists - her starting value should stop being used from here on
+  await pastEvent(s, 2, { came: [c.ann], yes: [c.ann] });
+  await run(s);
+
+  const r2 = await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: null } }, s.officer);
+  assert.equal(r2.body.Ann, undefined, 'a null value clears it');
+  assert.equal(r2.body.Bob, 40, 'clearing one does not touch another');
+});

@@ -23,7 +23,9 @@ no dependencies: just Node 18+ and one JSON file of data.
   **Attendance**. The server does not even send them other people's loot, attendance or requests. In Admin the
   leadership can hide whole sections from normal members (Parties, Member, Loot, Points, Requests, and two dashboard panels).
 - **Requests**: players ask for **Lucent** or an **item** for a specific build. The leadership approves, rejects
-  or marks it as handed over (an item then appears in the Loot section with its type).
+  or marks it as handed over (an item then appears in the Loot section with its type). A player can withdraw their own
+  request while it is still open; an officer can delete any request, in any status - for a troll request, even after
+  rejecting it.
 - **Tags**: the leadership creates tags (text and colour) in Admin and puts them on players on the Member page.
 - **Standing, at a glance**: the leadership sees a Standing column on the Member page (active warnings, attendance %,
   coloured when it needs a look) and a full Standing panel on a player's profile (every active warning with its reason,
@@ -79,7 +81,12 @@ no dependencies: just Node 18+ and one JSON file of data.
 - **Member** (the roster): characters with role, two weapons, an optional **Questlog link**, the **class name** that pair gives in
   Throne and Liberty (for example Wand & Tome / Orb - Oracle), a free-text **specialization** you type
   yourself, gear score, level, rank, Discord. Members manage
-  their own characters (including alts); officers manage everyone.
+  their own characters (including alts); officers manage everyone. With Discord sign-in, an officer can also **kick**
+  a player from a character's edit dialog: their history (loot, points, attendance) is kept and their character is
+  simply deactivated, but their Discord account is flagged so they cannot sign in normally again - even a Discord role
+  or officer/coach status they still technically have cannot override it. They land on the application page instead,
+  same as anyone new, and only get back in if an officer accepts a fresh application from them, which also clears the
+  flag.
 - **Events**: a big **week or month calendar** with colour-coded event types and a **mandatory** flag per event (each
   event type has a default in `config.json`; you can change it per event). Event types include Wargames,
   Tax delivery, Guild bosses, PvE-Raid, Interserver Boonstone/Riftstone and Worldboss (Conflict/Peace). Click an event and a **window opens to the right of the calendar**: the event, your sign-up and the attendance PIN. Officers
@@ -135,7 +142,11 @@ no dependencies: just Node 18+ and one JSON file of data.
 - **Attendance and points**: one row per player with their **attendance %**, how many events they **came to**, how often
   they said Going but did **not show up** ("no-show"), and how often they **never answered** Going or Can't. Click a row for the
   event-by-event list. Filter by period, mandatory only, role, colour, no-shows or unanswered events; sort by any column. Officers tick who showed up; when points are switched on they are awarded automatically and
-  can be adjusted by hand (loot spent, corrections, decay). Attendance rate is tracked per character.
+  can be adjusted by hand (loot spent, corrections, decay). Attendance rate is tracked per character. For a guild moving its whole
+  history onto Guild Hall, the **Starting attendance %** panel on this page lets officers give every player a starting percentage
+  carried over from wherever they tracked it before, instead of everyone showing a blank "-" until real events build up - it only
+  ever fills in until a player has one real counted event here, at which point their actual attendance takes over completely and
+  the starting value stops mattering on its own, with nothing to turn off by hand.
 - **Admin**: the defaults for sign-up closing, the PIN and the reminders, a test message to yourself, the list of
   players, linking old characters to Discord players, backup and restore, and a switch to turn **points for attending** on or off (they are **off** as standard). Every section of the Admin page is a dropdown, and
   "Open all" / "Close all" at the top opens or closes them together.
@@ -251,16 +262,28 @@ Good to know:
 - **Class coaches and VOD review**: Admin > Coaches grants coach status (a Discord role and/or specific players, the same mechanism as
   extra officers) and links each coach to one or more **classes**, not to specific players - whoever is currently playing a linked
   class is automatically that coach's student, so the list never needs updating by hand as people join, leave, or switch classes.
+  Specific-player coach assignments take effect immediately, including for someone already signed in - no need to sign out and back
+  in. This works the same way in passcode mode as it does with Discord sign-in.
   A coach sees their students' full profile - questlog links, notes, loot and points included - the same as the student sees their own,
   not the stripped-down view a normal member gets of anyone else. Anyone can post a VOD (a YouTube link) for themselves on the **VODs**
   page; a coach can also post one for a student they are
   linked to. Each VOD's name is always built automatically from its type, the date it was recorded, and (for types where it applies -
   Wargame, Stonefight, GvG Boss) the enemy guild - never typed by hand. A VOD is private by default (the owner, their coach, and
   officers only); only a coach or an officer can share it more widely, with everyone or with a specific class - never the owner
-  themselves. VODs are grouped into one folder per player, named with their current class.
+  themselves. VODs are grouped into one folder per class - the first thing shown on the page - labelled with
+  that class's two weapon icons, and created automatically the moment the first VOD from someone currently
+  playing it exists; nobody creates or manages these by hand. Opening a class folder shows one smaller folder
+  per player within it. Someone who has respecced moves to their new class's folder on its own, the same way
+  they move in and out of a coach's roster elsewhere; a player with no resolvable class lands in one "Other"
+  folder instead of being silently dropped.
   Opening a VOD plays it with the normal YouTube controls, plus a **Fullscreen** button and a free-hand **drawing overlay** open to
   anyone watching, for a coach to sketch over the video while talking it through on Discord voice - nothing here is saved, it is for
-  the moment only.
+  the moment only, unless it is turned into a **coaching point**: whoever can manage the VOD (its owner or their coach) can save the
+  video's current position as a timestamped note, with whatever is currently drawn on it kept too, and how many seconds before and
+  after that moment the marking should show for. Coaching points list down the side of the player, each one jumping straight to its
+  timestamp and restoring its drawing when clicked - and during normal playback, a coaching point's drawing appears and disappears
+  on its own as the video plays through its time window, without anyone needing to click anything. A note does not need a drawing
+  attached at all; a plain timestamped reminder works just as well.
 - **Proof of use**: an officer can mark any loot entry as confirmed (who confirmed it and when is remembered), for tracking whether a
   player actually showed proof the item was used for what it was given for. Click again to undo it if needed.
 - A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the

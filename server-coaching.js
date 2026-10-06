@@ -5,7 +5,7 @@
 // this module actually owns: who is a coach, who they coach, and the VOD links themselves and who can see each one.
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, isOfficer, isCoach, audit } = ctx;
+  const { route, need, clean, newId, save, config, isOfficer, isCoach, audit, discord } = ctx;
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
 
@@ -47,12 +47,43 @@ module.exports = function install(ctx) {
   function canPromoteVisibility(user, v) {  // "everyone" / "a class" - never the owner's own choice
     return isOfficer(user) || coachesOf(v.owner).includes(user.key);
   }
+  // A coaching point: a note pinned to an exact moment in the VOD, with an optional drawing that reappears on
+  // its own during playback for a short window around that moment (see syncVodMarkerDisplay client-side) -
+  // distinct from the live drawing overlay, which is never saved. Anyone who can manage the VOD can add one.
+  function markerForClient(m) { return { ...m, strokes: Array.isArray(m.strokes) ? m.strokes : [] }; }
+  function cleanMarker(body) {
+    const timestamp = Number(body.timestamp);
+    const before = Number(body.beforeSeconds === undefined ? 2 : body.beforeSeconds);
+    const after = Number(body.afterSeconds === undefined ? 2 : body.afterSeconds);
+    need(Number.isFinite(timestamp) && timestamp >= 0, 400, 'Pick a valid VOD timestamp.');
+    need(Number.isFinite(before) && before >= 0 && before <= 10, 400, 'The time before must be between 0 and 10 seconds.');
+    need(Number.isFinite(after) && after >= 0 && after <= 10, 400, 'The time after must be between 0 and 10 seconds.');
+    const note = clean(body.note, 500);
+    need(note, 400, 'Add a note to the coaching point.');
+    // Strokes are optional - a coaching point can be a plain timestamped note with nothing drawn on it. Points
+    // are stored as fractions of the video frame (0 to 1), not pixels, so they still line up correctly no
+    // matter what size the player is drawn at when the point is viewed again later.
+    const strokes = Array.isArray(body.strokes) ? body.strokes.slice(0, 200) : [];
+    const safeStrokes = strokes.map((stroke) => {
+      const points = Array.isArray(stroke && stroke.points) ? stroke.points.slice(0, 1000) : [];
+      return {
+        color: /^#[0-9a-fA-F]{6}$/.test(String((stroke && stroke.color) || '')) ? String(stroke.color) : '#e2685c',
+        points: points.map((pt) => [Math.max(0, Math.min(1, Number(pt && pt[0]))), Math.max(0, Math.min(1, Number(pt && pt[1])))])
+          .filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1])),
+      };
+    }).filter((stroke) => stroke.points.length >= 2);
+    return { timestamp: Math.round(timestamp * 1000) / 1000, beforeSeconds: Math.round(before * 100) / 100, afterSeconds: Math.round(after * 100) / 100, note, strokes: safeStrokes };
+  }
 
   // What a signed-in person needs about coaching: their own coach status, who they coach (if anyone), who
   // coaches them (if anyone, just so their own profile can say so), and the VODs they can see.
   function coachingState(user) {
     const D = db(), off = isOfficer(user), coach = isCoach(user);
-    const vods = D.vods.filter((v) => canSeeVod(user, v)).map((v) => ({ ...v, canManage: canManageVod(user, v), canPromote: canPromoteVisibility(user, v) }));
+    const vods = D.vods.filter((v) => canSeeVod(user, v)).map((v) => ({
+      ...v,
+      markers: D.vodMarkers.filter((m) => m.vodId === v.id).map(markerForClient).sort((a, b) => a.timestamp - b.timestamp || a.id - b.id),
+      canManage: canManageVod(user, v), canPromote: canPromoteVisibility(user, v),
+    }));
     return {
       isCoach: coach,
       myStudents: coach ? studentsOf(user.key) : [],
@@ -96,13 +127,16 @@ module.exports = function install(ctx) {
   route('POST', '/api/admin/coach-links', ({ body, user }) => {
     const D = db(), coach = clean(body.coach, 40), cls = clean(body.class, 40);
     need(coach && cls, 400, 'Pick a coach and a class.');
-    need(D.users[coach], 400, 'The coach has to have signed in with Discord before.');
+    // Discord mode: the coach must have an actual signed-in record. Passcode mode has no such record for
+    // anyone at all (see /api/login), so a known player - someone who owns an active character - is the
+    // closest equivalent, and the same set the admin picker itself was built from.
+    need(discord.loginEnabled ? D.users[coach] : D.members.some((m) => m.owner === coach && m.active), 400, discord.loginEnabled ? 'The coach has to have signed in with Discord before.' : 'Pick a known player.');
     need((config.classes || []).some((c) => c.name === cls), 400, 'Pick a real class.');
     need(!D.coachLinks.some((l) => l.coach === coach && l.class === cls), 409, 'Already linked.');
     const link = { id: newId(), coach, class: cls, linkedAt: now() };
     D.coachLinks.push(link);
     save();
-    audit(user, 'coach.link', { type: 'class', id: cls, name: cls }, `${user.name} linked ${D.users[coach].name} as a coach for ${cls} players.`);
+    audit(user, 'coach.link', { type: 'class', id: cls, name: cls }, `${user.name} linked ${D.users[coach] ? D.users[coach].name : coach} as a coach for ${cls} players.`);
     return link;
   }, { officer: true });
 
@@ -181,11 +215,46 @@ module.exports = function install(ctx) {
     return v;
   });
 
+  route('POST', '/api/vods/:id/markers', ({ body, user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    need(canManageVod(user, v), 403, 'You can only add coaching points to VODs you can manage.');
+    const data = cleanMarker(body);
+    const marker = { id: newId(), vodId: v.id, createdBy: user.key, createdAt: now(), ...data };
+    D.vodMarkers.push(marker);
+    save();
+    audit(user, 'vod.marker.create', { type: 'vod', id: v.id, name: v.title }, `${user.name} added a coaching point at ${data.timestamp}s to the VOD "${v.title}".`);
+    return markerForClient(marker);
+  });
+
+  route('PUT', '/api/vods/:id/markers/:markerId', ({ body, user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    need(canManageVod(user, v), 403, 'You can only edit coaching points on VODs you can manage.');
+    const marker = D.vodMarkers.find((x) => x.id === Number(params.markerId) && x.vodId === v.id);
+    need(marker, 404, 'Coaching point not found.');
+    Object.assign(marker, cleanMarker(body), { updatedAt: now() });
+    save();
+    return markerForClient(marker);
+  });
+
+  route('DELETE', '/api/vods/:id/markers/:markerId', ({ user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    need(canManageVod(user, v), 403, 'You can only delete coaching points from VODs you can manage.');
+    const i = D.vodMarkers.findIndex((x) => x.id === Number(params.markerId) && x.vodId === v.id);
+    need(i >= 0, 404, 'Coaching point not found.');
+    D.vodMarkers.splice(i, 1);
+    save();
+    return { ok: true };
+  });
+
   route('DELETE', '/api/vods/:id', ({ user, params }) => {
     const D = db(), i = D.vods.findIndex((x) => x.id === Number(params.id));
     need(i >= 0, 404, 'VOD not found.');
     need(canManageVod(user, D.vods[i]), 403, 'You can only delete your own VODs, or VODs of a player you coach.');
     const [gone] = D.vods.splice(i, 1);
+    D.vodMarkers = D.vodMarkers.filter((m) => m.vodId !== gone.id);
     save();
     audit(user, 'vod.delete', { type: 'vod', id: gone.id, name: gone.title }, `${user.name} deleted the VOD "${gone.title}".`);
     return { ok: true };

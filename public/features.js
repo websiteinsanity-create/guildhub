@@ -270,7 +270,7 @@ VIEWS.requests = () => {
       <td>${r.kind === 'Lucent' ? `<b>${Number(r.amount).toLocaleString()}</b> Lucent` : `${esc(r.item)} <span class="type-pill t-${esc(r.lootType)}">${esc(r.lootType)}</span>`}${r.reason ? `<div class="muted small">${esc(r.reason)}</div>` : ''}</td>
       <td><span class="st-pill st-${r.status}">${REQ_STATUS[r.status]}</span>${r.note ? `<div class="muted small">${esc(r.note)}${r.decidedBy ? ` (${esc(r.decidedBy)})` : ''}</div>` : ''}</td>
       <td class="nowrap">${off && (r.status === 'open' || r.status === 'approved') ? `${r.status === 'open' ? `<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="approved">Approve</button> ` : ''}<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="given">${r.kind === 'Item' ? 'Handed over' : 'Paid out'}</button> <button class="btn sm danger" data-act="req-set" data-id="${r.id}" data-s="rejected">Reject</button>` : ''}
-        ${(r.status === 'open' && (r.byKey === S.user.key || off)) ? `<button class="btn sm" data-act="req-del" data-id="${r.id}">${off ? 'Delete' : 'Withdraw'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+        ${((r.status === 'open' && r.byKey === S.user.key) || off) ? `<button class="btn sm ${off ? 'danger' : ''}" data-act="req-del" data-id="${r.id}">${off ? 'Delete' : 'Withdraw'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">${S.requests.length ? 'Nothing matches.' : 'No requests yet.'}</div>`}
   ${off ? '<p class="muted small">"Handed over" (or "Paid out" for Lucent) adds the entry to the Loot section by itself. Players get a Discord message when you decide.</p>' : ''}`;
 };
@@ -361,12 +361,34 @@ function attRows(evs) {
       if (attended) { status = 'attended'; n++; } else if (going) { status = 'noshow'; noshow++; } else if (no) { status = 'declined'; declined++; } else status = 'noreply';
       list.push({ e, status, answer: going ? 'Going' : no ? "Can't" : 'no answer' });
     }
-    const pct = total ? Math.floor(100 * n / total) : null;
+    const startPct = (S.attendanceStarting || {})[owner];
+    const pct = total ? Math.floor(100 * n / total) : (startPct === undefined ? null : startPct);
     const last = S.events.filter((e) => ids.some((id) => e.attended.includes(id))).map((e) => e.start).sort().pop();
     return { owner, name: ownerName(owner), chars, n, total, noshow, noreply, declined, pct, band: pct === null ? 'none' : bandOf(pct, ls), last, bal: ids.reduce((a, id) => a + balance(id), 0), list };
   });
 }
 
+// A one-time migration aid: lets the leadership carry over each player's attendance reputation from
+// wherever they tracked it before, instead of everyone starting from a blank "-". Only ever fills in for a
+// player with no real counted events yet - see playerStats() server-side and attendanceStats()/attRows()
+// client-side, all three of which fall back to this the same way.
+function attendanceStartingPanel(active) {
+  const owners = [...new Map(active.map((m) => [m.owner, m])).values()].sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
+  const starting = S.attendanceStarting || {};
+  return `<details class="panel fold" style="margin-top:16px" data-fold="att-starting">
+    <summary>Starting attendance % <span class="muted small">(a one-time migration aid)</span></summary>
+    <div class="muted small" style="margin:-4px 0 10px">For a guild moving its whole history onto Guild Hall: give each player a starting percentage instead of
+      everyone showing a blank "-" until real events build up. The moment a player has one real counted event here, their actual
+      attendance takes over completely and this stops being used for them - nothing to turn off by hand later. Leave a field blank for no starting value.</div>
+    <form data-form="att-starting">
+      <div class="att-start-grid">
+        ${owners.map((m) => `<label class="att-start-row"><span>${esc(ownerName(m.owner))}</span><input type="number" min="0" max="100" name="${esc(m.owner)}" value="${starting[m.owner] ?? ''}" placeholder="-"></label>`).join('')}
+      </div>
+      <button class="btn primary" style="margin-top:10px">Save all</button>
+    </form>
+  </details>`;
+}
+FORMS['att-starting'] = (f, fd) => act(() => api('/api/admin/attendance-starting', 'PUT', { values: fd }), 'Saved');
 VIEWS.points = () => {
   const off = isOfficer(), ls = lootSettings(), q = UI.attQ.toLowerCase();
   const evs = attEvents(), days = UI.attDays === 'all' ? null : Number(UI.attDays);
@@ -410,6 +432,7 @@ VIEWS.points = () => {
       <td class="num">${r.total ? `${r.n} / ${r.total}` : '-'}${r.total < evs.length ? `<div class="muted small">${evs.length - r.total} on leave</div>` : ''}</td><td class="num">${bad(r.noshow)}</td><td class="num">${warn(r.noreply)}</td>
       <td class="muted small nowrap">${r.last ? fmtShort(r.last) : '-'}</td>${showPts ? `<td class="num ${r.bal > 0 ? 'pos' : r.bal < 0 ? 'neg' : ''}">${r.bal}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : '<div class="empty">Nobody matches these filters.</div>'}
+  ${off ? attendanceStartingPanel(active) : ''}
   ${showPts && off ? `<div class="panel" style="margin-top:20px"><h3>Adjust points</h3>
     <form data-form="points" class="toolbar" style="margin:0">
       <select name="memberId" required aria-label="Character" style="min-width:180px">${active.map((m) => `<option value="${m.id}" ${focus && focus.id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
@@ -1012,7 +1035,7 @@ function officersAdmin() {
     : [...c.roles, ...roleIds.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
   return `<div class="panel"><h3>Officers</h3>
     <div class="muted small" style="margin:-6px 0 10px">Officer status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
-      server's .env file. Specific-player coach assignments take effect immediately, including for people already signed in. Discord-role assignments are refreshed when Discord sign-in updates their roles.</div>
+      server's .env file. A change here applies the next time that person signs in, not immediately to someone already signed in.</div>
     <form data-form="officers">
       <label><b>Discord roles that make someone an officer</b></label>
       ${allRoles.length ? allRoles.map((r) => `<label class="tagpick"><input type="checkbox" name="orole" value="${esc(r.id)}" ${roleIds.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')

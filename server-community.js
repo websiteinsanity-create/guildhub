@@ -62,6 +62,7 @@ module.exports = function install(ctx) {
     a.status = 'accepted';
     const u = (D.users[a.userKey] = { id: a.userKey, name: a.name, username: a.username, avatar: a.avatar, ...(D.users[a.userKey] || {}) });
     u.accepted = true; u.applicant = false; u.acceptedAt = now();
+    u.kicked = false;   // accepting a fresh application is the only way back in after a kick - this is that
     if (!D.members.some((m) => m.owner === a.userKey && m.name.toLowerCase() === a.character.name.toLowerCase())) {
       D.members.push({ id: newId(), owner: a.userKey, joinedAt: now(), builds: [], ...a.character, active: true });            // their character is on the roster straight away
     }
