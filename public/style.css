@@ -590,6 +590,11 @@ details.fold > summary::after { content: ''; flex: none; width: 8px; height: 8px
 details.fold[open] > summary::after { transform: rotate(-135deg); margin-top: 3px; }
 details.fold > summary:hover { color: var(--accent-text); }
 .fold-body { padding: 0 0 16px; }
+/* A player folder nested inside a class folder on the VODs page - smaller and less padded than a top-level
+   fold, so it reads as a sub-level rather than another folder of equal weight. */
+details.vod-player-fold { padding: 0 0 0 4px; border-left: 2px solid var(--line); margin-bottom: 8px; }
+details.vod-player-fold > summary { font-size: 15px; padding: 8px 10px; }
+details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 .count-pill { font-family: var(--body); font-size: 13px; padding: 1px 9px; border-radius: 20px; background: var(--panel-2); color: var(--muted); margin-left: 8px; }
 
 .ql-drop { margin-top: 4px; font-size: 14px; }
@@ -677,3 +682,27 @@ details.fold > summary:hover { color: var(--accent-text); }
 .vod-color { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .vod-color.active { border-color: #fff; }
 
+
+/* Weapon icons: simple inline glyphs, grouped together right before whatever text follows them (the class
+   name once it is known, or the weapon names themselves when it is not) */
+.wicons { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; vertical-align: middle; }
+.wicon { width: 18px; height: 18px; flex: none; object-fit: cover; border-radius: 4px; vertical-align: middle; }
+
+.att-start-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; }
+.att-start-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
+.att-start-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-start-row input { width: 64px; flex: none; }
+
+/* VOD coaching points: the player (left/top) plus a running list of timestamped notes (right/below), each
+   optionally with a saved drawing that reappears on its own as playback reaches that moment again. */
+.vod-review-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, .75fr); gap: 16px; align-items: start; }
+.vod-marker-panel { max-height: calc(100vh - 180px); overflow: auto; }
+.vod-marker-list { display: flex; flex-direction: column; gap: 8px; }
+.vod-marker { display: flex; gap: 8px; align-items: stretch; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.vod-marker.active { border-color: var(--accent); }
+.vod-marker-jump { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; text-align: left; padding: 8px; cursor: pointer; border-radius: 6px; }
+.vod-marker-jump:hover { background: var(--panel-2); }
+.vod-marker-time { display: block; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
+.vod-marker-note { display: block; white-space: normal; overflow-wrap: anywhere; }
+.vod-marker .btn { align-self: center; }
+@media (max-width: 900px) { .vod-review-grid { grid-template-columns: 1fr; } .vod-marker-panel { max-height: none; } }

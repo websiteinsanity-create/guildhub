@@ -224,9 +224,10 @@ function migrate() {
   db.loot = db.loot || [];
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
-  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots']) db[k] = db[k] || [];
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers']) db[k] = db[k] || [];
   for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
   db.partyBuilderNote = typeof db.partyBuilderNote === 'string' ? db.partyBuilderNote : '';
+  db.attendanceStarting = (db.attendanceStarting && typeof db.attendanceStarting === 'object') ? db.attendanceStarting : {};
   db.infoBoard = db.infoBoard && Array.isArray(db.infoBoard.categories) ? db.infoBoard : { categories: [] };
   db.infoBoard.title = db.infoBoard.title || 'Info';
   db.settings.compliance = { ...SETTING_DEFAULTS.compliance, ...(db.settings.compliance || {}) };
@@ -349,7 +350,10 @@ route('POST', '/api/login', ({ body, ip }) => {
     failures.get(ip).push(Date.now());
     throw new HttpError(401, 'Wrong passcode.');
   }
-  const user = { key: name, name, role };
+  // Passcode mode has no Discord roles to check, only the specific-player list - and no persisted db.users
+  // record either (unlike Discord sign-in), so this is re-checked fresh on every request below rather than
+  // relying on what the token says, the same way Discord-mode coach status now works.
+  const user = { key: name, name, role, coach: db.settings.coachUserIds.includes(name) };
   return { token: makeToken(user), user };
 }, { auth: false });
 
@@ -393,6 +397,29 @@ function deleteMemberCascade(m) {
   for (const p of db.presets) p.parties = p.parties.map((q) => dropFromParty(q, m.id));
   for (const h of hooks.memberDeleted) h(m);
 }
+// A kick is not a delete: history (loot, points, attendance) stays exactly as it is, and the character is just
+// deactivated, same as if they had left on their own. What makes it a kick rather than that is the Discord
+// account itself gets flagged, checked at the top of every future sign-in (see the OAuth callback below) -
+// instead of landing in the guild normally (even if they still have the Discord role, even if they were
+// accepted before), they are sent to the application page to ask to come back, same as anyone new. Accepting
+// a fresh application from them clears the flag - see /api/applications/:id.
+route('POST', '/api/admin/kick', ({ body, user }) => {
+  need(discord.loginEnabled, 400, 'Kicking a specific player only makes sense with Discord sign-in, which this server is not using.');
+  const owner = clean(body.ownerKey, 40);
+  need(owner, 400, 'Pick a player.');
+  need(db.users[owner], 404, 'That player has never signed in with Discord.');
+  need(owner !== user.key, 400, 'You cannot kick yourself.');
+  const reason = clean(body.reason, 300);
+  const chars = db.members.filter((m) => m.owner === owner && m.active);
+  for (const m of chars) m.active = false;
+  db.users[owner].kicked = true;
+  db.users[owner].kickedAt = new Date().toISOString();
+  db.users[owner].kickedBy = user.name;
+  db.users[owner].kickReason = reason;
+  save();
+  audit.log(user, 'player.kick', { type: 'player', id: owner, name: db.users[owner].name }, `${user.name} kicked ${db.users[owner].name}${reason ? ` (${reason})` : ''}. They can no longer sign in normally and will be sent to re-apply.`);
+  return { ok: true };
+}, { officer: true });
 route('DELETE', '/api/members/:id', ({ user, params }) => {
   const m = findMember(params.id);
   need(m, 404, 'Character not found.');
@@ -551,6 +578,23 @@ route('DELETE', '/api/points/:id', ({ params, user }) => {
 }, { officer: true });
 
 // Guild-wide settings (officers only).
+// A one-off migration aid for a guild moving its whole roster onto Guild Hall: lets the leadership give
+// everyone a starting attendance percentage, carried over from wherever they tracked it before, instead of
+// everyone showing a blank "-" until real event history builds up. It only ever fills in for a player with
+// no real counted events yet - the moment they have one, their actual attendance takes over completely and
+// this value stops mattering, so there is nothing to "turn off" later.
+route('PUT', '/api/admin/attendance-starting', ({ body, user }) => {
+  const values = body.values && typeof body.values === 'object' ? body.values : {};
+  let changed = 0;
+  for (const [owner, raw] of Object.entries(values)) {
+    if (raw === null || raw === '') { if (owner in db.attendanceStarting) { delete db.attendanceStarting[owner]; changed++; } continue; }
+    const pct = Math.round(Number(raw));
+    need(Number.isFinite(pct) && pct >= 0 && pct <= 100, 400, `${raw} is not a percentage between 0 and 100.`);
+    if (db.attendanceStarting[owner] !== pct) { db.attendanceStarting[owner] = pct; changed++; }
+  }
+  if (changed) { save(); audit.log(user, 'attendance.starting', { type: 'settings' }, `${user.name} set a starting attendance percentage for ${changed} ${changed === 1 ? 'player' : 'players'}.`); }
+  return db.attendanceStarting;
+}, { officer: true });
 route('PUT', '/api/party-builder-note', ({ body }) => {
   db.partyBuilderNote = clean(body.note, 2000);
   save();
@@ -994,14 +1038,20 @@ http.createServer(async (req, res) => {
       const merc = cookieOf(req, 'gh_merc') === '1';
       const u = await discord.resolveUser(code);
       const known = db.users[u.id];
-      if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
+      // A kicked player is sent to the application page like anyone new, regardless of their Discord role or
+      // having been accepted before - overrides everything else below. Accepting a fresh application from
+      // them clears this (see /api/applications/:id), which is the only way back in.
+      if (known && known.kicked) { u.role = 'applicant'; u.whyNot = 'You were removed from the guild. You can send a new application below.'; }
+      else if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
       // Officer status can also be granted in Admin > Officers, without editing .env or restarting the server -
       // by a specific Discord role (on top of DISCORD_OFFICER_ROLE_IDS) or a specific player directly.
+      const kicked = known && known.kicked;
       const { officerRoleIds: xRoles, officerUserIds: xUsers, coachRoleIds, coachUserIds } = db.settings;
-      if (u.role !== 'officer' && (xUsers.includes(u.id) || (u.roles || []).some((r) => xRoles.includes(r)))) u.role = 'officer';
+      if (!kicked && u.role !== 'officer' && (xUsers.includes(u.id) || (u.roles || []).some((r) => xRoles.includes(r)))) u.role = 'officer';
       // A coach is a separate, narrower flag, not a role - someone can be a normal member and a coach, or an
-      // officer and a coach, at the same time.
-      const isCoach = coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r));
+      // officer and a coach, at the same time. Neither this nor officer status above can override a kick -
+      // being in either list from before does not let a kicked player back in through the side door.
+      const isCoach = !kicked && (coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r)));
       if (u.role === 'applicant' && !merc && !db.settings.applications.enabled) return fail(u.whyNot);
       db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, discordRoles: Array.isArray(u.roles) ? u.roles : (known?.discordRoles || []), lastLogin: new Date().toISOString() };
       save();
@@ -1058,6 +1108,10 @@ http.createServer(async (req, res) => {
         // `coach` value until the next Discord login.
         if (user.key && db.users[user.key]) {
           user.coach = !!db.users[user.key].coach;
+        } else if (!discord.loginEnabled) {
+          // Passcode mode has no persisted db.users record to re-check against (sign-in never writes one),
+          // so the setting itself is the live source of truth here instead.
+          user.coach = db.settings.coachUserIds.includes(user.key);
         }
         // Somebody whose application was accepted since they signed in is a member from now on, without signing in again.
         if (user.role === 'applicant' && db.users[user.key] && db.users[user.key].accepted) user.role = 'member';

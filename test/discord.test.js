@@ -307,6 +307,50 @@ test('an application: needs a character and a few words, one at a time; the lead
   assert.equal(fake.state.roleAdds.length, 0, 'no member role is configured, so no role is given');
 });
 
+test('kicking a player: their character is deactivated (not deleted), they cannot sign in normally again, and officer/coach status from before cannot override that', async () => {
+  // B is an existing member with a character; also add them to the officer list by specific player, to prove
+  // a kick cannot be undone by some other access they still technically have on paper
+  await call('/api/admin/officers', 'PUT', { userIds: [B] }, 'A');
+  const beforeKick = await state('B');
+  const charId = beforeKick.members.find((m) => m.owner === B).id;
+
+  assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: B, reason: 'Inactive for months' }, 'B')).status, 403, 'members cannot kick');
+  assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: A, reason: 'oops' }, 'A')).status, 400, 'cannot kick yourself');
+  assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: '999999999999999999' }, 'A')).status, 404, 'has to be a real, signed-in player');
+
+  const r = await call('/api/admin/kick', 'POST', { ownerKey: B, reason: 'Inactive for months' }, 'A');
+  assert.equal(r.status, 200);
+
+  const afterKick = await state('A');
+  const char = afterKick.members.find((m) => m.id === charId);
+  assert.equal(char.active, false, 'deactivated, not deleted');
+  const auditLog = (await call('/api/admin/audit', 'GET', null, 'A')).body;
+  assert.ok(auditLog.entries.some((e) => e.action === 'player.kick'));
+
+  // signing in again - even though they are STILL on the officer-by-specific-player list - lands them as an
+  // applicant, not an officer and not a member
+  const relogin = await discordLogin(B, [OFFICER_ROLE]);
+  sessions.B = relogin.cookie;
+  const st = await state('B');
+  assert.equal(st.user.role, 'applicant');
+  assert.ok(!st.isCoach, 'not a coach either - an applicant has no coach status to report at all');
+
+  // they can apply again like anyone new
+  const app = (await call('/api/applications', 'POST', { characterName: 'SecondChance', role: 'DPS', about: 'Sorry about before, I would like to come back.' }, 'B')).body;
+  assert.equal(app.status, 'pending');
+
+  await call('/api/applications/' + app.id, 'PUT', { decision: 'accept', note: 'Welcome back' }, 'A');
+  // the same session is in again immediately, same as any other acceptance - no longer an applicant
+  assert.notEqual((await state('B')).user.role, 'applicant');
+
+  // and it sticks on a brand new sign-in too, with the kick flag genuinely cleared, not just the live session -
+  // back to 'officer' specifically because they were never actually removed from that list, only overridden
+  // while the kick itself was in effect; that override is gone now that they have been accepted again
+  const again = await discordLogin(B, [OFFICER_ROLE]);
+  sessions.B2 = again.cookie;
+  assert.equal((await state('B2')).user.role, 'officer');
+});
+
 test('a rejected applicant may apply again; a withdrawn application is gone; accepted people can sign in later without being in the server', async () => {
   const lone = '100000000000000011';
   const login = await discordLogin(lone, null); sessions.Y = login.cookie;

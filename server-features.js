@@ -85,7 +85,17 @@ module.exports = function install(ctx) {
       // every event's board, officer-only. Kept separate from the settings object above (which is sent to
       // everyone) so the note's actual content never reaches a non-officer, not just hidden from their view.
       partyBuilderNote: off ? (D.partyBuilderNote || '') : undefined,
-      users: Object.values(D.users).filter((u) => !u.applicant).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role, coach: !!u.coach })),
+      // Not sensitive, and a member needs their own value to see their own attendance % fall back to it
+      // correctly (the client computes its own attendance numbers rather than asking the server every time),
+      // so this goes to everyone rather than being officer-only like the note above.
+      attendanceStarting: D.attendanceStarting,
+      // Passcode mode has no persisted per-player record at all (signing in never writes one - see
+      // /api/login), so "known players" there is built the same way the client's own allPlayers() already
+      // does: straight from who owns an active character, with coach status read live off the setting
+      // itself rather than off a user record that will never exist.
+      users: discord.loginEnabled
+        ? Object.values(D.users).filter((u) => !u.applicant).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role, coach: !!u.coach }))
+        : [...new Set(D.members.filter((m) => m.active).map((m) => m.owner))].map((o) => ({ id: o, name: o, avatar: '', role: 'member', coach: D.settings.coachUserIds.includes(o) })),
       now: Date.now(),
     };
   }

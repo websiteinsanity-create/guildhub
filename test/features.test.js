@@ -202,6 +202,8 @@ withServer('lucent and item requests: per build, own view for members, given ite
   assert.equal((await s.call('/api/requests/' + lucent.id, 'PUT', { status: 'approved', note: 'ok' }, s.officer)).body.status, 'approved');
   assert.equal((await s.call('/api/requests/' + lucent.id, 'PUT', { status: 'approved' }, s.officer)).status, 409);
   assert.equal((await s.call('/api/requests/' + lucent.id, 'DELETE', null, s.ann)).status, 403, 'cannot withdraw once it was looked at');
+  assert.equal((await s.call('/api/requests/' + lucent.id, 'DELETE', null, s.officer)).status, 200, 'an officer can delete it anyway, in any status - for a troll request even after it has been rejected');
+  assert.equal((await state(s, 'officer')).requests.some((r) => r.id === lucent.id), false);
   assert.equal((await s.call('/api/requests/' + item.id, 'PUT', { status: 'given' }, s.officer)).body.status, 'given');
   const loot = (await state(s, 'ann')).loot;
   assert.equal(loot.length, 1); assert.deepEqual([loot[0].item, loot[0].type], ['Skillcore: Heal Pulse', 'Skillcore']);

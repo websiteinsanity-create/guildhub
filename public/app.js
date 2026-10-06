@@ -1,7 +1,7 @@
 'use strict';
 /* ================= state & helpers ================= */
 const S = { cfg: null, user: null, members: [], events: [], points: [], duties: [], presets: [], loot: [], presetRules: [], users: [], applications: [], application: null, notices: [], leaves: [], warnings: [], explanations: [], alert: null, infoBoard: { title: 'Info', categories: [] }, requests: [], changes: [], profiles: {}, series: [], tags: [], playerTags: {}, prefs: {}, settings: { lootFrom: '', lootThreshold: 60, lootRedMax: 59, lootOrangeMax: 80, lootItemDays: 7, pointsEnabled: true, signupCloseDefault: 30, pinOffsetMinutes: 0, pinWindowDefault: 15, reminderMinutes: [300, 120], remindersEnabled: true, approvals: {}, hiddenSections: [], branding: {}, compliance: {} }, now: Date.now() };
-const UI = { rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
+const UI = { vodJump: null, rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
 // Pages, click actions, change handlers and form handlers can be added from features.js.
 const AFTER_RENDER = [];  // functions run after a page was drawn (page name as argument)
 const VIEWS = {};      // page name -> function that returns the page's HTML
@@ -81,11 +81,30 @@ const classFor = (a, b) => {
   return c ? c.name : '';
 };
 const classOf = (m) => classFor(m.primaryWeapon, m.secondaryWeapon);
+// Custom weapon icon artwork (the guild's own, supplied directly as images), one small JPEG per weapon
+// embedded as a data URI so the whole app stays a single self-contained file with no separate image requests.
+const WEAPON_ICONS = {
+  'Sword & Shield': 'data:image/jpeg;base64,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',
+  'Greatsword': 'data:image/jpeg;base64,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',
+  'Spear': 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCABAAEADASIAAhEBAxEB/8QAHAAAAQQDAQAAAAAAAAAAAAAABQACBAYBAwcI/8QAMhAAAgEDAwIDBgYCAwAAAAAAAQIDBAURABIhBjETQVEHIjJhcaEUFSNCYoFSkbHB8P/EABgBAAMBAQAAAAAAAAAAAAAAAAMEBQIB/8QAKBEAAQQBAgYCAgMAAAAAAAAAAQACAxEhBEESMVFhcfCh0TKBYpGx/9oADAMBAAIRAxEAPwDzFPBJTSvDNG8UsbFXRxhlI7gjyOteNSa+qWurJalYBAJTuMYYkA455PPfn+9RtECyUsaRGs6WNapctYxpY04rgDBzkZ+mshO+tBhWS5MxnWxImc4UE6JWTpy59QVi0lvo5Z5WAbgYCrnG5ieFX5nA13zpz2d9P+yWngrr41Jd+pqlPHgUpvprbCMkzlT8ZGDtLcEgkDAyWGQZHHugvlABI2XnBhpuNbZFxpgGdKsFpqQUUgNEqfp+vnhFQYDFBjPiSnYCPUZ5I+gOiFGtL09Rx1tVClRXTDdTwtyEH+ZH/Hnxxj4tQrnVVlbIz19UzSNhhCvZc+o7D7nTzIQMlJulvDUXvtjpB+WwUtXTrGlMsf4h8qtQ25izrxnGT5jRS0eyK/3Whqq2mp4qiOndE2wtveTdn4FHJxjJzjGhdg6QuN/8P8TPDQW6ki3vV1rbYoIyxOMd2YnOFHJ+Q511/pCOz2KxUl2t9bXVlDap53RnDRRVk4QYCoOQASWJx8s8csvnibIGtjyaxfIVZ6bfaBwPEReX48czdD5+lLv0t49m/RVttllt9rsrVUCNUPKqPVTTKBwQxIIVsksfdXAABbXPfaFfLk1hatudRNPX3oiHxJWIfwIgFPH8jj/batV8utvkobjfOpLshvUoUQ0tOqTPAuAQrLnbFkYAzkjceN2dcc6nvVy6gqUrrnJvl2iJQBgAKB2HYZz5aFGRIx07jbs8tr7+Ft7SHCICm/JIzy8oRIedTLJTwz1ympOIIwZJMdyoGTj+gdQ5WDyMyoEBOQoJIHy551Y7LdrbBa66na2KweECYmUmWTnja2MLjk9u3roOhjD3CzSZ1zy1p4UFqayatq5K6QhZZGyFUcIBwAPQAYA+miltFRbIfxMKhK2oVvDkfH6aebDP7j2/3ofQUpqayOJaeWXxDhY0b3m+Wca6PSdD04qZ6+/VQo6ajCLJFE/iOq8ALjHxHso5JJ+p1R07A1jpnnA9vz0UyeUcbYG8zt7t12pATba2qp6OsutSY7fDFvkZWyzkkjaoOdzvjHp64AOnRdRPdKsVNa6U1ttS5hp0X3P4KEGAzk5ZmGMkEnjRX2hdVJdoKO2woIlikMdNTRRqBTw5wAxAyZCeSR5caqdPaIpZZqfdPmBS8hyNgxxx8+QNCdo3ao5bR8+5KNHqWwDDrHvx/qh1SvUmSdN6RPIZHYn4+7KT8+/9nSuIFbaqesyDJEfBkH3B+x+2rLZ6OB+l7pI0bHwAyKG5I3LkMfIYwf7YaFQ3ehg6cekNpiZWlUys8rFpmAOCCPhA54Hrp+bStjYBdBwv9hLR6kyPNDLTX9hVYnJ0SsdQkVXslXdHKpjb15/999Cs50W6eo2qq9GZP0I/emkb4Y1HOSfL/vUHSP4XgkqrqRxtIV5lsH5RXPYbdVRxCkijnuF1ZcGIMPewRyAOMAcknA0OvvVJ3RUVteSKOkYCFXA3HjHiuexcjA/iOB5k6upOpHuMa2ynmkjptysJGXDStz7z458+F/aD5knQeW2pb1b8zwkwYALE2SRjzPYeXfn5aqAvlfxnDR+IOK7n+XT7U2NrYYwxxt5/I9etdveSnrb6usNt/CRGarqFYkgZbduIOTq4wdKtR0Ev5pWU1DLMwM0jMpdgowF5IUHk57+XpoDADZOj4rs8klM9f4kdIoch5gGw2MdlByWPnwNVynpKmvJNNDLPKvMs7nCofmx4H1J1VEzIaIySOvuSpT4pNRYDuFrSRdc89zVD95Vh6ovdPDaoOm7Gu6OSXxah095p3OAq5/d2HkBngdsmsXl4qaKG3xMr+DzK69mfzwfTJP21JklhtKS+DOlRXFCGn3YWIYwVjzyWI43enbHfVfdyxydSdbqi4knf4CraLStYAG8hnyTuv//Z',
+  'Crossbow': 'data:image/jpeg;base64,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',
+  'Daggers': 'data:image/jpeg;base64,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',
+  'Staff': 'data:image/jpeg;base64,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',
+  'Wand & Tome': 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCABAAEADASIAAhEBAxEB/8QAHAAAAgIDAQEAAAAAAAAAAAAABAUDBgACBwEI/8QAMRAAAQQBAgUDBAECBwAAAAAAAQIDBBEFACEGEjFBURMiYRQycYFCByMVUnORocHw/8QAGQEAAgMBAAAAAAAAAAAAAAAAAgQAAwUB/8QAKREAAQMDAwIGAwEAAAAAAAAAAQACAwQRIRIxQXHwBRMjYYHBIpHhof/aAAwDAQACEQMRAD8A+X9ZrNbAHxq8NJQBa6zUzMV6QsIabUskgUPJ8nt+9N85gUwXYzMUodUmOgPqQqwXrPNR6EDYbbbaubTPcCQEYYSLhItG4rC5DNy2omPhvSXnSQhKE3dCyfAAG5J2HfTXhrBGRlfSnRnS2lFj22nnOyQqj0JPQGz023OutcScNvf0xwkePw681LROafQp4n3rdV/aKVDoAkhRJ6bdSASW6ajbISHm1gT+sqt7gwgEbrgjieRxSLBo1Y6HXl63cQtKzY/YG2ozpOaPSTiyIrdKbNae4rFQ0Rfr8opbUaxRTuTtYATYJJ7CxtuSB1X4aF9dPba5QoE2Qdgd6A/ZIH++p8rk0TcgKTzRGAW2kg1zDuv8qO/4odhpqmaBYnlGwAC5R+bzOTjtNw0Y9GKjlvmSktArdSf5cxFbivtAGlEzIyprUFCypBjNekhaCbV7jv8Anev1py0zI4sZketLUp6Czcb+37VoB3b26EDcdtj5vR3BuCbk5FiVN9AxICFOyA4o2ijY2SbKiSKA+L05UQPYHPJOji+xyPhGXkkgFM+C5znC/D8ziTJSXhJkH6bHpfJUDy/e4UkGwkkAfO3S9VaVxK5LCWwt9lCeZtS0LNKbPav2e/fTbiXKJ4rzZSgrVFaJQiJzECM3ewCv5EXfybPfUMv+n8kUcXKTI50FaY8gei8pI8AmlfFHetZlNL5chkkzc/H9XXXIAH9SafFSiKj6eU4+xdi+iCev/WlShRI8abJjTMLKSxPhvxm36JD7ZSPhQvr+u2gJ7BYkrTRq7B8jWh4g9k7BK3jCrcMXVn4cwLyce9NMyDHffRyRULko5id7K9/YK81vWhOE+Gnc5nkYQIaL6iocynAW2gASpZINKoDpegcEj6l5cLm5RJAR+N+ujeF5qsO5McC1MykNhACbCwOdIcCfnlChv2J0xQxNe6MHbKGc+kNKNk56eJn+C4EBSFyEoYU3GQh54n2gWkXRv7brffU2fmRsdBa4Ww7gWkOF+a8PcHX6q0n/ACo6D5s+Do5OOZ4PhuvxULczGVSUQk7KMSMvbn/1Fi0g7Umz1I0ri4g4eWfr6R6iD/IKIQR9xAO1nse2kPFJpJ5zETgXx0RQsaxupo3Vj4U4MyLuNVJjQ0MxmklS31o5+YEbWRdnsAO5GtcnJUpJXMRTjBQgtOErTQGwSP4p6Cr86PxXE2VxePOOj8jQXzKUoFCUXsAKsCvN7m/jSWNPixluTH0oKkOBSUpsMuO1YSNqHLdmq+NKMk03NhjbpzfqjLcABe8fcSSJOOawb7imgi1ymmQkNpXVobSkbe2xzHqSe2qrmcU/6TLyVsvKQyC8UOpISokmhvvQI6fOhpzb+VlrShfqulew3taiST172b386HyK922OYLSynlBHfc6aZS+RTnUMO277+1C/VclRxHlsuBTe6zsNr/8AeNdAx+AOKbRxTmYqY4SFenDkjec8BsCLBCRVrPzt12rPBmHYyWQU9NkSokOKEuOyI7QcWi1ACkk7nrQ86l4qzSHZL0NiI3HjIabajsoc5/QSCSeY91n+R23J8DRCaSOIBuPrp/qjLBv5KOVOm5nIKzaZDqlOOguLBCVMkVSgB27eBVdtFx+Jw9LU7PDEl8LJ51oDalHzY2I+CP3pRDfxzhuWlbaya52q2+Skgg/8fnTh6Hil8NqLbqH5Tr6VmR6HKmOgJV7CfJO5qxt8abfRQTeo02Nu/cLjA/g35TjF4djiCRJc+tr1Eq5G1JAeDprlPKPvSTtY7ntpFxY8EyU4yAr148MhlCkC+Zy/crbyeh8AedK4kiPEkoP1jpaWkp5gOUtHsRuTse+oomSXEnCQkBxKTRs0FDz8XrKEcjZiCbgbDv2REttayasxU8NsmbIdbXLf5kNsj3LbHcq7JUb/ACBffVbdUS4q+t6kkSVvqJJB9xVsK3OoNO19a2RoiYLNH3uqnEcL/9k=',
+  'Orb': 'data:image/jpeg;base64,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',
+  'Gauntlet': 'data:image/jpeg;base64,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',
+  'Longbow': 'data:image/jpeg;base64,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',};
+const weaponIcon = (name) => WEAPON_ICONS[name] ? `<img class="wicon" src="${WEAPON_ICONS[name]}" alt="" aria-hidden="true">` : '';
 const weaponLine = (m) => {
   const w = [m.primaryWeapon, m.secondaryWeapon].filter(Boolean);
   if (!w.length) return '<span class="muted">-</span>';
   const cls = classOf(m);
-  return `${esc(w.join(' / '))}${cls ? ` - <span class="cls">${esc(cls)}</span>` : ''}${m.specialization ? ` <span class="spec">| ${esc(m.specialization)}</span>` : ''}`;
+  const icons = w.length ? `<span class="wicons">${w.map(weaponIcon).join('')}</span>` : '';
+  // Once the class is known, the icons already say which two weapons that is - showing the weapon names as
+  // text too would just repeat the same information twice. Without a resolvable class there is no name to
+  // show instead, so the weapon names stay as text, just with their icons in front of them.
+  const names = cls ? `<span class="cls">${esc(cls)}</span>` : w.map((n) => esc(n)).join(' / ');
+  return `${icons}${names}${m.specialization ? ` <span class="spec">| ${esc(m.specialization)}</span>` : ''}`;
 };
 const fmtDate = (iso) => `${new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() })} ${tzAbbr(new Date(iso).getTime())}`;
 const fmtShort = (iso) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() });
@@ -116,7 +135,13 @@ function myStatus(e) {
 function attendanceStats(id) {
   const recorded = S.events.filter((e) => new Date(e.start) < Date.now() && rolled(e));
   const n = recorded.filter((e) => e.attended.includes(id)).length;
-  return { n, of: recorded.length, pct: recorded.length ? Math.round(100 * n / recorded.length) : null };
+  // A migration aid: with no real recorded events yet for this character, fall back to a starting percentage
+  // the leadership carried over from before the guild used Guild Hall, keyed by owner (set in Admin) - this
+  // stops applying the moment there is one real recorded event.
+  const owner = (byId(S.members, id) || {}).owner;
+  const startPct = (S.attendanceStarting || {})[owner];
+  const pct = recorded.length ? Math.round(100 * n / recorded.length) : (startPct === undefined ? null : startPct);
+  return { n, of: recorded.length, pct };
 }
 const enc = encodeURIComponent;
 const classPreviewText = (a, b) => { const c = classFor(a, b); return c ? 'Class: ' + c : a && b && a !== b ? 'Class: this pair has no name in the list yet (it works, the weapons are shown instead)' : 'Class: pick two different weapons'; };
@@ -267,8 +292,6 @@ window.addEventListener('hashchange', () => {
   if (!S.user) return;
   render();
   refresh().catch(() => {});                       // pick up changes other people made while you were on another page
-  const r = route();
-  if (r.page === 'events' && r.id) { const d = $('#ev-detail'); if (d) d.scrollIntoView({ block: 'start' }); }
 });
 
 /* ================= dashboard ================= */
@@ -471,8 +494,8 @@ function viewRoster() {
       <td>${esc(m.rank)}</td><td>${esc(m.discord)}</td>
       ${isOfficer() ? `<td><a href="#/profile/${enc(m.owner)}" class="plain standing-cell">
           ${wn.length ? `<span class="standing-flag warn">⚠ ${wn.length} ${wn.length === 1 ? 'warning' : 'warnings'}</span>` : ''}
-          ${a && a.of ? `<span class="standing-flag ${a.pct < 60 ? 'low' : ''}">${a.pct}% attendance</span>` : ''}
-          ${!wn.length && !onLeave && (!a || !a.of) ? '<span class="muted small">-</span>' : ''}
+          ${a && a.pct !== null ? `<span class="standing-flag ${a.pct < 60 ? 'low' : ''}">${a.pct}% attendance${a.of ? '' : ' (starting)'}</span>` : ''}
+          ${!wn.length && !onLeave && (!a || a.pct === null) ? '<span class="muted small">-</span>' : ''}
         </a></td>
         <td class="tagcell">${tagsOf(m.owner).map(tagChip).join('')}<button class="btn sm" data-act="tags-edit" data-key="${esc(m.owner)}" aria-label="Edit tags of ${esc(ownerName(m.owner))}">Tags</button></td>` : ''}
       <td>${canEdit(m) ? `<button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button>` : ''}</td>
@@ -538,6 +561,7 @@ function memberDialog(m) {
     <div class="field"><label>Notes</label><textarea name="notes" maxlength="500">${esc(m.notes)}</textarea></div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" name="active" ${m.active ? 'checked' : ''}> Active (uncheck if taking a break or left)</label>
     <div class="dlg-actions">
+      ${!isNew && isOfficer() && S.cfg.authMode === 'discord' ? `<button type="button" class="btn danger left" data-act="member-kick" data-owner="${esc(m.owner)}" data-name="${esc(ownerName(m.owner))}" title="Blocks them from signing in normally again - they are sent to re-apply instead">Kick</button>` : ''}
       ${isNew ? '' : '<button type="button" class="btn danger left" data-act="member-delete">Delete</button>'}
       <button type="button" class="btn" data-act="dlg-close">Cancel</button>
       <button class="btn primary">Save</button>
@@ -786,11 +810,15 @@ function memberRow(m, at, o) {
   const off = isOfficer();
   const eff = effectiveBuild(m, o.from === 'party' ? (o.parties || [])[o.i] : null);     // the class this player plays in this party
   const cls = classFor(eff.primaryWeapon, eff.secondaryWeapon);
-  const meta = [cls, eff.specialization].filter(Boolean).join(' | ') || [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / ');
+  const wpns = [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean);
+  const icons = wpns.length ? `<span class="wicons">${wpns.map(weaponIcon).join('')}</span>` : '';
+  // Already-safe HTML either way (weapon names and the class/specialization text are both escaped here), so
+  // the render below must not escape this a second time - that would show the icon markup as literal text.
+  const meta = `${icons}${cls ? esc([cls, eff.specialization].filter(Boolean).join(' | ')) : wpns.map((n) => esc(n)).join(' / ')}`;
   const tag = o.ev && o.from === 'pool' ? (o.ev.rsvps[m.id] === 'yes' ? 'going' : '') : '';
   return `<div class="mrow ${o.dim ? 'not-attending' : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${o.dim ? ' (not confirmed for this event)' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}
-    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${esc(meta) || '&nbsp;'}</div></div>
+    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div></div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
@@ -1260,6 +1288,11 @@ document.addEventListener('click', async (e) => {
     if (confirm('Delete this character, including their points and sign-ups? This cannot be undone. (To keep history, mark them inactive instead.)'))
       act(async () => { await api('/api/members/' + id, 'DELETE'); closeDialog(); }, 'Character deleted');
   }
+  else if (a === 'member-kick') {
+    if (!confirm(`Kick ${d.name}? They will not be able to sign in normally again - they will be sent to a page to re-apply, which an officer has to accept. Their history (loot, points, attendance) is kept; their character is just marked inactive.`)) return;
+    const reason = prompt('Reason (optional, kept for your own records)', '') || '';
+    act(async () => { await api('/api/admin/kick', 'POST', { ownerKey: d.owner, reason }); closeDialog(); }, `${d.name} kicked`);
+  }
   else if (a === 'event-new') eventDialog();
   else if (a === 'event-edit') eventDialog(byId(S.events, d.id));
   else if (a === 'event-delete') {
@@ -1442,25 +1475,42 @@ async function start() {
 
 VIEWS.dashboard = () => viewDashboard();
 VIEWS.loot = () => viewLoot();
+// A player's current class, the same way everywhere else in the app resolves it (their active character's two
+// weapons) - a VOD's class folder is therefore whatever its owner currently plays, not whatever they played
+// when it was posted. Someone who has respecced moves to their new class folder automatically, the same way
+// they move in and out of a coach's roster elsewhere.
+function classOfOwner(owner) {
+  const m = S.members.find((x) => x.owner === owner && x.active);
+  return m ? classFor(m.primaryWeapon, m.secondaryWeapon) : '';
+}
 function viewVods() {
   const vods = S.vods || [];
-  // One folder per player who has posted at least one VOD, labelled with their current class so a coach can
-  // tell at a glance who plays what - sorted by name, newest VOD first within each folder.
-  const folders = {};
-  for (const v of vods) (folders[v.owner] ??= []).push(v);
-  const folderList = Object.entries(folders).map(([owner, list]) => ({ owner, list: list.slice().sort((a, b) => b.recordedDate.localeCompare(a.recordedDate) || b.id - a.id) }))
-    .sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
+  // Folders are class-first - the first thing anyone sees on this page - because that is how a coach actually
+  // goes looking for footage ("show me Oracle VODs"), not by hunting through every player one at a time. A
+  // class folder exists only once a VOD from someone currently playing it actually exists; it is never created
+  // or managed by hand. Players with no resolvable class (an unmapped weapon pair, or no active character at
+  // all) land in one "Other" folder rather than being silently dropped.
+  const byClass = {};
+  for (const v of vods) { const cls = classOfOwner(v.owner) || 'Other'; (byClass[cls] ??= []).push(v); }
+  const classFolders = Object.entries(byClass).sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
   return `
   <div class="page-head"><div><h1>VODs</h1><div class="muted">Post a YouTube link for a coach to review live over Discord, or browse what has been shared with you.</div></div></div>
   <button class="btn primary" style="margin-bottom:16px" data-act="vod-post-open">+ Post a VOD</button>
-
-  ${folderList.length ? folderList.map((f) => vodFolder(f.owner, f.list)).join('') : '<div class="empty">No VODs yet.</div>'}`;
+  ${classFolders.length ? classFolders.map(([cls, list]) => vodClassFolder(cls, list)).join('') : '<div class="empty">No VODs yet.</div>'}`;
 }
-
+function vodClassFolder(cls, vods) {
+  const classDef = (S.cfg.classes || []).find((c) => c.name === cls);
+  const icons = classDef ? `<span class="wicons">${classDef.weapons.map(weaponIcon).join('')}</span>` : '';
+  const byOwner = {};
+  for (const v of vods) (byOwner[v.owner] ??= []).push(v);
+  const ownerFolders = Object.entries(byOwner).map(([owner, list]) => ({ owner, list: list.slice().sort((a, b) => b.recordedDate.localeCompare(a.recordedDate) || b.id - a.id) }))
+    .sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
+  return `<details class="fold" style="margin-bottom:12px"><summary>${icons}${esc(cls)} <span class="muted small">(${vods.length})</span></summary>
+    <div class="fold-body">${ownerFolders.map((f) => vodFolder(f.owner, f.list)).join('')}</div>
+  </details>`;
+}
 function vodFolder(owner, list) {
-  const m = S.members.find((x) => x.owner === owner && x.active);
-  const cls = m ? classFor(m.primaryWeapon, m.secondaryWeapon) : '';
-  return `<details class="fold" style="margin-bottom:12px"><summary>${esc(ownerName(owner))}${cls ? ` (${esc(cls)})` : ''} <span class="muted small">(${list.length})</span></summary>
+  return `<details class="fold vod-player-fold" style="margin-bottom:10px"><summary>${esc(ownerName(owner))} <span class="muted small">(${list.length})</span></summary>
     <div class="fold-body">${list.map((v) => vodRow(v)).join('')}</div>
   </details>`;
 }
@@ -1481,23 +1531,50 @@ function vodPostDialog() {
     </form>`);
 }
 ACTIONS['vod-post-open'] = () => vodPostDialog();
+function fmtVodTimestamp(seconds) {
+  const n = Math.max(0, Number(seconds) || 0), total = Math.floor(n);
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
 function viewVodReview(id) {
   const v = (S.vods || []).find((x) => x.id === Number(id));
   if (!v) return `<div class="page-head"><h1>VOD not found</h1></div><div class="empty">This VOD may have been deleted, or you may not have access to it.</div>`;
   const visText = v.visibility === 'everyone' ? 'Shared with everyone' : v.visibility === 'class' ? `Shared with ${esc(v.visibleClass)}` : 'Private';
+  const markers = Array.isArray(v.markers) ? v.markers : [];
   return `
   <div class="page-head"><div><h1>${esc(v.title)}</h1><div class="muted">${esc(ownerName(v.owner))}${v.note ? ' · ' + esc(v.note) : ''} · ${visText}</div></div>
     <a href="#/vods" class="btn sm">← Back to VODs</a></div>
-  <div class="panel">
-    <div id="vod-player-wrap" class="vod-player-wrap">
-      <div id="vod-yt-player"></div>
-      <canvas id="vod-draw-canvas" class="vod-draw-canvas"></canvas>
-      <div class="vod-toolbar">
-        <span class="vod-colors" id="vod-colors">${['#e2685c', '#e8c468', '#7cc4b8', '#ebe5e3'].map((c, i) => `<button type="button" class="vod-color ${i === 0 ? 'active' : ''}" data-act="vod-color" data-color="${c}" style="background:${c}" aria-label="Draw in this colour"></button>`).join('')}</span>
-        <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn">✏️ Draw</button>
-        <button type="button" class="btn sm" data-act="vod-draw-clear">🗑️ Clear</button>
-        <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">⛶ Fullscreen</button>
+  <div class="vod-review-grid">
+    <div class="panel">
+      <div id="vod-player-wrap" class="vod-player-wrap">
+        <div id="vod-yt-player"></div>
+        <canvas id="vod-draw-canvas" class="vod-draw-canvas"></canvas>
+        <div class="vod-toolbar">
+          <span class="vod-colors" id="vod-colors">${['#e2685c', '#e8c468', '#7cc4b8', '#ebe5e3'].map((c, i) => `<button type="button" class="vod-color ${i === 0 ? 'active' : ''}" data-act="vod-color" data-color="${c}" style="background:${c}" aria-label="Draw in this colour"></button>`).join('')}</span>
+          <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn">✏️ Draw</button>
+          <button type="button" class="btn sm" data-act="vod-draw-clear">🗑️ Clear</button>
+          <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">⛶ Fullscreen</button>
+        </div>
       </div>
+      ${v.canManage ? `<form data-form="vod-marker" class="panel" style="margin-top:12px">
+        <h3 style="margin-top:0">Save coaching point</h3>
+        <div class="muted small" style="margin:-4px 0 10px">Saved at the video's current position. Draw on the video first if you want a marking attached - otherwise this saves as a plain timestamped note.</div>
+        <div class="row">
+          <div class="field"><label for="vm-before">Show marking before (seconds)</label><input id="vm-before" name="beforeSeconds" type="number" min="0" max="10" step="0.5" value="2"></div>
+          <div class="field"><label for="vm-after">Show marking after (seconds)</label><input id="vm-after" name="afterSeconds" type="number" min="0" max="10" step="0.5" value="2"></div>
+        </div>
+        <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" required></textarea></div>
+        <div class="link-row"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
+      </form>` : ''}
+    </div>
+    <div class="panel vod-marker-panel">
+      <h3 style="margin-top:0">Coaching points <span class="muted small">(${markers.length})</span></h3>
+      ${markers.length ? `<div class="vod-marker-list">${markers.map((m) => `<div class="vod-marker" data-marker-row="${m.id}">
+        <button type="button" class="vod-marker-jump" data-act="vod-marker-jump" data-marker-id="${m.id}" title="Jump to ${fmtVodTimestamp(m.timestamp)}">
+          <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)}</span><span class="vod-marker-note">${esc(m.note)}</span>
+        </button>
+        ${v.canManage ? `<button type="button" class="btn sm danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete</button>` : ''}
+      </div>`).join('')}</div>` : '<div class="empty">No coaching points yet.</div>'}
     </div>
   </div>`;
 }
@@ -1505,30 +1582,64 @@ function viewVodReview(id) {
 // while talking it through on Discord voice. Nothing here is saved on its own; it only becomes permanent if a
 // coach or officer takes a screenshot (a separate, later control), and otherwise resets whenever the page is
 // left or the player is resized (entering/exiting fullscreen), which is fine since it was never meant to last.
-let vodDraw = null;   // { ctx, drawing, color }
+// Strokes are now kept as data (points as fractions of the player's size, 0 to 1), not just painted onto the
+// canvas and forgotten - that is what lets a coaching point save exactly what was drawn, and what lets the
+// video restore a saved drawing on its own when its marker's timestamp is reached again later. A stroke being
+// mid-draw (currentStroke) is kept separate from the finished ones so a resize mid-stroke cannot lose it.
+let vodDraw = null;   // { ctx, drawing, color, strokes, currentStroke, activeMarkerId }
+function redrawVodStrokes() {
+  const canvas = $('#vod-draw-canvas');
+  if (!vodDraw || !canvas) return;
+  const r = canvas.getBoundingClientRect(), ctx = vodDraw.ctx;
+  ctx.clearRect(0, 0, r.width, r.height);
+  const drawStroke = (stroke) => {
+    if (!stroke || !Array.isArray(stroke.points) || stroke.points.length < 2) return;
+    ctx.strokeStyle = stroke.color || '#e2685c';
+    ctx.beginPath();
+    stroke.points.forEach((p, i) => { const x = p[0] * r.width, y = p[1] * r.height; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.stroke();
+  };
+  vodDraw.strokes.forEach(drawStroke);
+  if (vodDraw.currentStroke) drawStroke(vodDraw.currentStroke);
+}
 function setupVodDrawing() {
   const canvas = $('#vod-draw-canvas'), wrap = $('#vod-player-wrap');
   if (!canvas || !wrap) return;
+  vodDraw = { ctx: canvas.getContext('2d'), drawing: false, color: '#e2685c', strokes: [], currentStroke: null, activeMarkerId: null };
   const resize = () => {
     const r = wrap.getBoundingClientRect(), ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(r.width * ratio); canvas.height = Math.round(r.height * ratio);
-    const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
+    canvas.width = Math.max(1, Math.round(r.width * ratio)); canvas.height = Math.max(1, Math.round(r.height * ratio));
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 4;
-    ctx.strokeStyle = vodDraw ? vodDraw.color : '#e2685c';
-    vodDraw = { ctx, drawing: false, color: ctx.strokeStyle };
+    vodDraw.ctx = ctx;
+    redrawVodStrokes();
   };
   resize();
   new ResizeObserver(resize).observe(wrap);
-  let lastX = 0, lastY = 0;
-  const pos = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-  canvas.addEventListener('pointerdown', (e) => { if (!vodDraw) return; vodDraw.drawing = true; [lastX, lastY] = pos(e); canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!vodDraw || !vodDraw.drawing) return;
-    const [x, y] = pos(e);
-    vodDraw.ctx.beginPath(); vodDraw.ctx.moveTo(lastX, lastY); vodDraw.ctx.lineTo(x, y); vodDraw.ctx.stroke();
-    lastX = x; lastY = y;
+  // Points are stored as a fraction of the canvas size (0 to 1), not pixels, so a saved drawing still lines up
+  // correctly even if it is viewed again at a different window size than it was drawn at.
+  const pos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))];
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!vodDraw || !canvas.classList.contains('active')) return;
+    vodDraw.drawing = true; vodDraw.currentStroke = { color: vodDraw.color, points: [pos(e)] };
+    canvas.setPointerCapture(e.pointerId);
   });
-  const stop = () => { if (vodDraw) vodDraw.drawing = false; };
+  canvas.addEventListener('pointermove', (e) => {
+    if (!vodDraw || !vodDraw.drawing || !vodDraw.currentStroke) return;
+    vodDraw.currentStroke.points.push(pos(e));
+    redrawVodStrokes();
+  });
+  const stop = () => {
+    if (!vodDraw || !vodDraw.drawing) return;
+    vodDraw.drawing = false;
+    if (vodDraw.currentStroke && vodDraw.currentStroke.points.length >= 2) vodDraw.strokes.push(vodDraw.currentStroke);
+    vodDraw.currentStroke = null;
+    redrawVodStrokes();
+  };
   canvas.addEventListener('pointerup', stop); canvas.addEventListener('pointercancel', stop);
 }
 ACTIONS['vod-draw-toggle'] = (el) => {
@@ -1537,12 +1648,52 @@ ACTIONS['vod-draw-toggle'] = (el) => {
   el.classList.toggle('primary', on);
   el.textContent = on ? '✏️ Drawing (on)' : '✏️ Draw';
 };
-ACTIONS['vod-draw-clear'] = () => { if (vodDraw) vodDraw.ctx.clearRect(0, 0, $('#vod-draw-canvas').width, $('#vod-draw-canvas').height); };
+ACTIONS['vod-draw-clear'] = () => { if (vodDraw) { vodDraw.strokes = []; vodDraw.currentStroke = null; redrawVodStrokes(); } };
 ACTIONS['vod-color'] = (el) => {
   if (!vodDraw) return;
-  vodDraw.ctx.strokeStyle = el.dataset.color; vodDraw.color = el.dataset.color;
+  vodDraw.color = el.dataset.color;
   $('#vod-colors').querySelectorAll('.vod-color').forEach((b) => b.classList.toggle('active', b === el));
 };
+// Jumping to a coaching point pauses the video there and immediately shows whatever was drawn for it, without
+// waiting for the playback-position check below to notice (that one only fires while the video is playing).
+ACTIONS['vod-marker-jump'] = (el) => {
+  const markerId = Number(el.dataset.markerId), v = (S.vods || []).find((x) => x.id === Number(route().id));
+  const m = v && (v.markers || []).find((x) => x.id === markerId);
+  if (!m || !ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
+  UI.vodJump = m.timestamp;
+  ytPlayer.seekTo(m.timestamp, true);
+  ytPlayer.pauseVideo();
+  vodDraw.activeMarkerId = m.id;
+  setVodMarkerDrawing(m);
+};
+ACTIONS['vod-marker-delete'] = (el) => {
+  const markerId = Number(el.dataset.markerId), v = (S.vods || []).find((x) => x.id === Number(route().id));
+  if (v && confirm('Delete this coaching point?')) act(() => api(`/api/vods/${v.id}/markers/${markerId}`, 'DELETE'), 'Deleted');
+};
+function setVodMarkerDrawing(marker) {
+  if (!vodDraw) return;
+  vodDraw.strokes = (marker && marker.strokes) ? marker.strokes.map((s) => ({ color: s.color, points: s.points.map((p) => [p[0], p[1]]) })) : [];
+  redrawVodStrokes();
+  document.querySelectorAll('[data-marker-row]').forEach((row) => row.classList.toggle('active', !!marker && Number(row.dataset.markerRow) === marker.id));
+}
+// Runs continuously (see the interval timer below) while a VOD is open: as the video plays normally and its
+// position passes through a saved coaching point's [timestamp - before, timestamp + after] window, that
+// point's drawing appears on its own, then clears again once playback moves past it - automatic annotations,
+// not something anyone has to click through.
+function syncVodMarkerDisplay() {
+  const r = route();
+  if (r.page !== 'vods' || !r.id || !ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
+  const v = (S.vods || []).find((x) => x.id === Number(r.id));
+  if (!v) return;
+  const t = Number(ytPlayer.getCurrentTime()) || 0, current = $('#vod-current-time');
+  if (current) current.textContent = `Current position: ${fmtVodTimestamp(t)}`;
+  const marker = (v.markers || []).find((m) => t >= Math.max(0, m.timestamp - m.beforeSeconds) && t <= m.timestamp + m.afterSeconds);
+  if (marker) {
+    if (vodDraw.activeMarkerId !== marker.id) { vodDraw.activeMarkerId = marker.id; setVodMarkerDrawing(marker); }
+  } else if (vodDraw.activeMarkerId !== null) {
+    vodDraw.activeMarkerId = null; setVodMarkerDrawing(null);
+  }
+}
 // Fullscreen is the whole wrap (the player plus its toolbar, not just the YouTube iframe), so whatever gets
 // added on top later - the drawing canvas, a screenshot button - comes along into fullscreen with it rather
 // than being left behind outside the fullscreened element. It also happens to be exactly what makes a later
@@ -1582,12 +1733,27 @@ AFTER_RENDER.push(async (page) => {
   const v = (S.vods || []).find((x) => x.id === Number(id));
   const wrap = $('#vod-yt-player');
   if (!v || !wrap) return;
+  ytPlayer = null;
   setupVodDrawing();   // works regardless of whether the YouTube embed itself loads below
   const timedOut = await Promise.race([loadYouTubeApi().then(() => false), new Promise((r) => setTimeout(() => r(true), 10000))]);
   if (!$('#vod-yt-player')) return;    // the page may have been navigated away from while the API was loading
   if (timedOut) { $('#vod-yt-player').outerHTML = '<div class="empty" style="height:100%;display:grid;place-items:center">Could not load the YouTube player. Check your connection and reload.</div>'; return; }
-  ytPlayer = new YT.Player('vod-yt-player', { videoId: v.videoId, playerVars: { playsinline: 1, rel: 0 } });
+  ytPlayer = new YT.Player('vod-yt-player', {
+    videoId: v.videoId, playerVars: { playsinline: 1, rel: 0 },
+    events: {
+      onReady: () => {
+        // Clicking a coaching point before the player existed yet (e.g. the API was still loading) is
+        // remembered and honoured the moment it becomes ready, rather than silently doing nothing.
+        if (UI.vodJump !== null) { ytPlayer.seekTo(UI.vodJump, true); ytPlayer.pauseVideo(); UI.vodJump = null; }
+        syncVodMarkerDisplay();
+      },
+      onStateChange: syncVodMarkerDisplay,
+    },
+  });
 });
+// One shared interval, not one per page visit - it is a no-op (syncVodMarkerDisplay returns immediately) on
+// every page except an open VOD, so there is nothing to tear down when leaving one.
+if (!window.__vodMarkerTimer) window.__vodMarkerTimer = setInterval(syncVodMarkerDisplay, 200);
 function vodRow(v) {
   const visBadge = v.visibility === 'everyone' ? '<span class="type-pill">Everyone</span>' : v.visibility === 'class' ? `<span class="type-pill">${esc(v.visibleClass)}</span>` : '<span class="muted small">Private</span>';
   return `<div class="rule-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
@@ -1638,6 +1804,15 @@ ACTIONS['notice-accept'] = (el, d) => act(() => api(`/api/notices/${d.id}/ack`, 
 CHANGES['vod-type'] = (el) => { $('#vf-enemy-field').classList.toggle('off', !S.cfg.vodTypesWithEnemy.includes(el.value)); };
 CHANGES['vod-vis'] = (el) => { const cls = el.closest('form').querySelector('[name=visibleClass]'); cls.classList.toggle('hidden', el.value !== 'class'); };
 FORMS['vod-post'] = (f, fd) => act(async () => { await api('/api/vods', 'POST', fd); closeDialog(); }, 'Posted');
+FORMS['vod-marker'] = (f, fd) => act(async () => {
+  const v = (S.vods || []).find((x) => x.id === Number(route().id));
+  if (!v || !ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') throw new Error('The VOD player is not ready yet.');
+  const beforeSeconds = Number(fd.beforeSeconds), afterSeconds = Number(fd.afterSeconds);
+  if (!Number.isFinite(beforeSeconds) || beforeSeconds < 0 || beforeSeconds > 10 || !Number.isFinite(afterSeconds) || afterSeconds < 0 || afterSeconds > 10) throw new Error('Marking duration must be between 0 and 10 seconds.');
+  const strokes = vodDraw ? (vodDraw.strokes || []).map((s) => ({ color: s.color, points: s.points })) : [];
+  await api(`/api/vods/${v.id}/markers`, 'POST', { timestamp: Number(ytPlayer.getCurrentTime()) || 0, beforeSeconds, afterSeconds, note: fd.note, strokes });
+  f.reset();
+}, 'Coaching point saved');
 FORMS['vod-vis'] = (f, fd, id) => act(() => api(`/api/vods/${id}`, 'PUT', { visibility: fd.visibility, visibleClass: fd.visibleClass }), 'Saved');
 ACTIONS['vod-delete'] = (el, d) => { if (confirm('Delete this VOD? This also removes any saved screenshots from it.')) act(() => api('/api/vods/' + d.id, 'DELETE'), 'Deleted'); };
 CHANGES['loot-type'] = (el) => {

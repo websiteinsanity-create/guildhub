@@ -185,3 +185,38 @@ test("a coach sees their linked student's full profile - questlog links, notes, 
   assert.ok(!otherSt.loot.some((l) => l.memberId === studentId));
 });
 
+
+test('VOD coaching points save an exact timestamp, an optional persisted drawing, and a configurable before/after window - distinct from the live-only drawing overlay', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://www.youtube.com/watch?v=zzzzzzzzzzz', type: 'Siege', recordedDate: '2026-10-05' }, 'student')).body;
+  const strokes = [{ color: '#e2685c', points: [[0.1, 0.2], [0.5, 0.4], [0.8, 0.3]] }];
+  const created = await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 763.25, beforeSeconds: 3, afterSeconds: 5, note: 'Wait for the engage.', strokes }, 'coach');
+  assert.equal(created.status, 200);
+  assert.equal(created.body.timestamp, 763.25);
+  assert.equal(created.body.beforeSeconds, 3);
+  assert.equal(created.body.afterSeconds, 5);
+  assert.deepEqual(created.body.strokes, strokes);
+
+  // a plain note with nothing drawn is just as valid - strokes are optional, only the note is required
+  const plain = await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 10, note: 'Just a reminder, nothing drawn.' }, 'coach');
+  assert.equal(plain.status, 200);
+  assert.deepEqual(plain.body.strokes, []);
+  assert.equal((await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 10 }, 'coach')).status, 400, 'a note is still required');
+
+  const coachVod = (await state('coach')).vods.find((x) => x.id === v.id);
+  assert.equal(coachVod.markers.length, 2);
+  assert.equal(coachVod.markers[0].note, 'Just a reminder, nothing drawn.', 'sorted by timestamp');
+  assert.deepEqual(coachVod.markers[1].strokes, strokes);
+
+  assert.equal((await call(`/api/vods/${v.id}/markers/${created.body.id}`, 'PUT', { timestamp: 764, beforeSeconds: 2, afterSeconds: 2, note: 'Updated.', strokes }, 'student')).status, 200);
+  const updated = (await state('student')).vods.find((x) => x.id === v.id).markers.find((m) => m.id === created.body.id);
+  assert.equal(updated.timestamp, 764);
+  assert.equal(updated.note, 'Updated.');
+
+  assert.equal((await call(`/api/vods/${v.id}/markers/${created.body.id}`, 'DELETE', null, 'other')).status, 403);
+  assert.equal((await call(`/api/vods/${v.id}/markers/${created.body.id}`, 'DELETE', null, 'coach')).status, 200);
+  assert.equal((await state('student')).vods.find((x) => x.id === v.id).markers.length, 1);
+
+  // deleting the VOD itself cleans up its markers too
+  await call(`/api/vods/${v.id}`, 'DELETE', null, 'student');
+  assert.equal((await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 1, note: 'gone' }, 'coach')).status, 404);
+});
