@@ -783,8 +783,11 @@ function pinState(ev) {
   const info = ev.pinInfo || { state: 'pending' };
   if (info.state === 'open') return 'open';
   if (info.state === 'closed') return 'late';
+  // Know in advance there is no PIN coming (switched off for this event, or skipped for an old one) rather than
+  // waiting for the scheduled time to pass before saying so.
+  if (ev.pinSkip || info.enabled === false) return 'none';
   const around = new Date(info.scheduledAt).getTime();
-  return ev.pinSkip || Date.now() > around + (info.windowMinutes || 15) * 60000 ? 'none' : 'early';
+  return Date.now() > around + (info.windowMinutes || 15) * 60000 ? 'none' : 'early';
 }
 function pinSide(ev) {
   const info = ev.pinInfo || {}, kind = pinState(ev), own = mine();
@@ -836,7 +839,9 @@ function automationPanel(ev) {
     ${pin ? `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin:6px 0 4px"><div class="pin-code" aria-label="PIN">${esc(pin.code)}</div>
         <div class="small muted">Created ${fmtShort(pin.at)} (${esc(pin.by)}).<br>Players can enter it until ${fmtTime(info.closesAt)}. ${info.state === 'open' ? '<span class="ok-text">Open now.</span>' : 'Closed.'}<br>${entered} ${entered === 1 ? 'character has' : 'characters have'} entered it.</div></div>
       <ul class="sent">${(pin.sent || []).map((r) => `<li class="${r.ok ? 'yes' : 'fail'}">${r.ok ? 'Sent to' : 'Not delivered to'} <b>${esc(r.name)}</b> <span class="muted">(${esc(r.why)})</span>${r.ok ? '' : ` - ${esc(r.error)}`}</li>`).join('') || '<li class="muted">Nobody to send it to yet.</li>'}</ul>`
-      : `<div class="muted small">It will be created ${st.pinOffsetMinutes === 0 ? 'when the event starts' : `${Math.abs(st.pinOffsetMinutes)} minutes ${st.pinOffsetMinutes > 0 ? 'after the start' : 'before the start'}`} (around ${fmtTime(info.scheduledAt)}) and sent by Discord to the party leaders and the leadership. Change this in Admin.</div>`}
+      : ev.pinEnabled
+        ? `<div class="muted small">It will be created ${st.pinOffsetMinutes === 0 ? 'when the event starts' : `${Math.abs(st.pinOffsetMinutes)} minutes ${st.pinOffsetMinutes > 0 ? 'after the start' : 'before the start'}`} (around ${fmtTime(info.scheduledAt)}) and sent by Discord to the party leaders and the leadership. Change this in Admin.</div>`
+        : `<div class="muted small">The PIN is switched off for this event (see "Attendance PIN" below) - nothing is sent automatically, but you can still create and send one by hand with the button above.</div>`}
     <div class="small" style="margin-top:12px"><span class="muted">Reminders for players who have not answered:</span> ${!st.remindersEnabled ? 'switched off in Admin' : ev.reminders === false ? 'off for this event' : (st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set')}.
       ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>
   </div>`;
@@ -1117,7 +1122,7 @@ function attendancePanel(ev, past) {
 function eventDialog(ev, dateStr) {
   const isNew = !ev;
   const startIso = tzToIso((dateStr || addDayStr(todayTz(), 1)) + 'T20:00');      // 20:00 in your time zone
-  ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0 };
+  ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, pinEnabled: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0 };
   openDialog(`
   <form data-form="event" data-id="${ev.id || ''}">
     <h2>${isNew ? 'New event' : 'Edit event'}</h2>
@@ -1135,7 +1140,8 @@ function eventDialog(ev, dateStr) {
       <div class="field"><label>PIN window (minutes players can enter it)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${ev.pinWindowMinutes ?? S.settings.pinWindowDefault}"></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${ev.reminders === false ? '' : 'checked'}> Remind players who have not answered (times are set in Admin)</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(ev.pinEnabled ?? ev.mandatory) ? 'checked' : ''}> Attendance PIN for this event (on by default for a mandatory event, off for an optional one - switch it either way here)</label>
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(ev.description)}</textarea></div>
     <div class="dlg-actions">
       ${isNew ? '' : '<button type="button" class="btn danger left" data-act="event-delete">Delete</button>'}
@@ -1471,7 +1477,11 @@ document.addEventListener('change', (e) => {
     if (!confirm('Restoring replaces ALL current data with the contents of this file. Continue?')) { el.value = ''; return; }
     f.text().then((t) => act(() => api('/api/import', 'POST', JSON.parse(t)), 'Backup restored')).catch(() => toast('That file could not be read.', true));
   }
-  else if (el.id === 'ev-type') { if ($('#ev-pts')) $('#ev-pts').value = el.selectedOptions[0].dataset.pts; $('#ev-mand').checked = el.selectedOptions[0].dataset.mand === '1'; }
+  else if (el.id === 'ev-type') {
+    if ($('#ev-pts')) $('#ev-pts').value = el.selectedOptions[0].dataset.pts;
+    $('#ev-mand').checked = el.selectedOptions[0].dataset.mand === '1';
+    if ($('#ev-pin')) $('#ev-pin').checked = $('#ev-mand').checked;   // follows the type's default too, same as Mandatory - still a separate switch from here
+  }
 });
 document.addEventListener('input', (e) => {
   const k = e.target.dataset.ui;
@@ -1502,6 +1512,7 @@ document.addEventListener('submit', async (e) => {
   } else if (kind === 'event') {
     fd.start = tzToIso(fd.start);
     fd.mandatory = f.elements.mandatory.checked;
+    fd.pinEnabled = f.elements.pinEnabled.checked;
     fd.reminders = f.elements.reminders.checked;
     act(async () => {
       const r = await api(id ? '/api/events/' + id : '/api/events', id ? 'PUT' : 'POST', fd);
