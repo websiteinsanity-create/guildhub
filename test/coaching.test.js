@@ -108,6 +108,10 @@ test('a VOD link is recognized in every common YouTube URL shape, not just youtu
     ['https://www.youtube.com/shorts/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
     ['https://www.youtube.com/embed/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
     ['https://m.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // mobile subdomain
+    ['https://www.youtube.com/live/ dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // a stray space from how the link got pasted/shared
+    ['  https://youtu.be/dQw4w9WgXcQ\n', 'dQw4w9WgXcQ'],                // leading/trailing whitespace from the same
+    ['https://www.youtube.com/live/%dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // a stray "%" right before the id, same kind of paste glitch
+    ['https://www.youtube.com/live/%20dQw4w9WgXcQ', 'dQw4w9WgXcQ'],     // a wrapped line copied back out as a literal "%20" instead of a space
   ];
   for (const [url, expectedId] of cases) {
     const r = await call('/api/vods', 'POST', { url, type: 'Testing', recordedDate: '2026-09-26' }, 'student');
@@ -121,7 +125,7 @@ test('a VOD link is recognized in every common YouTube URL shape, not just youtu
   }
 });
 
-test('a VOD is private by default (owner + their coach + officers only); the owner cannot promote its visibility, only a coach or officer can', async () => {
+test('a VOD is private by default (owner + their coach + officers only); the owner, their coach, or an officer can all promote its visibility', async () => {
   await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer');   // re-link after the previous test's isolated server state
   const v = (await call('/api/vods', 'POST', { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', type: 'Siege', recordedDate: '2026-09-26' }, 'student')).body;
   assert.equal(v.visibility, 'private');
@@ -132,9 +136,32 @@ test('a VOD is private by default (owner + their coach + officers only); the own
   assert.ok((await state('officer')).vods.some((x) => x.id === v.id), 'officers see everything');
   assert.ok(!(await state('other')).vods.some((x) => x.id === v.id), 'an unrelated player cannot see it');
 
-  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'everyone' }, 'student')).status, 403, 'the owner cannot promote their own VOD');
-  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'everyone' }, 'coach')).status, 200);
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'everyone' }, 'other')).status, 403, 'an unrelated player still cannot touch it');
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'everyone' }, 'student')).status, 200, 'the owner can promote their own VOD');
   assert.ok((await state('other')).vods.some((x) => x.id === v.id), 'now visible to everyone');
+
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'private' }, 'student')).status, 200);
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'everyone' }, 'coach')).status, 200, 'a coach can promote it too');
+  assert.ok((await state('other')).vods.some((x) => x.id === v.id));
+});
+
+test('the owner promoting their own VOD to "a class" has no class picker to misuse - it always lands on whatever class they currently play', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/bcdefghijkl', type: 'Siege', recordedDate: '2026-09-26' }, 'student')).body;
+  const studentVod = (await state('student')).vods.find((x) => x.id === v.id);
+  assert.equal(studentVod.promoteOwnClassOnly, true, 'the owner is not a coach or officer, so only their own class makes sense');
+
+  // no visibleClass sent at all - still resolves to Scorpion, the class StudentChar actually plays
+  const r = await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'class' }, 'student');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.visibleClass, 'Scorpion');
+  assert.ok((await state('student')).vods.some((x) => x.id === v.id), 'still visible to the student themselves');
+  assert.ok(!(await state('other')).vods.some((x) => x.id === v.id), 'other plays Oracle - not Scorpion - so still cannot see it');
+
+  // a coach is not restricted the same way - they keep the full class picker, including a class the owner does not play
+  const coachVod = (await state('coach')).vods.find((x) => x.id === v.id);
+  assert.equal(coachVod.promoteOwnClassOnly, false, 'a coach is never restricted to "their own" class, since they do not own the VOD');
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'class', visibleClass: 'Oracle' }, 'coach')).status, 200);
+  assert.ok((await state('other')).vods.some((x) => x.id === v.id), 'Oracle was picked explicitly, so the Oracle player can see it now');
 });
 
 test('a VOD shared with "a class" is visible only to players currently playing that class', async () => {
@@ -319,7 +346,31 @@ test('a guest coach is never DMed about a new VOD, even for the class they coach
   assert.equal(fake.state.dms.filter((d) => d.to === GUEST).length, 0, 'the guest coach gets no DM');
 
   // but they can still see the VOD itself - the exclusion is notification-only, not visibility
-  assert.ok((await state('guest')).vods.some((v) => v.id === posted.body.id), 'visibility is untouched - they can still see it');
+  const guestVod = (await state('guest')).vods.find((v) => v.id === posted.body.id);
+  assert.ok(guestVod, 'visibility is untouched - they can still see it');
+  // the guest coach has no member/user list of their own to resolve a name or a class from (see
+  // server-coaching.js's coachingState) - each VOD must carry its own owner's name and class directly, or the
+  // VOD library page has nothing to show for its folders at all
+  assert.equal(guestVod.ownerName, 'StudentChar');
+  assert.equal(guestVod.ownerClass, 'Scorpion');
+
+  // StudentChar's own VOD, shared with "everyone" by the real coach earlier in this file, still has nothing to
+  // do with the class this guest coach was actually brought in for - an outsider should never see footage of
+  // any other class, no matter how broadly its owner or a real coach chose to share it
+  const everyoneVod = (await call('/api/vods', 'POST', { url: 'https://youtu.be/qqqqqqqqqqq', type: 'Siege', recordedDate: '2026-09-30' }, 'other')).body;   // OtherChar plays Oracle
+  await call(`/api/vods/${everyoneVod.id}`, 'PUT', { visibility: 'everyone' }, 'other');
+  assert.ok((await state('student')).vods.some((v) => v.id === everyoneVod.id), 'a regular member does see it - "everyone" means everyone for them');
+  assert.ok(!(await state('guest')).vods.some((v) => v.id === everyoneVod.id), 'but the guest coach, outside the guild entirely, still does not');
 
   await call(`/api/guest-coaches/${GUEST}`, 'DELETE', null, 'officer');   // tidy up
+});
+
+test('a member can promote their own VOD straight to "everyone" or to their own class - not just leave it private', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/rstuvwxyzab', type: 'Siege', recordedDate: '2026-10-01' }, 'other')).body;   // OtherChar plays Oracle
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'everyone' }, 'other')).status, 200);
+  assert.ok((await state('student')).vods.some((x) => x.id === v.id), 'an unrelated player now sees it, by the owner\'s own choice');
+
+  assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'class' }, 'other')).status, 200);
+  assert.ok((await state('other')).vods.some((x) => x.id === v.id));
+  assert.ok(!(await state('student')).vods.some((x) => x.id === v.id), 'student plays Scorpion, not Oracle - no longer visible to them');
 });

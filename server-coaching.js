@@ -36,18 +36,31 @@ module.exports = function install(ctx) {
     return [...new Set(db().coachLinks.filter((l) => l.class === cls).map((l) => l.coach))];
   }
 
+  // A guest coach is an outsider, here only for the one class they were linked to - unlike a real (in-guild)
+  // coach, they should never see footage of any other class, even footage its own owner or a real coach chose
+  // to share with "everyone" or with a different class. That broader sharing is meant for guild members
+  // browsing each other's VODs, not for someone outside the guild entirely.
+  function isGuestCoach(user) { return db().guestCoaches.some((g) => g.discordId === user.key); }
   function canSeeVod(user, v) {
     if (isOfficer(user) || v.owner === user.key || v.postedBy === user.key) return true;
+    if (isGuestCoach(user)) return coachesOf(v.owner).includes(user.key);
+    if (coachesOf(v.owner).includes(user.key)) return true;   // the owner's own coach(es) can always see it, whatever the visibility is set to - not only when they happen to play the same class themselves
     if (v.visibility === 'everyone') return true;
     if (v.visibility === 'class') { const mine = db().members.find((m) => m.owner === user.key && m.active); return !!mine && classOf(mine) === v.visibleClass; }
-    return coachesOf(v.owner).includes(user.key);   // private: only the owner's own coach(es), handled above too but kept explicit
+    return false;   // private, and not the owner's coach
   }
   function canManageVod(user, v) {        // edit the title/note, delete it, change who posted it
     return isOfficer(user) || v.owner === user.key || coachesOf(v.owner).includes(user.key);
   }
-  function canPromoteVisibility(user, v) {  // "everyone" / "a class" - never the owner's own choice
-    return isOfficer(user) || coachesOf(v.owner).includes(user.key);
+  function canPromoteVisibility(user, v) {  // "everyone" / "a class" - the owner can choose this for their own VOD too, same as any coach or officer
+    return isOfficer(user) || v.owner === user.key || coachesOf(v.owner).includes(user.key);
   }
+  // When the owner themselves promotes visibility (rather than a coach or officer), "a class" can only
+  // reasonably mean their own class - there is no sensible reason for a player to hand their own footage to a
+  // class they do not play, so the client does not even offer the choice. A coach or officer keeps the full
+  // picker, since cross-class sharing is sometimes exactly what they want (showing one class a strong example
+  // from another, say).
+  function promoteOwnClassOnly(user, v) { return v.owner === user.key && !isOfficer(user) && !coachesOf(v.owner).includes(user.key); }
   // A coaching point: a note pinned to an exact moment in the VOD, with an optional drawing that reappears on
   // its own during playback for a short window around that moment (see syncVodMarkerDisplay client-side) -
   // distinct from the live drawing overlay, which is never saved. Anyone who can manage the VOD can add one.
@@ -80,14 +93,28 @@ module.exports = function install(ctx) {
   // coaches them (if anyone, just so their own profile can say so), and the VODs they can see.
   function coachingState(user) {
     const D = db(), off = isOfficer(user), coach = isCoach(user);
-    const vods = D.vods.filter((v) => canSeeVod(user, v)).map((v) => ({
-      ...v,
-      markers: D.vodMarkers.filter((m) => m.vodId === v.id).map(markerForClient).sort((a, b) => a.timestamp - b.timestamp || a.id - b.id),
-      canManage: canManageVod(user, v), canPromote: canPromoteVisibility(user, v),
-    }));
+    // A guest coach (an applicant, never a member) gets none of the usual member/user lists that the client
+    // would otherwise use to turn an owner key into a name or a class - so each VOD carries its own owner's
+    // name and class here, resolved server-side where the full member list is actually available, instead of
+    // relying on the client to look it up from data it may not have been sent.
+    const vods = D.vods.filter((v) => canSeeVod(user, v)).map((v) => {
+      const owner = D.members.find((m) => m.owner === v.owner && m.active);
+      return {
+        ...v,
+        ownerName: owner ? owner.name : v.owner,
+        ownerClass: owner ? classOf(owner) : '',
+        markers: D.vodMarkers.filter((m) => m.vodId === v.id).map(markerForClient).sort((a, b) => a.timestamp - b.timestamp || a.id - b.id),
+        canManage: canManageVod(user, v), canPromote: canPromoteVisibility(user, v), promoteOwnClassOnly: promoteOwnClassOnly(user, v),
+      };
+    });
+    const myStudents = coach ? studentsOf(user.key) : [];
     return {
       isCoach: coach,
-      myStudents: coach ? studentsOf(user.key) : [],
+      myStudents,
+      // Same reasoning as each VOD's ownerName above - a guest coach has no member list to resolve their own
+      // students' names from, so hand the names over directly, keyed by the same owner key myStudents already
+      // uses (the "For" picker on the post-a-VOD form needs exactly this).
+      myStudentNames: Object.fromEntries(myStudents.map((key) => { const m = D.members.find((x) => x.owner === key && x.active); return [key, m ? m.name : key]; })),
       myCoaches: coachesOf(user.key),
       // Which class the signed-in person themselves coaches, if they are a guest coach checking their own
       // status on the join/switch-class page - not meaningful for a regular coach, who can have several.
@@ -208,14 +235,25 @@ module.exports = function install(ctx) {
   // ---------------------------------------------------------------- VODs
   function parseYoutube(url) {
     try {
-      const u = new URL(String(url || '').trim());
+      // A real YouTube URL never contains whitespace, but a pasted one sometimes picks up a stray space or
+      // line break anyway - from how a link got shared, wrapped in a chat message, or copied out of one -
+      // most often right after "/live/", "/shorts/" or "/embed/". A line that wraps and gets copied back out
+      // often turns that same stray space into a literal "%20" instead (its URL-encoded form), which looks
+      // like normal id characters at a glance (digits are "word" characters) and needs stripping on its own,
+      // not just whitespace. Either way, strip it rather than rejecting an otherwise perfectly good link.
+      const u = new URL(String(url || '').trim().replace(/\s+/g, '').replace(/%20/gi, ''));
       if (!/(^|\.)youtube\.com$/.test(u.hostname) && u.hostname !== 'youtu.be') return null;
       // youtu.be/ID and youtube.com/watch?v=ID are the two most common forms, but a VOD is very often a
       // livestream replay, which YouTube gives out as youtube.com/live/ID instead - and shorts/embed links get
       // pasted in sometimes too. All of these just put the id in a different place in the same URL.
       const pathMatch = /^\/(live|shorts|embed)\/([^/]+)/.exec(u.pathname);
-      const id = u.hostname === 'youtu.be' ? u.pathname.slice(1) : pathMatch ? pathMatch[2] : u.searchParams.get('v');
-      return /^[\w-]{11}$/.test(id || '') ? id : null;
+      const raw = u.hostname === 'youtu.be' ? u.pathname.slice(1) : pathMatch ? pathMatch[2] : u.searchParams.get('v');
+      // A real video id is exactly 11 letters/digits/-/_ characters, nothing else - but the same way a stray
+      // space sometimes rides along with a pasted link, so can a stray leading or trailing character like a
+      // lone "%" (seen in the wild right after "/live/"). Rather than rejecting the whole link over one odd
+      // character next to an otherwise-valid id, look for the 11-character id itself within it.
+      const id = /([\w-]{11})/.exec(raw || '');
+      return id ? id[1] : null;
     } catch { return null; }
   }
 
@@ -282,10 +320,15 @@ module.exports = function install(ctx) {
     }
     if (body.note !== undefined) v.note = clean(body.note, 500);
     if (body.visibility !== undefined) {
-      need(canPromoteVisibility(user, v), 403, 'Only a coach or an officer can change who else sees this.');
+      need(canPromoteVisibility(user, v), 403, 'Only the owner, a coach or an officer can change who else sees this.');
       need(['private', 'everyone', 'class'].includes(body.visibility), 400, 'Pick a valid visibility.');
       v.visibility = body.visibility;
-      v.visibleClass = body.visibility === 'class' ? clean(body.visibleClass, 40) : '';
+      if (body.visibility === 'class') {
+        // No class named (the owner's own picker never offers one - see promoteOwnClassOnly) falls back to
+        // whatever class the owner currently plays, since that is the only sensible choice for them anyway.
+        const ownerMember = D.members.find((m) => m.owner === v.owner && m.active);
+        v.visibleClass = clean(body.visibleClass, 40) || (ownerMember ? classOf(ownerMember) : '');
+      } else v.visibleClass = '';
       need(v.visibility !== 'class' || (config.classes || []).some((c) => c.name === v.visibleClass), 400, 'Pick a real class.');
     }
     save();

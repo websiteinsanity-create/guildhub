@@ -140,7 +140,7 @@ test('the attendance PIN goes to party leaders and leadership only; players type
   const st0 = await state('A');
   const lead = st0.members.find((m) => m.name === 'Lead'), cee = st0.members.find((m) => m.name === 'Cee');
   const dee = (await call('/api/members', 'POST', { name: 'Dee', role: 'Healer' }, 'D')).body;
-  const ev = (await call('/api/events', 'POST', { title: 'PIN night', type: 'Wargames', start: inMinutes(5), pinWindowMinutes: 10 }, 'A')).body;
+  const ev = (await call('/api/events', 'POST', { title: 'PIN night', type: 'Wargames', start: inMinutes(5), pinWindowMinutes: 10, pinEnabled: true }, 'A')).body;
   await call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', leader: lead.id, members: [lead.id, cee.id] }] }, 'A');
   assert.equal((await state('A')).events.find((e) => e.id === ev.id).pin, null, 'not generated before its time');
   assert.equal((await call('/api/events/' + ev.id + '/pin', 'POST', { memberId: dee.id, pin: '0000' }, 'D')).status, 409, 'no PIN yet');
@@ -190,6 +190,41 @@ test('the attendance PIN goes to party leaders and leadership only; players type
   fake.state.failDM.delete(B);
   const test = await call('/api/admin/test-dm', 'POST', {}, 'A');
   assert.equal(test.body.ok, true);
+});
+
+test('the attendance PIN defaults to following Mandatory, but can be switched independently either way, per event', async () => {
+  assert.equal((await call('/api/settings', 'PUT', { pinOffsetMinutes: -10 }, 'A')).status, 200);     // PINs are due the instant an event starts
+
+  // Wargames defaults to not mandatory (config.json) - leaving pinEnabled untouched should default to off, so
+  // no PIN gets created automatically, even once it is well past due.
+  const optional = (await call('/api/events', 'POST', { title: 'Optional night', type: 'Wargames', start: inMinutes(1), pinWindowMinutes: 10 }, 'A')).body;
+  assert.equal(optional.mandatory, false);
+  assert.equal(optional.pinEnabled, false, 'follows Mandatory by default');
+  await sleep(300);
+  assert.equal((await state('A')).events.find((e) => e.id === optional.id).pin, null, 'no automatic PIN for a non-mandatory event left on its default');
+
+  // The same non-mandatory type, but with the PIN explicitly switched on for this one event - now it should
+  // fire automatically just like a mandatory event would.
+  const optionalWithPin = (await call('/api/events', 'POST', { title: 'Optional night, PIN on', type: 'Wargames', start: inMinutes(1), pinWindowMinutes: 10, pinEnabled: true }, 'A')).body;
+  assert.equal(optionalWithPin.mandatory, false);
+  assert.equal(optionalWithPin.pinEnabled, true);
+  await waitFor(async () => (await state('A')).events.find((e) => e.id === optionalWithPin.id && e.pin));
+
+  // A mandatory event defaults the other way (PIN on), but that too can be switched off per event - and an
+  // officer can still always send one by hand regardless, since that action has no check of its own.
+  const mandatoryNoPin = (await call('/api/events', 'POST', { title: 'Mandatory, PIN off', type: 'Castle Siege', start: inMinutes(1), pinWindowMinutes: 10, pinEnabled: false }, 'A')).body;
+  assert.equal(mandatoryNoPin.mandatory, true);
+  assert.equal(mandatoryNoPin.pinEnabled, false);
+  await sleep(300);
+  assert.equal((await state('A')).events.find((e) => e.id === mandatoryNoPin.id).pin, null, 'switched off even though the event is mandatory');
+  const sentByHand = (await call(`/api/events/${mandatoryNoPin.id}/pin/send`, 'POST', {}, 'A')).body;
+  assert.ok(sentByHand.pin.code, 'an officer can still always send one manually regardless of the switch');
+
+  // Editing an event to toggle Mandatory does not silently flip pinEnabled along with it - the two are picked
+  // independently once set.
+  const edited = (await call('/api/events/' + optional.id, 'PUT', { title: optional.title, type: optional.type, start: optional.start, mandatory: true, pinEnabled: false }, 'A')).body;
+  assert.equal(edited.mandatory, true);
+  assert.equal(edited.pinEnabled, false, 'an explicit pinEnabled on the request is kept, not overridden by the new Mandatory value');
 });
 
 test('reminders go only to players who have not answered, at the editable times', async () => {
