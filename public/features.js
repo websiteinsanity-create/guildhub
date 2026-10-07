@@ -28,7 +28,7 @@ function seriesPanel() {
 
 function seriesDialog(se) {
   const isNew = !se, st = S.settings, t0 = S.cfg.eventTypes[0];
-  se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, pinEnabled: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true };
+  se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true };
   openDialog(`
   <form data-form="series" data-id="${se.id || ''}">
     <h2>${isNew ? 'New recurring event' : 'Edit recurring event'}</h2>
@@ -56,8 +56,7 @@ function seriesDialog(se) {
       <div class="field"><label>PIN window (minutes)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${se.pinWindowMinutes}"></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${se.reminders === false ? '' : 'checked'}> Remind players who have not answered</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${se.mandatory ? 'checked' : ''}> Mandatory (counts toward "Qualified for loot")</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(se.pinEnabled ?? se.mandatory) ? 'checked' : ''}> Attendance PIN for these events (on by default for a mandatory event, off for an optional one)</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="mandatory" id="ev-mand" ${se.mandatory ? 'checked' : ''}> Mandatory (counts toward "Qualified for loot")</label>
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(se.description)}</textarea></div>
     <div class="muted small">Dates are created about ${Math.round((S.cfg.recurrenceHorizonDays || 42) / 7)} weeks ahead. Changing the series changes all upcoming dates (sign-ups are kept). Deleting a single date only skips that date.</div>
     <div class="dlg-actions">
@@ -74,7 +73,7 @@ ACTIONS['series-delete'] = () => {
     act(async () => { await api('/api/series/' + id, 'DELETE'); closeDialog(); }, 'Recurring event deleted');
 };
 FORMS.series = (f, fd, id) => {
-  const body = { ...fd, weekdays: [...f.querySelectorAll('input[name=wd]:checked')].map((i) => Number(i.value)), reminders: f.elements.reminders.checked, mandatory: f.elements.mandatory.checked, pinEnabled: f.elements.pinEnabled.checked };
+  const body = { ...fd, weekdays: [...f.querySelectorAll('input[name=wd]:checked')].map((i) => Number(i.value)), reminders: f.elements.reminders.checked, mandatory: f.elements.mandatory.checked };
   delete body.wd;
   let created = 0;
   act(async () => { const r = await api(id ? '/api/series/' + id : '/api/series', id ? 'PUT' : 'POST', body); created = r.created; closeDialog(); })

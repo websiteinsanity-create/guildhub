@@ -419,7 +419,7 @@ module.exports = function install(ctx) {
   }
   const applyTemplate = (ev, se) => {
     Object.assign(ev, {
-      title: se.title || se.type, type: se.type, description: se.description, points: se.points, mandatory: se.mandatory, pinEnabled: se.pinEnabled,
+      title: se.title || se.type, type: se.type, description: se.description, points: se.points, mandatory: se.mandatory,
       maxSignups: se.maxSignups, signupCloseMinutes: se.signupCloseMinutes, pinWindowMinutes: se.pinWindowMinutes, reminders: se.reminders,
     });
   };

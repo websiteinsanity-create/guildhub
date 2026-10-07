@@ -10,7 +10,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createDiscord } = require('./discord');
-const pkg = require('./package.json');   // app version only - shown to officers in Admin, so they can tell at a glance which code a deployment is actually running
 
 // Optional .env file next to server.js (one KEY=value per line). Real environment variables always win.
 try {
@@ -268,9 +267,6 @@ function migrate() {
     ev.pinEntries = ev.pinEntries || {};
     ev.remindersSent = ev.remindersSent || {};
     ev.reminderLog = ev.reminderLog || [];
-    // Event from before the PIN could be switched off for a non-mandatory event on its own: it follows whatever
-    // Mandatory already was, same as the default for a brand new event does.
-    if (ev.pinEnabled === undefined) ev.pinEnabled = !!ev.mandatory;
   }
 }
 migrate();
@@ -370,17 +366,15 @@ const publicBranding = () => {
   const b = db.settings.branding;
   return { name: b.name, tagline: b.tagline, accent: b.accent, bgDim: b.bgDim, icon: b.iconFile ? '/uploads/' + b.iconFile : '', bg: b.bgFile ? '/uploads/' + b.bgFile : '' };
 };
-route('GET', '/api/config', () => ({ ...config, version: pkg.version, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
+route('GET', '/api/config', () => ({ ...config, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
 
 const closeAt = (ev) => Date.parse(ev.start) - (ev.signupCloseMinutes ?? db.settings.signupCloseDefault) * 60000;
 function pinInfo(ev) {
   const start = Date.parse(ev.start), win = ev.pinWindowMinutes * 60000;
   const scheduledAt = new Date(start + db.settings.pinOffsetMinutes * 60000).toISOString();
-  // enabled: true unless an officer switched the PIN off for this specific event - tells the client there is no
-  // point waiting for one here, rather than showing "not activated yet" until enough time has passed to give up.
-  if (!ev.pin) return { state: 'pending', scheduledAt, windowMinutes: ev.pinWindowMinutes, enabled: !!ev.pinEnabled };
+  if (!ev.pin) return { state: 'pending', scheduledAt, windowMinutes: ev.pinWindowMinutes };
   const opens = Date.parse(ev.pin.at);
-  return { state: Date.now() <= opens + win ? 'open' : 'closed', scheduledAt, opensAt: ev.pin.at, closesAt: new Date(opens + win).toISOString(), windowMinutes: ev.pinWindowMinutes, enabled: !!ev.pinEnabled };
+  return { state: Date.now() <= opens + win ? 'open' : 'closed', scheduledAt, opensAt: ev.pin.at, closesAt: new Date(opens + win).toISOString(), windowMinutes: ev.pinWindowMinutes };
 }
 // Officers get the whole event. Everybody else gets it without the PIN itself.
 function eventFor(ev, user) {
@@ -473,16 +467,11 @@ function pickEvent(b, ex) {
   need(!isNaN(start), 400, 'Pick a valid date and time.');
   const title = clean(b.title, 80) || type.name;                 // no title typed: the type becomes the title
   const int = (v, dflt, lo, hi) => { const n = Math.round(Number(v)); return v === undefined || v === '' || v === null || !Number.isFinite(n) ? dflt : Math.min(hi, Math.max(lo, n)); };
-  const mandatory = b.mandatory === undefined ? !!type.mandatory : b.mandatory === true || b.mandatory === 'true';
   return {
     title, type: type.name, start: start.toISOString(),
     description: clean(b.description, 1500),
     points: Math.max(0, Math.round(num(b.points, type.points))),
-    mandatory,
-    // The attendance PIN defaults to following "Mandatory" (on for a mandatory event, off for an optional one -
-    // nobody needs to prove they showed up to something optional), but is its own switch: pick it independently
-    // of Mandatory, in either direction, same as Mandatory itself can be picked independently of the event type.
-    pinEnabled: b.pinEnabled === undefined ? mandatory : b.pinEnabled === true || b.pinEnabled === 'true',
+    mandatory: b.mandatory === undefined ? !!type.mandatory : b.mandatory === true || b.mandatory === 'true',
     maxSignups: Math.max(0, Math.round(num(b.maxSignups))),
     signupCloseMinutes: int(b.signupCloseMinutes, ex ? ex.signupCloseMinutes : db.settings.signupCloseDefault, 0, 10080),
     pinWindowMinutes: int(b.pinWindowMinutes, ex ? ex.pinWindowMinutes : db.settings.pinWindowDefault, 1, 720),
@@ -934,11 +923,7 @@ async function tick() {
     for (const ev of [...db.events]) {
       const now = Date.now(), start = Date.parse(ev.start);
       if (start < now - 24 * 36e5) continue;
-      // Follows this event's own PIN switch, not Mandatory directly - it defaults to match Mandatory, but an
-      // officer can turn it on for an optional event (or off for a mandatory one) independently; see pickEvent.
-      // Either way, an officer can still always create and send one by hand ("Create and send PIN now" on the
-      // event), which has no check of its own, so this only changes what happens with nobody touching it.
-      if (!ev.pin && !ev.pinSkip && ev.pinEnabled && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
+      if (!ev.pin && !ev.pinSkip && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
       await runReminders(ev, Date.now());
     }
     for (const h of tickHooks) await h();
