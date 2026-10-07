@@ -178,6 +178,13 @@ withServer('old data with bare id arrays as parties is converted on start', asyn
   points: [],
 });
 
+withServer('the app version from package.json is exposed over /api/config, so officers can tell which code a deployment is actually running', async ({ call }) => {
+  const cfg = (await call('/api/config')).body;
+  const pkgVersion = require('../package.json').version;
+  assert.equal(cfg.version, pkgVersion);
+  assert.match(cfg.version, /^\d+\.\d+\.\d+$/);
+});
+
 withServer('loot entries have a type (skillcore, item, shard) that is validated and editable', async ({ call, member, officer }) => {
   const m = (await call('/api/members', 'POST', { name: 'Typey', role: 'DPS' }, member)).body;
   const cfg = (await call('/api/config')).body;

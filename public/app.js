@@ -301,8 +301,17 @@ function render() {
   renderNav(page);
   $('#who').innerHTML = `${avatarImg(S.user)}<b>${esc(S.user.name)}</b>${isOfficer() ? '<span class="badge-officer">Officer</span>' : S.user.role === 'applicant' ? '<span class="badge-officer" style="color:var(--muted);border-color:var(--muted)">Applicant</span>' : ''}`;
   $('#brand-name').textContent = guildName(); $('#brand-tag').textContent = guildTag();
-  $('#main').innerHTML = VIEWS[page](id);
-  for (const h of AFTER_RENDER) h(page);
+  // Re-rendering the VOD review page while the exact same VOD is already open (a coaching point was just saved
+  // or deleted, or the ordinary 30-second background refresh noticed something changed elsewhere) must not tear
+  // down and rebuild the YouTube player - see vodPatchReview's own comment for why that silently breaks mobile
+  // playback. Anything else (a different page, or a different VOD) renders normally.
+  if (page === 'vods' && id && window.__vodReviewId === Number(id) && $('#vod-player-wrap')) {
+    vodPatchReview(id);
+  } else {
+    $('#main').innerHTML = VIEWS[page](id);
+    window.__vodReviewId = (page === 'vods' && id) ? Number(id) : null;
+    for (const h of AFTER_RENDER) h(page);
+  }
   checkNotices();
 }
 window.addEventListener('hashchange', () => {
@@ -774,8 +783,11 @@ function pinState(ev) {
   const info = ev.pinInfo || { state: 'pending' };
   if (info.state === 'open') return 'open';
   if (info.state === 'closed') return 'late';
+  // Know in advance there is no PIN coming (switched off for this event, or skipped for an old one) rather than
+  // waiting for the scheduled time to pass before saying so.
+  if (ev.pinSkip || info.enabled === false) return 'none';
   const around = new Date(info.scheduledAt).getTime();
-  return ev.pinSkip || Date.now() > around + (info.windowMinutes || 15) * 60000 ? 'none' : 'early';
+  return Date.now() > around + (info.windowMinutes || 15) * 60000 ? 'none' : 'early';
 }
 function pinSide(ev) {
   const info = ev.pinInfo || {}, kind = pinState(ev), own = mine();
@@ -827,7 +839,9 @@ function automationPanel(ev) {
     ${pin ? `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin:6px 0 4px"><div class="pin-code" aria-label="PIN">${esc(pin.code)}</div>
         <div class="small muted">Created ${fmtShort(pin.at)} (${esc(pin.by)}).<br>Players can enter it until ${fmtTime(info.closesAt)}. ${info.state === 'open' ? '<span class="ok-text">Open now.</span>' : 'Closed.'}<br>${entered} ${entered === 1 ? 'character has' : 'characters have'} entered it.</div></div>
       <ul class="sent">${(pin.sent || []).map((r) => `<li class="${r.ok ? 'yes' : 'fail'}">${r.ok ? 'Sent to' : 'Not delivered to'} <b>${esc(r.name)}</b> <span class="muted">(${esc(r.why)})</span>${r.ok ? '' : ` - ${esc(r.error)}`}</li>`).join('') || '<li class="muted">Nobody to send it to yet.</li>'}</ul>`
-      : `<div class="muted small">It will be created ${st.pinOffsetMinutes === 0 ? 'when the event starts' : `${Math.abs(st.pinOffsetMinutes)} minutes ${st.pinOffsetMinutes > 0 ? 'after the start' : 'before the start'}`} (around ${fmtTime(info.scheduledAt)}) and sent by Discord to the party leaders and the leadership. Change this in Admin.</div>`}
+      : ev.pinEnabled
+        ? `<div class="muted small">It will be created ${st.pinOffsetMinutes === 0 ? 'when the event starts' : `${Math.abs(st.pinOffsetMinutes)} minutes ${st.pinOffsetMinutes > 0 ? 'after the start' : 'before the start'}`} (around ${fmtTime(info.scheduledAt)}) and sent by Discord to the party leaders and the leadership. Change this in Admin.</div>`
+        : `<div class="muted small">The PIN is switched off for this event (see "Attendance PIN" below) - nothing is sent automatically, but you can still create and send one by hand with the button above.</div>`}
     <div class="small" style="margin-top:12px"><span class="muted">Reminders for players who have not answered:</span> ${!st.remindersEnabled ? 'switched off in Admin' : ev.reminders === false ? 'off for this event' : (st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set')}.
       ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>
   </div>`;
@@ -1108,7 +1122,7 @@ function attendancePanel(ev, past) {
 function eventDialog(ev, dateStr) {
   const isNew = !ev;
   const startIso = tzToIso((dateStr || addDayStr(todayTz(), 1)) + 'T20:00');      // 20:00 in your time zone
-  ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0 };
+  ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, pinEnabled: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0 };
   openDialog(`
   <form data-form="event" data-id="${ev.id || ''}">
     <h2>${isNew ? 'New event' : 'Edit event'}</h2>
@@ -1126,7 +1140,8 @@ function eventDialog(ev, dateStr) {
       <div class="field"><label>PIN window (minutes players can enter it)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${ev.pinWindowMinutes ?? S.settings.pinWindowDefault}"></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${ev.reminders === false ? '' : 'checked'}> Remind players who have not answered (times are set in Admin)</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(ev.pinEnabled ?? ev.mandatory) ? 'checked' : ''}> Attendance PIN for this event (on by default for a mandatory event, off for an optional one - switch it either way here)</label>
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(ev.description)}</textarea></div>
     <div class="dlg-actions">
       ${isNew ? '' : '<button type="button" class="btn danger left" data-act="event-delete">Delete</button>'}
@@ -1312,7 +1327,8 @@ function adminBackup() {
 function adminCustomizingText() {
   return `<div class="muted small" style="margin:18px 2px 0;padding-top:14px;border-top:1px solid var(--line)">
     <b>Customizing:</b> guild name, roles, weapons, the class name for each weapon pair, ranks, event types (with default points and mandatory flag), loot types and the starting loot rules are in <code>config.json</code>. Restart the server after changing it. Colors and fonts are the variables at the top of <code>public/index.html</code>. Discord settings are environment variables (see the README).
-  </div>`;
+  </div>
+  <div class="muted small" style="margin:8px 2px 0">Version: ${esc(S.cfg.version || '?')} powered by Freki</div>`;
 }
 
 /* ================= dialog ================= */
@@ -1461,7 +1477,11 @@ document.addEventListener('change', (e) => {
     if (!confirm('Restoring replaces ALL current data with the contents of this file. Continue?')) { el.value = ''; return; }
     f.text().then((t) => act(() => api('/api/import', 'POST', JSON.parse(t)), 'Backup restored')).catch(() => toast('That file could not be read.', true));
   }
-  else if (el.id === 'ev-type') { if ($('#ev-pts')) $('#ev-pts').value = el.selectedOptions[0].dataset.pts; $('#ev-mand').checked = el.selectedOptions[0].dataset.mand === '1'; }
+  else if (el.id === 'ev-type') {
+    if ($('#ev-pts')) $('#ev-pts').value = el.selectedOptions[0].dataset.pts;
+    $('#ev-mand').checked = el.selectedOptions[0].dataset.mand === '1';
+    if ($('#ev-pin')) $('#ev-pin').checked = $('#ev-mand').checked;   // follows the type's default too, same as Mandatory - still a separate switch from here
+  }
 });
 document.addEventListener('input', (e) => {
   const k = e.target.dataset.ui;
@@ -1492,6 +1512,7 @@ document.addEventListener('submit', async (e) => {
   } else if (kind === 'event') {
     fd.start = tzToIso(fd.start);
     fd.mandatory = f.elements.mandatory.checked;
+    fd.pinEnabled = f.elements.pinEnabled.checked;
     fd.reminders = f.elements.reminders.checked;
     act(async () => {
       const r = await api(id ? '/api/events/' + id : '/api/events', id ? 'PUT' : 'POST', fd);
@@ -1546,6 +1567,12 @@ function classOfOwner(owner) {
   const m = S.members.find((x) => x.owner === owner && x.active);
   return m ? classFor(m.primaryWeapon, m.secondaryWeapon) : '';
 }
+// A VOD's own ownerClass/ownerName (set server-side, in coachingState) is always preferred over looking the
+// owner up in S.members/S.users - those lists are empty for a guest coach (an applicant, never a member), who
+// would otherwise see every VOD land in "Other" with no name at all. Falling back to the old lookup keeps this
+// working exactly as before for everyone else, in case either field is ever missing.
+const vodOwnerClass = (v) => v.ownerClass || classOfOwner(v.owner) || '';
+const vodOwnerName = (v) => v.ownerName || ownerName(v.owner);
 function viewVods() {
   const vods = S.vods || [];
   // Folders are class-first - the first thing anyone sees on this page - because that is how a coach actually
@@ -1558,7 +1585,7 @@ function viewVods() {
   // whole-fight analysis before drilling into any one player's own view.
   const spectatorVods = vods.filter((v) => v.spectator);
   const byClass = {};
-  for (const v of vods) { if (v.spectator) continue; const cls = classOfOwner(v.owner) || 'Other'; (byClass[cls] ??= []).push(v); }
+  for (const v of vods) { if (v.spectator) continue; const cls = vodOwnerClass(v) || 'Other'; (byClass[cls] ??= []).push(v); }
   const classFolders = Object.entries(byClass).sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
   return `
   <div class="page-head"><div><h1>VODs</h1><div class="muted">Post a YouTube link for a coach to review live over Discord, or browse what has been shared with you.</div></div></div>
@@ -1572,19 +1599,19 @@ function vodClassFolder(label, vods, fixedIcon) {
   const byOwner = {};
   for (const v of vods) (byOwner[v.owner] ??= []).push(v);
   const ownerFolders = Object.entries(byOwner).map(([owner, list]) => ({ owner, list: list.slice().sort((a, b) => b.recordedDate.localeCompare(a.recordedDate) || b.id - a.id) }))
-    .sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
+    .sort((a, b) => vodOwnerName(a.list[0]).localeCompare(vodOwnerName(b.list[0])));
   return `<details class="fold" style="margin-bottom:12px"><summary>${icons}${esc(label)} <span class="muted small">(${vods.length})</span></summary>
     <div class="fold-body">${ownerFolders.map((f) => vodFolder(f.owner, f.list)).join('')}</div>
   </details>`;
 }
 function vodFolder(owner, list) {
-  return `<details class="fold vod-player-fold" style="margin-bottom:10px"><summary>${esc(ownerName(owner))} <span class="muted small">(${list.length})</span></summary>
+  return `<details class="fold vod-player-fold" style="margin-bottom:10px"><summary>${esc(vodOwnerName(list[0]))} <span class="muted small">(${list.length})</span></summary>
     <div class="fold-body">${list.map((v) => vodRow(v)).join('')}</div>
   </details>`;
 }
 function vodPostDialog() {
-  const coach = S.isCoach, students = S.myStudents || [];
-  const postFor = coach ? [{ key: S.user.key, label: 'Myself' }, ...students.map((k) => ({ key: k, label: ownerName(k) }))] : null;
+  const coach = S.isCoach, students = S.myStudents || [], studentNames = S.myStudentNames || {};
+  const postFor = coach ? [{ key: S.user.key, label: 'Myself' }, ...students.map((k) => ({ key: k, label: studentNames[k] || ownerName(k) }))] : null;
   const defType = S.cfg.vodTypes[0], needsEnemy = S.cfg.vodTypesWithEnemy.includes(defType);
   openDialog(`<form data-form="vod-post"><h2>Post a VOD</h2>
       ${coach ? `<div class="field"><label for="vf-for">For</label><select id="vf-for" name="owner">${postFor.map((o) => `<option value="${esc(o.key)}">${esc(o.label)}</option>`).join('')}</select></div>` : ''}
@@ -1605,13 +1632,27 @@ function fmtVodTimestamp(seconds) {
   const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
   return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
+// Just the "Coaching points" list - pulled out of viewVodReview so it can also be redrawn on its own (see
+// vodPatchReview below), without touching the player/iframe next to it.
+function vodMarkerPanelHtml(v) {
+  const markers = Array.isArray(v.markers) ? v.markers : [];
+  return `<h3 style="margin-top:0">Coaching points <span class="muted small">(${markers.length})</span></h3>
+      ${markers.length ? `<div class="vod-marker-list">${markers.map((m) => `<div class="vod-marker" data-marker-row="${m.id}">
+        <button type="button" class="vod-marker-jump" data-act="vod-marker-jump" data-marker-id="${m.id}" title="Jump to ${fmtVodTimestamp(m.timestamp)}">
+          <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)}</span><span class="vod-marker-note">${esc(m.note)}</span>
+        </button>
+        ${v.canManage ? `<button type="button" class="btn sm danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete</button>` : ''}
+      </div>`).join('')}</div>` : '<div class="empty">No coaching points yet.</div>'}`;
+}
+function vodReviewSubtitle(v) {
+  const visText = v.visibility === 'everyone' ? 'Shared with everyone' : v.visibility === 'class' ? `Shared with ${esc(v.visibleClass)}` : 'Private';
+  return `${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''} · ${visText}`;
+}
 function viewVodReview(id) {
   const v = (S.vods || []).find((x) => x.id === Number(id));
   if (!v) return `<div class="page-head"><h1>VOD not found</h1></div><div class="empty">This VOD may have been deleted, or you may not have access to it.</div>`;
-  const visText = v.visibility === 'everyone' ? 'Shared with everyone' : v.visibility === 'class' ? `Shared with ${esc(v.visibleClass)}` : 'Private';
-  const markers = Array.isArray(v.markers) ? v.markers : [];
   return `
-  <div class="page-head"><div><h1>${esc(v.title)}</h1><div class="muted">${esc(ownerName(v.owner))}${v.note ? ' · ' + esc(v.note) : ''} · ${visText}</div></div>
+  <div class="page-head"><div><h1 id="vod-review-title">${esc(v.title)}</h1><div class="muted" id="vod-review-sub">${vodReviewSubtitle(v)}</div></div>
     <a href="#/vods" class="btn sm">← Back to VODs</a></div>
   <div class="vod-review-grid">
     <div class="panel">
@@ -1636,16 +1677,25 @@ function viewVodReview(id) {
         <div class="link-row"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
       </form>` : ''}
     </div>
-    <div class="panel vod-marker-panel">
-      <h3 style="margin-top:0">Coaching points <span class="muted small">(${markers.length})</span></h3>
-      ${markers.length ? `<div class="vod-marker-list">${markers.map((m) => `<div class="vod-marker" data-marker-row="${m.id}">
-        <button type="button" class="vod-marker-jump" data-act="vod-marker-jump" data-marker-id="${m.id}" title="Jump to ${fmtVodTimestamp(m.timestamp)}">
-          <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)}</span><span class="vod-marker-note">${esc(m.note)}</span>
-        </button>
-        ${v.canManage ? `<button type="button" class="btn sm danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete</button>` : ''}
-      </div>`).join('')}</div>` : '<div class="empty">No coaching points yet.</div>'}
-    </div>
+    <div class="panel vod-marker-panel">${vodMarkerPanelHtml(v)}</div>
   </div>`;
+}
+// Re-render while the SAME VOD review page is already open updates just the header text and the coaching-point
+// list, in place - leaving the player wrap (iframe, canvas, toolbar) completely alone. This is what actually
+// fixes the mobile "save a coaching point -> black screen -> nothing works after that" bug: the earlier fix
+// (seeking more carefully) only treated a symptom. The real cause is that a normal re-render replaces the whole
+// page's HTML, which destroys and recreates the YouTube iframe - and on a phone, a freshly created iframe has
+// never been directly tapped by the viewer, so the browser's autoplay rules silently block every later seek or
+// play on it (no error, just a permanently stuck black frame) until the page is fully reloaded. Not touching the
+// iframe at all when nothing about which VOD is open has actually changed avoids the problem entirely, for a
+// saved/deleted coaching point and for the normal 30-second background refresh alike.
+function vodPatchReview(id) {
+  const v = (S.vods || []).find((x) => x.id === Number(id));
+  if (!v) { $('#main').innerHTML = VIEWS['vods'](id); window.__vodReviewId = null; for (const h of AFTER_RENDER) h('vods'); return; }
+  const title = $('#vod-review-title'), sub = $('#vod-review-sub'), panel = document.querySelector('.vod-marker-panel');
+  if (title) title.textContent = v.title;
+  if (sub) sub.innerHTML = vodReviewSubtitle(v);
+  if (panel) panel.innerHTML = vodMarkerPanelHtml(v);
 }
 // A transparent canvas sitting over the player - open to anyone watching, for sketching over the paused video
 // while talking it through on Discord voice. Nothing here is saved on its own; it only becomes permanent if a
@@ -1723,6 +1773,39 @@ ACTIONS['vod-color'] = (el) => {
   vodDraw.color = el.dataset.color;
   $('#vod-colors').querySelectorAll('.vod-color').forEach((b) => b.classList.toggle('active', b === el));
 };
+// Seeking straight into a paused state is what produces the mobile "black screen" bug: phone browsers (iOS
+// Safari and Chrome especially) do not actually decode a video frame just because seekTo() was called - they
+// only do that once the player is genuinely playing. So instead of seeking-then-pausing, this seeks, lets the
+// player actually reach the "playing" state (which forces that frame to decode), and only then pauses it again
+// if the caller wanted it paused. A short safety timeout pauses it anyway if "playing" never fires (e.g. the
+// player was already sitting exactly on that frame and has nothing new to report).
+function vodSeekSettle(time, keepPlaying) {
+  if (!ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
+  const target = Math.max(0, Number(time) || 0);
+  ytPlayer.seekTo(target, true);
+  if (keepPlaying) { ytPlayer.playVideo(); return; }
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    try { ytPlayer.removeEventListener('onStateChange', onState); } catch {}
+    ytPlayer.pauseVideo();
+  };
+  const onState = (e) => { if (e && e.data === 1) settle(); };   // 1 = YT.PlayerState.PLAYING
+  try { ytPlayer.addEventListener('onStateChange', onState); } catch {}
+  ytPlayer.playVideo();
+  setTimeout(settle, 1200);
+}
+// How far into a VOD someone last was, remembered across a real page reload (not just the in-memory re-render
+// that a coaching-point save triggers, which UI.vodRestore already covers). Small/near-zero positions are not
+// worth restoring to, so those are not saved at all.
+const VOD_POS_PREFIX = 'gh_vodpos_';
+function vodSavedPosition(id) {
+  try { const n = Number(localStorage.getItem(VOD_POS_PREFIX + id)); return Number.isFinite(n) && n > 3 ? n : 0; } catch { return 0; }
+}
+function vodSavePosition(id, time) {
+  try { localStorage.setItem(VOD_POS_PREFIX + id, String(Math.floor(time))); } catch {}
+}
 // Jumping to a coaching point pauses the video there and immediately shows whatever was drawn for it, without
 // waiting for the playback-position check below to notice (that one only fires while the video is playing).
 ACTIONS['vod-marker-jump'] = (el) => {
@@ -1730,8 +1813,7 @@ ACTIONS['vod-marker-jump'] = (el) => {
   const m = v && (v.markers || []).find((x) => x.id === markerId);
   if (!m || !ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
   UI.vodJump = m.timestamp;
-  ytPlayer.seekTo(m.timestamp, true);
-  ytPlayer.pauseVideo();
+  vodSeekSettle(m.timestamp, false);
   vodDraw.activeMarkerId = m.id;
   setVodMarkerDrawing(m);
 };
@@ -1756,6 +1838,13 @@ function syncVodMarkerDisplay() {
   if (!v) return;
   const t = Number(ytPlayer.getCurrentTime()) || 0, current = $('#vod-current-time');
   if (current) current.textContent = `Current position: ${fmtVodTimestamp(t)}`;
+  // Throttled so a real reload can pick playback back up near here - not every 200ms tick, just every couple
+  // of seconds, since localStorage writes are synchronous and there is no need to do one that often.
+  const nowMs = Date.now();
+  if (!syncVodMarkerDisplay._savedAt || nowMs - syncVodMarkerDisplay._savedAt > 2000) {
+    syncVodMarkerDisplay._savedAt = nowMs;
+    vodSavePosition(v.id, t);
+  }
   const marker = (v.markers || []).find((m) => t >= Math.max(0, m.timestamp - m.beforeSeconds) && t <= m.timestamp + m.afterSeconds);
   if (marker) {
     if (vodDraw.activeMarkerId !== marker.id) { vodDraw.activeMarkerId = marker.id; setVodMarkerDrawing(marker); }
@@ -1776,8 +1865,16 @@ const fsRequest = (el) => (el.requestFullscreen ? el.requestFullscreen() : el.we
 const fsExit = () => (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen ? document.webkitExitFullscreen() : null);
 ACTIONS['vod-fullscreen'] = () => {
   const wrap = $('#vod-player-wrap');
-  if (fsElement()) fsExit();
-  else fsRequest(wrap).catch(() => toast('Your browser does not support fullscreen here.', true));
+  if (fsElement()) { fsExit(); return; }
+  fsRequest(wrap).catch(() => {
+    // Some mobile browsers (older iOS Safari especially) refuse fullscreen on a wrapping div that contains a
+    // cross-origin iframe, even though they are fine with fullscreening the iframe itself - fall back to that.
+    // The drawing overlay and toolbar live outside the iframe, so they will not be visible in this fallback,
+    // but a working fullscreen video is better than a silently-rejected request.
+    const frame = ytPlayer && typeof ytPlayer.getIframe === 'function' ? ytPlayer.getIframe() : null;
+    if (frame) fsRequest(frame).catch(() => toast('Your browser does not support fullscreen here.', true));
+    else toast('Your browser does not support fullscreen here.', true);
+  });
 };
 const onFsChange = () => { const btn = $('#vod-fs-btn'); if (btn) btn.textContent = fsElement() ? '⤢ Exit fullscreen' : '⛶ Fullscreen'; };
 document.addEventListener('fullscreenchange', onFsChange);
@@ -1817,13 +1914,23 @@ AFTER_RENDER.push(async (page) => {
         // normally restarts it at 0:00 - vodRestore (set in FORMS['vod-marker'] below) puts the viewer back
         // where they actually were, and whether it was playing. A deliberate marker jump always wins over this
         // passive restoration, since someone clicking a marker wants to go there, not stay where they were.
+        // Make sure the generated iframe is actually allowed to go fullscreen - some browsers otherwise reject
+        // a fullscreen request on it even when the surrounding page asks nicely.
+        try {
+          const frame = ytPlayer.getIframe();
+          if (frame) { frame.setAttribute('allowfullscreen', ''); if (!/fullscreen/.test(frame.getAttribute('allow') || '')) frame.setAttribute('allow', `${frame.getAttribute('allow') || ''}; fullscreen`.replace(/^;\s*/, '')); }
+        } catch {}
         if (UI.vodJump !== null) {
-          ytPlayer.seekTo(UI.vodJump, true); ytPlayer.pauseVideo(); UI.vodJump = null;
-          UI.vodRestore = null;
+          const jumpTo = UI.vodJump; UI.vodJump = null; UI.vodRestore = null;
+          vodSeekSettle(jumpTo, false);
         } else if (UI.vodRestore) {
           const restore = UI.vodRestore; UI.vodRestore = null;
-          ytPlayer.seekTo(Math.max(0, Number(restore.time) || 0), true);
-          if (restore.playing) ytPlayer.playVideo(); else ytPlayer.pauseVideo();
+          vodSeekSettle(restore.time, !!restore.playing);
+        } else {
+          // A plain page load/reload, not a save-triggered re-render - pick the viewer back up near where they
+          // last were watching this VOD, instead of always restarting at 0:00.
+          const saved = vodSavedPosition(v.id);
+          if (saved) vodSeekSettle(saved, false);
         }
         syncVodMarkerDisplay();
       },
@@ -1836,20 +1943,25 @@ AFTER_RENDER.push(async (page) => {
 if (!window.__vodMarkerTimer) window.__vodMarkerTimer = setInterval(syncVodMarkerDisplay, 200);
 function vodRow(v) {
   const visBadge = v.visibility === 'everyone' ? '<span class="type-pill">Everyone</span>' : v.visibility === 'class' ? `<span class="type-pill">${esc(v.visibleClass)}</span>` : '<span class="muted small">Private</span>';
+  // The owner picking "a class" for their own VOD can only mean their own class - there is no real reason to
+  // hand footage to a class they do not even play - so they get just the two meaningful choices and no class
+  // picker at all; a coach or officer keeps the full one, since sharing a VOD across classes is sometimes
+  // exactly the point for them.
+  const selfOnly = !!v.promoteOwnClassOnly;
   return `<div class="rule-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
     <div style="flex:1;min-width:220px">
       <a href="#/vods/${v.id}" class="plain"><b>${esc(v.title)}</b></a>
       <a href="${esc(v.url)}" target="_blank" rel="noopener" class="muted small" style="margin-left:6px">Open on YouTube ↗</a>
-      <div class="muted small">${esc(ownerName(v.owner))}${v.note ? ' · ' + esc(v.note) : ''}</div>
+      <div class="muted small">${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''}</div>
     </div>
     <div style="align-self:center">${visBadge}</div>
     ${v.canPromote ? `<form data-form="vod-vis" data-id="${v.id}" class="seg" style="align-items:center">
       <select name="visibility" data-act="vod-vis">
         <option value="private" ${v.visibility === 'private' ? 'selected' : ''}>Private</option>
         <option value="everyone" ${v.visibility === 'everyone' ? 'selected' : ''}>Everyone</option>
-        <option value="class" ${v.visibility === 'class' ? 'selected' : ''}>A class</option>
+        <option value="class" ${v.visibility === 'class' ? 'selected' : ''}>${selfOnly ? 'My class' : 'A class'}</option>
       </select>
-      <select name="visibleClass" id="vv-cls-${v.id}" class="${v.visibility === 'class' ? '' : 'hidden'}">${opts(S.cfg.classes.map((c) => c.name), v.visibleClass)}</select>
+      ${selfOnly ? '' : `<select name="visibleClass" id="vv-cls-${v.id}" class="${v.visibility === 'class' ? '' : 'hidden'}">${opts(S.cfg.classes.map((c) => c.name), v.visibleClass)}</select>`}
       <button class="btn sm">Save</button>
     </form>` : ''}
     ${v.canManage ? `<button class="btn sm danger" data-act="vod-delete" data-id="${v.id}">Delete</button>` : ''}
@@ -1882,7 +1994,7 @@ ACTIONS['notice-accept'] = (el, d) => act(() => api(`/api/notices/${d.id}/ack`, 
 
 // Lucent is an amount, everything else is a named item: the item field slides away and the amount field grows into its place.
 CHANGES['vod-type'] = (el) => { $('#vf-enemy-field').classList.toggle('off', !S.cfg.vodTypesWithEnemy.includes(el.value)); };
-CHANGES['vod-vis'] = (el) => { const cls = el.closest('form').querySelector('[name=visibleClass]'); cls.classList.toggle('hidden', el.value !== 'class'); };
+CHANGES['vod-vis'] = (el) => { const cls = el.closest('form').querySelector('[name=visibleClass]'); if (cls) cls.classList.toggle('hidden', el.value !== 'class'); };
 FORMS['vod-post'] = (f, fd) => act(async () => { await api('/api/vods', 'POST', fd); closeDialog(); }, 'Posted');
 FORMS['vod-marker'] = (f, fd) => act(async () => {
   const v = (S.vods || []).find((x) => x.id === Number(route().id));
@@ -1892,8 +2004,10 @@ FORMS['vod-marker'] = (f, fd) => act(async () => {
   const beforeSeconds = Number(fd.beforeSeconds), afterSeconds = Number(fd.afterSeconds);
   if (!Number.isFinite(beforeSeconds) || beforeSeconds < 0 || beforeSeconds > 10 || !Number.isFinite(afterSeconds) || afterSeconds < 0 || afterSeconds > 10) throw new Error('Marking duration must be between 0 and 10 seconds.');
   const strokes = vodDraw ? (vodDraw.strokes || []).map((s) => ({ color: s.color, points: s.points })) : [];
-  // Saving triggers a refresh and re-render, which recreates the VOD iframe - preserve the exact position and
-  // whether it was playing (see onReady above) so this does not unexpectedly throw the viewer back to 0:00.
+  // The re-render this save triggers patches the marker list in place and leaves the player alone (see
+  // vodPatchReview) - so this normally never gets consumed. It is kept only as a fallback for the rare case a
+  // full rebuild happens anyway (e.g. the VOD itself couldn't be found any more), so a restart at 0:00 still
+  // will not happen then either.
   UI.vodRestore = { time: currentTime, playing: playerState === 1 };
   await api(`/api/vods/${v.id}/markers`, 'POST', { timestamp: currentTime, beforeSeconds, afterSeconds, note: fd.note, strokes });
   f.reset();
