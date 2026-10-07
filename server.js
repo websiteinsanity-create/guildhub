@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createDiscord } = require('./discord');
+const pkg = require('./package.json');   // app version only - shown to officers in Admin, so they can tell at a glance which code a deployment is actually running
 
 // Optional .env file next to server.js (one KEY=value per line). Real environment variables always win.
 try {
@@ -366,7 +367,7 @@ const publicBranding = () => {
   const b = db.settings.branding;
   return { name: b.name, tagline: b.tagline, accent: b.accent, bgDim: b.bgDim, icon: b.iconFile ? '/uploads/' + b.iconFile : '', bg: b.bgFile ? '/uploads/' + b.bgFile : '' };
 };
-route('GET', '/api/config', () => ({ ...config, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
+route('GET', '/api/config', () => ({ ...config, version: pkg.version, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
 
 const closeAt = (ev) => Date.parse(ev.start) - (ev.signupCloseMinutes ?? db.settings.signupCloseDefault) * 60000;
 function pinInfo(ev) {
