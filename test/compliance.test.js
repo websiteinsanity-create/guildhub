@@ -339,23 +339,55 @@ withServer('the attendance rules can be paused for a set number of hours and res
   assert.equal((await state(s, 'ann')).warnings.length, 1, 'resumed by hand, so the same no-show is caught on the next check');
 });
 
-withServer('a starting attendance percentage fills in for a player with no real counted events yet, and stops being used the moment they have one', async (s) => {
+withServer('a starting attendance baseline decays away linearly day by day, not vanishing the moment one real event happens and not sitting there forever', async (s) => {
   const c = await cast(s);
-  assert.equal((await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: 85 } }, s.ann)).status, 403, 'members cannot set this');
-  assert.equal((await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: 150 } }, s.officer)).status, 400, 'rejects an out-of-range value');
+  const setAnn = (b, who = s.officer) => s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: b } }, who);
 
-  const r = await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: 85, Bob: 40 } }, s.officer);
+  assert.equal((await setAnn({ pct: 85, events: 10, days: 30, fromDate: dateOf(0) }, s.ann)).status, 403, 'members cannot set this');
+  assert.equal((await setAnn({ pct: 150, events: 10, days: 30, fromDate: dateOf(0) })).status, 400, 'rejects an out-of-range percentage');
+  assert.equal((await setAnn({ pct: 50, events: 0, days: 30, fromDate: dateOf(0) })).status, 400, 'rejects zero events');
+  assert.equal((await setAnn({ pct: 50, events: 10, days: 0, fromDate: dateOf(0) })).status, 400, 'rejects zero days, which would divide by zero');
+  assert.equal((await setAnn({ pct: 50, events: 10, days: 30, fromDate: 'not-a-date' })).status, 400);
+
+  // Freki's own example: 50% over 30 events across 14 days, starting exactly 7 days ago - half the window
+  // has passed, so half the baseline (15 of the 30 events, split 50/50) should still be "in effect". The
+  // actual decay math is verified through its one real observable effect - the attendance warning below -
+  // since the blended percentage itself is internal to playerStats() and never exposed through its own
+  // endpoint (the client recomputes the same blend itself for display, covered separately in the browser).
+  const baseline = { pct: 50, events: 30, days: 14, fromDate: dateOf(-7) };
+  const r = await setAnn(baseline);
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { Ann: 85, Bob: 40 });
+  assert.deepEqual(r.body.Ann, baseline);
+  assert.equal((await state(s, 'ann')).attendanceStarting.Ann.pct, 50, 'sent to everyone, not just officers, so a player can see their own');
 
-  let ann = await state(s, 'ann');
-  assert.equal(ann.attendanceStarting.Ann, 85, 'sent to everyone, not just officers, so a player can see their own fall back correctly');
+  const cleared = await setAnn(null);
+  assert.equal(cleared.body.Ann, undefined, 'clearing removes it entirely');
+  assert.equal((await setAnn({ pct: 40, events: 5, days: 20, fromDate: dateOf(0) })).status, 200, 'does not need an event for the player to already exist for');
+});
 
-  // one real counted event for Ann now exists - her starting value should stop being used from here on
-  await pastEvent(s, 2, { came: [c.ann], yes: [c.ann] });
+withServer('the attendance-% warning is suspended for as long as a starting baseline is still decaying, and resumes once it has fully aged out', async (s) => {
+  const c = await cast(s);
+  const rulesSet = await rules(s, { enabled: true, minAttendance: 60, minEvents: 1, noShowLimit: 0, noReplyLimit: 0, windowDays: 60, finalAfterMinutes: 5 });
+  assert.equal(rulesSet.status, 200, JSON.stringify(rulesSet.body));
+
+  // a deliberately low baseline (20%) that is still well within its decay window - should never be able to
+  // trigger the attendance warning by itself, no matter how low it is
+  await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: { pct: 20, events: 10, days: 30, fromDate: dateOf(-5) } } }, s.officer);
+  await pastEvent(s, 2, { came: [c.ann], yes: [c.ann] });   // one real event, well attended, so this is not what would trigger it either
+  let alert = await run(s);
+  assert.equal(alert.status, 200);
+  assert.equal((await state(s, 'ann')).alert, null, 'no warning while the baseline is still active, regardless of how low it is');
+
+  // the same baseline, but fully decayed (started well over 30 days ago) - now only the real, well-attended
+  // event counts, so there should still be no warning (this confirms decaying-out does not itself cause one)
+  await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: { pct: 20, events: 10, days: 30, fromDate: dateOf(-90) } } }, s.officer);
   await run(s);
+  assert.equal((await state(s, 'ann')).alert, null, 'still fine - the one real event was a Going+attended');
 
-  const r2 = await s.call('/api/admin/attendance-starting', 'PUT', { values: { Ann: null } }, s.officer);
-  assert.equal(r2.body.Ann, undefined, 'a null value clears it');
-  assert.equal(r2.body.Bob, 40, 'clearing one does not touch another');
+  // now give Bob a genuinely poor real record while his baseline has already fully decayed - this should
+  // trigger normally, proving the suspension is specific to an active baseline, not a blanket exemption
+  await s.call('/api/admin/attendance-starting', 'PUT', { values: { Bob: { pct: 90, events: 10, days: 10, fromDate: dateOf(-90) } } }, s.officer);
+  await pastEvent(s, 3, { yes: [c.bob] });   // said Going, did not attend
+  await run(s);
+  assert.ok((await state(s, 'bob')).alert, 'a real poor record still triggers normally once the baseline has fully decayed out');
 });

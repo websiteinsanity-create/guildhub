@@ -81,10 +81,15 @@ module.exports = function install(ctx) {
     // this to offer a link to their own mercenary page alongside the application link - otherwise someone who
     // only ever came to help for one event has no way back to it once they navigate anywhere else.
     const merc = D.members.find((m) => m.owner === user.key && m.mercenary);
+    // A guest class coach is the same idea: still "applicant" as far as sign-in goes, but with real coaching
+    // access underneath. coachingState() already works for anyone regardless of role (it only ever looks at
+    // user.key and user.coach), so this is the exact same data a real coach gets, not a separate code path.
+    const coachBits = ctx.coaching ? ctx.coaching.coachingState(user) : { isCoach: false, myStudents: [], myCoaches: [], vods: [] };
     return {
       user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: 'applicant' },
       application: latestFor(user.key),
       mercEventId: merc ? merc.mercFor : null,
+      ...coachBits,
       members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], requests: [], changes: [], profiles: {}, series: [],
       infoBoard: { title: 'Info', categories: [] }, notices: [], leaves: [], warnings: [], explanations: [], alert: null, tags: [], playerTags: {}, prefs: {}, users: [],
       settings: { branding: D.settings.branding, hiddenSections: [], approvals: {}, compliance: {}, applications: { enabled: D.settings.applications.enabled, intro: D.settings.applications.intro } },

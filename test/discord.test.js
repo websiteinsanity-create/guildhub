@@ -41,11 +41,17 @@ async function startServer(seedDb) {
 function stopServer() { proc && proc.kill(); fake && fake.close(); dir && fs.rmSync(dir, { recursive: true, force: true }); }
 
 // Walks through the OAuth redirect exactly like a browser would and returns the session cookie.
-async function discordLogin(id, roles = [], { state: forceState } = {}) {
+async function discordLogin(id, roles = [], { state: forceState, authQuery = '' } = {}) {
   fake.state.guildMembers[id] = roles === null ? undefined : { roles };
-  const start = await fetch(base + '/auth/discord', { redirect: 'manual' });
-  const oauth = /gh_oauth=([^;]+)/.exec(start.headers.get('set-cookie'))[1];
-  const cb = await fetch(`${base}/auth/discord/callback?code=${id}&state=${forceState ?? oauth}`, { redirect: 'manual', headers: { Cookie: `gh_oauth=${oauth}` } });
+  const start = await fetch(base + '/auth/discord' + authQuery, { redirect: 'manual' });
+  // /auth/discord can set more than one cookie (gh_oauth always, plus gh_merc or gh_guestcoach when the link
+  // asked for one) - all of them need forwarding to the callback below, not just gh_oauth, or a bypass cookie
+  // set here is silently dropped before the callback ever sees it.
+  const setCookies = (start.headers.raw ? start.headers.raw()['set-cookie'] : start.headers.get('set-cookie').split(/,(?=\s*\w+=)/)) || [];
+  const startCookies = Object.fromEntries(setCookies.map((c) => c.split(';')[0].split('=').map((s) => s.trim())));
+  const oauth = startCookies.gh_oauth;
+  const forwardCookie = Object.entries(startCookies).map(([k, v]) => `${k}=${v}`).join('; ');
+  const cb = await fetch(`${base}/auth/discord/callback?code=${id}&state=${forceState ?? oauth}`, { redirect: 'manual', headers: { Cookie: forwardCookie } });
   const cookie = /gh_session=([^;]+)/.exec(cb.headers.get('set-cookie') || '');
   return { start, cb, cookie: cookie ? `gh_session=${cookie[1]}` : null, location: cb.headers.get('location') };
 }
@@ -349,6 +355,69 @@ test('kicking a player: their character is deactivated (not deleted), they canno
   const again = await discordLogin(B, [OFFICER_ROLE]);
   sessions.B2 = again.cookie;
   assert.equal((await state('B2')).user.role, 'officer');
+});
+
+test('guest class coaches: someone outside the guild joins via the invite link, even with applications closed, picks a class, and gets real coaching access for it - officers can reassign or remove them, a plain sign-in link does not let a stranger in the same way', async () => {
+  const GUEST = '100000000000000050';
+  // an earlier test in this file leaves applications open - close them explicitly, since the whole point of
+  // this test is proving the guest-coach link works even when they are not
+  await call('/api/admin/discord', 'PUT', { applications: { enabled: false } }, 'A');
+
+  // without the special link, applications being closed still blocks a total stranger, same as ever
+  assert.equal((await discordLogin(GUEST, null)).cookie, null, 'a plain sign-in is still blocked while applications are closed');
+
+  // with the link, the same person gets through as an applicant, not rejected
+  const first = await discordLogin(GUEST, null, { authQuery: '?guestcoach=1' });
+  assert.ok(first.cookie, 'the guest-coach link lets them through even with applications closed');
+  sessions.guest = first.cookie;
+  assert.equal((await state('guest')).user.role, 'applicant');
+  assert.equal((await state('guest')).isCoach, false, 'not a coach yet - only after they actually join and pick a class');
+
+  // B already has a character from an earlier test in this file - switch it to Oracle so myStudents has
+  // something real to show once the guest coach joins, rather than trying to add a second character for B
+  // (one character per player is enforced, so that would just be rejected)
+  // an officer edits directly, so this applies immediately rather than going into the approval queue a
+  // player's own weapon change would need (a separate concern from what this test covers)
+  const bChar = (await state('B')).members.find((m) => m.owner === B);
+  await call(`/api/members/${bChar.id}`, 'PUT', { name: 'OracleStudent', role: 'Healer', primaryWeapon: 'Orb', secondaryWeapon: 'Wand & Tome' }, 'A');
+
+  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Not a real class' }, 'guest')).status, 400);
+  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Oracle' }, 'A')).status, 400, 'only someone not already a member can join this way');
+  const joined = await call('/api/guest-coaches/join', 'POST', { class: 'Oracle' }, 'guest');
+  assert.equal(joined.status, 200);
+  assert.equal(joined.body.class, 'Oracle');
+
+  const guestState = await state('guest');
+  assert.equal(guestState.isCoach, true);
+  assert.ok(guestState.myStudents.includes(B), 'sees the real Oracle player as a student, the same mechanism a real coach uses');
+
+  // an officer can see them listed, with their class
+  const officerState = await state('A');
+  const listed = officerState.guestCoaches.find((g) => g.discordId === GUEST);
+  assert.ok(listed);
+  assert.equal(listed.class, 'Oracle');
+  assert.deepEqual((await state('guest')).guestCoaches, [], 'the list itself is officer-only, like coachLinks');
+
+  // signing in again later, with no special link at all, still gets them through and still a coach - the
+  // bypass is not only a one-time thing tied to the link itself
+  const again = await discordLogin(GUEST, null);
+  assert.ok(again.cookie, 'a returning guest coach signs in normally afterwards, no link needed a second time');
+  sessions.guest2 = again.cookie;
+  assert.equal((await state('guest2')).isCoach, true);
+
+  // only an officer can reassign or remove them
+  assert.equal((await call(`/api/guest-coaches/${GUEST}/class`, 'PUT', { class: 'Crusader' }, 'guest')).status, 403);
+  assert.equal((await call(`/api/guest-coaches/${GUEST}/class`, 'PUT', { class: 'Crusader' }, 'A')).status, 200);
+  assert.equal((await state('A')).guestCoaches.find((g) => g.discordId === GUEST).class, 'Crusader');
+  assert.ok(!(await state('guest')).myStudents.includes(B), 'moved off Oracle, so the Oracle player is no longer their student');
+
+  assert.equal((await call(`/api/guest-coaches/${GUEST}`, 'DELETE', null, 'guest')).status, 403);
+  assert.equal((await call(`/api/guest-coaches/${GUEST}`, 'DELETE', null, 'A')).status, 200);
+  assert.equal((await state('A')).guestCoaches.length, 0);
+  assert.equal((await state('guest')).isCoach, false, 'removed - no more coaching access at all');
+
+  // restore applications to how this file's later tests expect to find them (left open by an earlier test)
+  await call('/api/admin/discord', 'PUT', { applications: { enabled: true } }, 'A');
 });
 
 test('a rejected applicant may apply again; a withdrawn application is gone; accepted people can sign in later without being in the server', async () => {

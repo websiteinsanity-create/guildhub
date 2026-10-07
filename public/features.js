@@ -361,8 +361,9 @@ function attRows(evs) {
       if (attended) { status = 'attended'; n++; } else if (going) { status = 'noshow'; noshow++; } else if (no) { status = 'declined'; declined++; } else status = 'noreply';
       list.push({ e, status, answer: going ? 'Going' : no ? "Can't" : 'no answer' });
     }
-    const startPct = (S.attendanceStarting || {})[owner];
-    const pct = total ? Math.floor(100 * n / total) : (startPct === undefined ? null : startPct);
+    const virtual = virtualAttendanceFor(owner);
+    const blendedTotal = total + virtual.events, blendedN = n + virtual.came;
+    const pct = blendedTotal > 0 ? Math.floor(100 * blendedN / blendedTotal) : null;
     const last = S.events.filter((e) => ids.some((id) => e.attended.includes(id))).map((e) => e.start).sort().pop();
     return { owner, name: ownerName(owner), chars, n, total, noshow, noreply, declined, pct, band: pct === null ? 'none' : bandOf(pct, ls), last, bal: ids.reduce((a, id) => a + balance(id), 0), list };
   });
@@ -375,20 +376,45 @@ function attRows(evs) {
 function attendanceStartingPanel(active) {
   const owners = [...new Map(active.map((m) => [m.owner, m])).values()].sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
   const starting = S.attendanceStarting || {};
+  const field = (owner, name, attrs, val) => `<input ${attrs} name="${name}__${esc(owner)}" value="${val ?? ''}">`;
   return `<details class="panel fold" style="margin-top:16px" data-fold="att-starting">
-    <summary>Starting attendance % <span class="muted small">(a one-time migration aid)</span></summary>
-    <div class="muted small" style="margin:-4px 0 10px">For a guild moving its whole history onto Guild Hall: give each player a starting percentage instead of
-      everyone showing a blank "-" until real events build up. The moment a player has one real counted event here, their actual
-      attendance takes over completely and this stops being used for them - nothing to turn off by hand later. Leave a field blank for no starting value.</div>
+    <summary>Starting attendance % <span class="muted small">(a migration aid)</span></summary>
+    <div class="muted small" style="margin:-4px 0 10px">For a guild moving its whole history onto Guild Hall: give a player a starting baseline instead of
+      everyone showing a blank "-" until real events build up - for example "50% over their last 30 events across 14 days, starting Oct 1". It decays
+      away linearly, day by day, rather than vanishing the moment one real event happens (which would let a single event swing someone from 5% to 100%
+      overnight) - by the start date plus the day count, it is gone entirely and only real attendance counts from then on. It never triggers a
+      compliance warning by itself either, for as long as any of it is still "in effect". Leave the percentage blank to clear a player's baseline.</div>
     <form data-form="att-starting">
       <div class="att-start-grid">
-        ${owners.map((m) => `<label class="att-start-row"><span>${esc(ownerName(m.owner))}</span><input type="number" min="0" max="100" name="${esc(m.owner)}" value="${starting[m.owner] ?? ''}" placeholder="-"></label>`).join('')}
+        <div class="att-start-head"><span>Player</span><div class="att-start-fields"><span>%</span><span>Events</span><span>Days</span><span>Start date</span></div></div>
+        ${owners.map((m) => { const c = starting[m.owner] || {}; return `<div class="att-start-row">
+          <span>${esc(ownerName(m.owner))}</span>
+          <div class="att-start-fields">
+            ${field(m.owner, 'pct', 'type="number" min="0" max="100" placeholder="-" aria-label="Starting percentage"', c.pct)}
+            ${field(m.owner, 'events', 'type="number" min="1" max="1000" placeholder="events" aria-label="Based on this many events"', c.events)}
+            ${field(m.owner, 'days', 'type="number" min="1" max="1000" placeholder="days" aria-label="Spread across this many days"', c.days)}
+            ${field(m.owner, 'fromDate', 'type="date" aria-label="Starting from this date"', c.fromDate)}
+          </div>
+        </div>`; }).join('')}
       </div>
       <button class="btn primary" style="margin-top:10px">Save all</button>
     </form>
   </details>`;
 }
-FORMS['att-starting'] = (f, fd) => act(() => api('/api/admin/attendance-starting', 'PUT', { values: fd }), 'Saved');
+FORMS['att-starting'] = (f, fd) => {
+  // Reassemble the flat "pct__<owner>" form fields this had to be submitted as into the {owner: {pct, events,
+  // days, fromDate}} shape the API actually wants - a blank percentage clears that player's baseline entirely,
+  // even if the other three fields still have values left over in them from before.
+  const values = {};
+  for (const [key, val] of Object.entries(fd)) {
+    const sep = key.indexOf('__');
+    if (sep < 0) continue;
+    const field = key.slice(0, sep), owner = key.slice(sep + 2);
+    (values[owner] ??= {})[field] = val;
+  }
+  for (const owner of Object.keys(values)) if (values[owner].pct === '') values[owner] = null;
+  return act(() => api('/api/admin/attendance-starting', 'PUT', { values }), 'Saved');
+};
 VIEWS.points = () => {
   const off = isOfficer(), ls = lootSettings(), q = UI.attQ.toLowerCase();
   const evs = attEvents(), days = UI.attDays === 'all' ? null : Number(UI.attDays);
@@ -962,6 +988,31 @@ VIEWS.merc = (id) => {
 };
 ACTIONS['merc-edit-toggle'] = () => { UI.mercEditing = !UI.mercEditing; render(); };
 FORMS['merc-signup'] = (f, fd, id) => act(async () => { await api('/api/merc-signup/' + id, 'POST', fd); UI.mercInfoFor = null; UI.mercEditing = false; }, 'Joined. The officers can see you in the party board now.');
+
+// A guest class coach: someone outside the guild entirely, here only to review VODs for one class. Reached by
+// an invite link from Admin, the same trust model as a mercenary's event link - the link itself is the gate,
+// there is no separate approval step once someone has it.
+VIEWS['guest-coach'] = () => {
+  const head = `<div class="page-head"><div><h1>Guest class coach</h1><div class="muted">Signed in as ${esc(S.user.name)}. This does not make you a guild member - you only get access to VODs for the class below.</div></div></div>`;
+  const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  if (S.isCoach && S.myGuestCoachClass) {
+    return `${head}<div class="panel"><h3>You're coaching ${esc(S.myGuestCoachClass)} players</h3>
+      <div class="muted small" style="margin:-4px 0 10px">You can see their VODs and leave coaching points on them. Switch to a different class any time below.</div>
+      <form data-form="guest-coach-join">
+        <div class="field"><label for="gc-class">Class</label><select id="gc-class" name="class">${opts(classes, S.myGuestCoachClass)}</select></div>
+        <div class="link-row"><a href="#/vods" class="btn sm">Go to VODs</a><button class="btn primary">Switch class</button></div>
+      </form>
+    </div>`;
+  }
+  return `${head}<div class="panel"><h3>Pick the class you are coaching</h3>
+    <div class="muted small" style="margin:-4px 0 10px">You will be able to see and review VODs from anyone currently playing this class. You can switch classes later from this same page.</div>
+    <form data-form="guest-coach-join">
+      <div class="field"><label for="gc-class">Class</label><select id="gc-class" name="class" required>${opts(classes, '', 'Pick a class')}</select></div>
+      <div class="link-row"><button class="btn primary">Join as a guest coach</button></div>
+    </form>
+  </div>`;
+};
+FORMS['guest-coach-join'] = (f, fd) => act(() => api('/api/guest-coaches/join', 'POST', fd), 'Done');
 
 /* ================= Admin: the Discord bot, the channel for party pictures, applications ================= */
 UI.dcheck = null;

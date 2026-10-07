@@ -5,7 +5,8 @@
 // this module actually owns: who is a coach, who they coach, and the VOD links themselves and who can see each one.
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, isOfficer, isCoach, audit, discord } = ctx;
+  const { route, need, clean, newId, save, config, isOfficer, isCoach, audit, discord, appUrl } = ctx;
+  const notify = (ownerKey, text) => { discord.sendDM(ownerKey, text).catch(() => {}); };   // best effort, never blocks a request
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
 
@@ -88,8 +89,14 @@ module.exports = function install(ctx) {
       isCoach: coach,
       myStudents: coach ? studentsOf(user.key) : [],
       myCoaches: coachesOf(user.key),
+      // Which class the signed-in person themselves coaches, if they are a guest coach checking their own
+      // status on the join/switch-class page - not meaningful for a regular coach, who can have several.
+      myGuestCoachClass: classesCoachedBy(user.key)[0] || null,
       vods,
       coachLinks: off ? D.coachLinks : [],   // the full link list is only useful for the Admin page
+      // Same reasoning as coachLinks above - officer-only, matching the Member page's Mercenaries section,
+      // which this sits right alongside.
+      guestCoaches: off ? D.guestCoaches.map((g) => ({ ...g, class: (D.coachLinks.find((l) => l.coach === g.discordId) || {}).class || '' })) : [],
     };
   }
 
@@ -149,12 +156,65 @@ module.exports = function install(ctx) {
     return { ok: true };
   }, { officer: true });
 
+  // ---------------------------------------------------------------- Guest class coaches
+  // Someone outside the guild entirely, there only to coach one class - never a member in any other sense.
+  // They reach this the same way a mercenary reaches event sign-up: a link an officer shares (Admin > Guest
+  // coaches), which lets their very first Discord sign-in through even with general applications switched off
+  // (see the OAuth callback in server.js). The link itself is the only gate, the same trust model mercenaries
+  // already use - there is deliberately no approval step here either.
+  route('POST', '/api/guest-coaches/join', ({ body, user }) => {
+    const D = db(), cls = clean(body.class, 40);
+    need(user.role === 'applicant', 400, 'Only someone who is not already a guild member can join as a guest coach.');
+    need((config.classes || []).some((c) => c.name === cls), 400, 'Pick a real class.');
+    if (!D.guestCoaches.some((g) => g.discordId === user.key)) {
+      D.guestCoaches.push({ id: newId(), discordId: user.key, name: user.name, avatar: user.avatar || '', addedAt: now() });
+    }
+    // One class at a time, swapped rather than added to - a guest coach is "the Oracle guest coach", not
+    // gradually accumulating classes the way a real coach might.
+    D.coachLinks = D.coachLinks.filter((l) => l.coach !== user.key);
+    D.coachLinks.push({ id: newId(), coach: user.key, class: cls, linkedAt: now() });
+    // The session that just joined was issued before this existed, so its own token still says coach: false -
+    // update the persisted record directly so the auth middleware's live re-check (the same one that already
+    // keeps a regular coach's status current without a fresh sign-in) picks this up on their very next request.
+    if (D.users[user.key]) D.users[user.key].coach = true;
+    save();
+    audit(user, 'guestcoach.join', { type: 'player', id: user.key, name: user.name }, `${user.name} joined as a guest coach for ${cls} players.`);
+    return { class: cls };
+  }, { applicant: true });
+
+  route('PUT', '/api/guest-coaches/:discordId/class', ({ body, user, params }) => {
+    const D = db(), gc = D.guestCoaches.find((g) => g.discordId === params.discordId);
+    need(gc, 404, 'Guest coach not found.');
+    const cls = clean(body.class, 40);
+    need((config.classes || []).some((c) => c.name === cls), 400, 'Pick a real class.');
+    D.coachLinks = D.coachLinks.filter((l) => l.coach !== gc.discordId);
+    D.coachLinks.push({ id: newId(), coach: gc.discordId, class: cls, linkedAt: now() });
+    save();
+    audit(user, 'guestcoach.reassign', { type: 'player', id: gc.discordId, name: gc.name }, `${user.name} moved the guest coach ${gc.name} to ${cls} players.`);
+    return { class: cls };
+  }, { officer: true });
+
+  route('DELETE', '/api/guest-coaches/:discordId', ({ user, params }) => {
+    const D = db(), i = D.guestCoaches.findIndex((g) => g.discordId === params.discordId);
+    need(i >= 0, 404, 'Guest coach not found.');
+    const [gone] = D.guestCoaches.splice(i, 1);
+    D.coachLinks = D.coachLinks.filter((l) => l.coach !== gone.discordId);
+    if (D.users[gone.discordId]) D.users[gone.discordId].coach = false;
+    save();
+    audit(user, 'guestcoach.remove', { type: 'player', id: gone.discordId, name: gone.name }, `${user.name} removed ${gone.name} as a guest coach.`);
+    return { ok: true };
+  }, { officer: true });
+
   // ---------------------------------------------------------------- VODs
   function parseYoutube(url) {
     try {
       const u = new URL(String(url || '').trim());
       if (!/(^|\.)youtube\.com$/.test(u.hostname) && u.hostname !== 'youtu.be') return null;
-      const id = u.hostname === 'youtu.be' ? u.pathname.slice(1) : u.searchParams.get('v');
+      // youtu.be/ID and youtube.com/watch?v=ID are the two most common forms, but a VOD is very often a
+      // livestream replay, which YouTube gives out as youtube.com/live/ID instead - and shorts/embed links get
+      // pasted in sometimes too. All of these just put the id in a different place in the same URL.
+      const pathMatch = /^\/(live|shorts|embed)\/([^/]+)/.exec(u.pathname);
+      const id = u.hostname === 'youtu.be' ? u.pathname.slice(1) : pathMatch ? pathMatch[2] : u.searchParams.get('v');
       return /^[\w-]{11}$/.test(id || '') ? id : null;
     } catch { return null; }
   }
@@ -172,7 +232,11 @@ module.exports = function install(ctx) {
     const recordedDate = body.recordedDate !== undefined ? String(body.recordedDate).trim() : v.recordedDate;
     need(/^\d{4}-\d{2}-\d{2}$/.test(recordedDate) && !isNaN(new Date(recordedDate + 'T00:00:00Z')), 400, 'Pick a valid recording date.');
     const enemyGuild = VOD_TYPES_WITH_ENEMY.includes(type) ? clean(body.enemyGuild !== undefined ? body.enemyGuild : v.enemyGuild, 60) : '';
-    return { type, recordedDate, enemyGuild };
+    // A wide-angle/overview recording, not any one player's own combat view - it goes in its own "Spectator
+    // PoV" folder instead of a class folder regardless of whoever's account it is posted under, since the
+    // owner's class is not really what the footage is about.
+    const spectator = body.spectator !== undefined ? !!body.spectator : !!v.spectator;
+    return { type, recordedDate, enemyGuild, spectator };
   };
 
   route('POST', '/api/vods', ({ body, user }) => {
@@ -183,23 +247,36 @@ module.exports = function install(ctx) {
     need(owner === user.key || isOfficer(user) || coachesOf(owner).includes(user.key), 403, "You can only post VODs for yourself or a player you coach.");
     const videoId = parseYoutube(body.url);
     need(videoId, 400, 'That does not look like a YouTube link.');
-    const { type, recordedDate, enemyGuild } = validVodFields(body, { type: '', recordedDate: '', enemyGuild: '' });
+    const { type, recordedDate, enemyGuild, spectator } = validVodFields(body, { type: '', recordedDate: '', enemyGuild: '', spectator: false });
     const v = {
       id: newId(), owner, postedBy: user.key, postedAt: now(), url: String(body.url).trim(), videoId,
-      type, recordedDate, enemyGuild, title: vodTitle(type, recordedDate, enemyGuild), note: clean(body.note, 500),
+      type, recordedDate, enemyGuild, spectator, title: vodTitle(type, recordedDate, enemyGuild), note: clean(body.note, 500),
       visibility: 'private', visibleClass: '',
     };
     D.vods.push(v);
     save();
     audit(user, 'vod.create', { type: 'vod', id: v.id, name: v.title }, `${user.name} posted a VOD ("${v.title}") for ${m.name}.`);
+    // Whoever coaches this player's current class gets a DM the moment a VOD is posted for them - private by
+    // default or not, a coach can already see any VOD for their own students, so there is no visibility check
+    // to make here. Posting for yourself does not DM yourself, and a spectator recording is not really "for"
+    // any one class, so neither sends anything.
+    if (!spectator) {
+      // Guest coaches are deliberately left out here - notified on request would mean pinging someone outside
+      // the guild for every single upload, which is not wanted. They can still always see the VOD itself
+      // (coachesOf, used for visibility elsewhere, is untouched) - just no DM about it landing.
+      const guestCoachIds = new Set(D.guestCoaches.map((g) => g.discordId));
+      for (const coachKey of coachesOf(owner)) {
+        if (coachKey !== user.key && !guestCoachIds.has(coachKey)) notify(coachKey, `🎬 New VOD posted for ${m.name}: "${v.title}"${v.note ? `\n${v.note}` : ''}\n${appUrl()}/#/vods/${v.id}`);
+      }
+    }
     return v;
-  });
+  }, { applicant: true });   // a guest class coach (an applicant, never a member) can post a VOD for their student
 
   route('PUT', '/api/vods/:id', ({ body, user, params }) => {
     const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
     need(v, 404, 'VOD not found.');
     need(canManageVod(user, v), 403, 'You can only edit your own VODs, or VODs of a player you coach.');
-    if (body.type !== undefined || body.recordedDate !== undefined || body.enemyGuild !== undefined) {
+    if (body.type !== undefined || body.recordedDate !== undefined || body.enemyGuild !== undefined || body.spectator !== undefined) {
       Object.assign(v, validVodFields(body, v));
       v.title = vodTitle(v.type, v.recordedDate, v.enemyGuild);
     }
@@ -213,7 +290,7 @@ module.exports = function install(ctx) {
     }
     save();
     return v;
-  });
+  }, { applicant: true });
 
   route('POST', '/api/vods/:id/markers', ({ body, user, params }) => {
     const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
@@ -225,7 +302,7 @@ module.exports = function install(ctx) {
     save();
     audit(user, 'vod.marker.create', { type: 'vod', id: v.id, name: v.title }, `${user.name} added a coaching point at ${data.timestamp}s to the VOD "${v.title}".`);
     return markerForClient(marker);
-  });
+  }, { applicant: true });
 
   route('PUT', '/api/vods/:id/markers/:markerId', ({ body, user, params }) => {
     const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
@@ -236,7 +313,7 @@ module.exports = function install(ctx) {
     Object.assign(marker, cleanMarker(body), { updatedAt: now() });
     save();
     return markerForClient(marker);
-  });
+  }, { applicant: true });
 
   route('DELETE', '/api/vods/:id/markers/:markerId', ({ user, params }) => {
     const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
@@ -247,7 +324,7 @@ module.exports = function install(ctx) {
     D.vodMarkers.splice(i, 1);
     save();
     return { ok: true };
-  });
+  }, { applicant: true });
 
   route('DELETE', '/api/vods/:id', ({ user, params }) => {
     const D = db(), i = D.vods.findIndex((x) => x.id === Number(params.id));
@@ -258,7 +335,7 @@ module.exports = function install(ctx) {
     save();
     audit(user, 'vod.delete', { type: 'vod', id: gone.id, name: gone.title }, `${user.name} deleted the VOD "${gone.title}".`);
     return { ok: true };
-  });
+  }, { applicant: true });
 
   return { coachingState, studentsOf };
 };

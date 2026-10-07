@@ -10,6 +10,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { startFakeDiscord } = require('./fake-discord');
 
+// DMs are sent fire-and-forget (notify() never awaits discord.sendDM()), so the HTTP response for whatever
+// triggered one can come back before it actually lands in fake.state.dms - wait for it rather than assume it
+// is already there the instant the request resolves.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitFor(fn, ms = 4000) { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) throw new Error('timed out waiting'); await sleep(100); } }
+
 const GUILD = '111111111111111111', OFFICER_ROLE = '900000000000000001';
 const OFFICER = '100000000000000001', COACH = '100000000000000060', STUDENT = '100000000000000061', OTHER = '100000000000000062';
 
@@ -89,6 +95,30 @@ test('an officer links a coach to a class; whoever currently plays that class sh
   assert.deepEqual((await state('other')).myCoaches, []);
 
   assert.equal((await call(`/api/admin/coach-links/${link.id}`, 'DELETE', null, 'coach')).status, 403);
+});
+
+test('a VOD link is recognized in every common YouTube URL shape, not just youtube.com/watch - including a livestream replay link, which is what most VODs actually are', async () => {
+  const cases = [
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://youtube.com/watch?v=dQw4w9WgXcQ&t=42s', 'dQw4w9WgXcQ'],   // an extra query param alongside v= still works
+    ['https://youtu.be/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://youtu.be/dQw4w9WgXcQ?t=42', 'dQw4w9WgXcQ'],
+    ['https://www.youtube.com/live/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],        // a livestream replay - most VODs are actually this
+    ['https://www.youtube.com/live/dQw4w9WgXcQ?feature=share', 'dQw4w9WgXcQ'],
+    ['https://www.youtube.com/shorts/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://www.youtube.com/embed/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
+    ['https://m.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // mobile subdomain
+  ];
+  for (const [url, expectedId] of cases) {
+    const r = await call('/api/vods', 'POST', { url, type: 'Testing', recordedDate: '2026-09-26' }, 'student');
+    assert.equal(r.status, 200, `${url} should be accepted (${r.body && r.body.error})`);
+    assert.equal(r.body.videoId, expectedId, `${url} should resolve to ${expectedId}`);
+  }
+  // still rejects things that are not a real YouTube video link
+  const bad = ['https://vimeo.com/123456789', 'https://www.youtube.com/channel/UC123', 'not a url at all', 'https://youtu.be/tooshort'];
+  for (const url of bad) {
+    assert.equal((await call('/api/vods', 'POST', { url, type: 'Testing', recordedDate: '2026-09-26' }, 'student')).status, 400, `${url} should be rejected`);
+  }
 });
 
 test('a VOD is private by default (owner + their coach + officers only); the owner cannot promote its visibility, only a coach or officer can', async () => {
@@ -219,4 +249,77 @@ test('VOD coaching points save an exact timestamp, an optional persisted drawing
   // deleting the VOD itself cleans up its markers too
   await call(`/api/vods/${v.id}`, 'DELETE', null, 'student');
   assert.equal((await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 1, note: 'gone' }, 'coach')).status, 404);
+});
+
+test('a VOD can be marked as a spectator/overview recording, not tied to any one class - settable on posting or afterwards, independent of the other fields', async () => {
+  const posted = await call('/api/vods', 'POST', { url: 'https://youtu.be/dQw4w9WgXcQ', type: 'Siege', recordedDate: '2026-09-26', spectator: true }, 'student');
+  assert.equal(posted.status, 200);
+  assert.equal(posted.body.spectator, true);
+
+  // defaults to false when not mentioned at all
+  const normal = await call('/api/vods', 'POST', { url: 'https://youtu.be/abcdefghijk', type: 'Siege', recordedDate: '2026-09-26' }, 'student');
+  assert.equal(normal.body.spectator, false);
+
+  // can be toggled on its own afterwards, without touching type/date/enemyGuild
+  const toggled = await call(`/api/vods/${normal.body.id}`, 'PUT', { spectator: true }, 'student');
+  assert.equal(toggled.status, 200);
+  assert.equal(toggled.body.spectator, true);
+  assert.equal(toggled.body.type, 'Siege', 'other fields are untouched by a spectator-only update');
+
+  // and back off again
+  assert.equal((await call(`/api/vods/${normal.body.id}`, 'PUT', { spectator: false }, 'student')).body.spectator, false);
+});
+
+test('posting a VOD DMs whoever coaches the player\'s current class - not the poster themselves, and not at all for a spectator recording', async () => {
+  // re-establish this explicitly rather than relying on whatever an earlier test in this file left behind -
+  // StudentChar plays Scorpion (set up in before())
+  await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer').catch(() => {});
+  fake.state.dms.length = 0;
+
+  // the student posts their own VOD - their coach gets a DM about it
+  const posted = await call('/api/vods', 'POST', { url: 'https://youtu.be/mmmmmmmmmmm', type: 'Siege', recordedDate: '2026-09-26' }, 'student');
+  const coachDms = await waitFor(() => { const l = fake.state.dms.filter((d) => d.to === COACH); return l.length && l; });
+  assert.equal(coachDms.length, 1);
+  assert.ok(coachDms[0].content.includes(posted.body.title), 'mentions the VOD title');
+  assert.ok(coachDms[0].content.includes(`/vods/${posted.body.id}`), 'links straight to it');
+
+  // the coach posting for the same student does not DM themselves
+  fake.state.dms.length = 0;
+  await call('/api/vods', 'POST', { owner: STUDENT, url: 'https://youtu.be/nnnnnnnnnnn', type: 'Siege', recordedDate: '2026-09-27' }, 'coach');
+  await sleep(300);   // give a wrongly-sent DM time to arrive before checking it did not
+  assert.equal(fake.state.dms.filter((d) => d.to === COACH).length, 0, 'the coach does not get a DM for their own post');
+
+  // a spectator recording is not really "for" any class, so it notifies nobody
+  fake.state.dms.length = 0;
+  await call('/api/vods', 'POST', { url: 'https://youtu.be/ooooooooooo', type: 'Siege', recordedDate: '2026-09-28', spectator: true }, 'student');
+  await sleep(300);
+  assert.equal(fake.state.dms.length, 0);
+});
+
+test('a guest coach is never DMed about a new VOD, even for the class they coach - they can still see it, just not get pinged about every upload', async () => {
+  await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer').catch(() => {});
+
+  // a true outsider signs in via the guest-coach link (not added to guildMembers at all, same as a real
+  // stranger - see the dedicated discord.test.js coverage for why that distinction matters) and joins as a
+  // guest coach for the same class StudentChar plays
+  const GUEST = '100000000000000070';
+  const start = await fetch(base + '/auth/discord?guestcoach=1', { redirect: 'manual' });
+  const setCookies = (start.headers.raw ? start.headers.raw()['set-cookie'] : start.headers.get('set-cookie').split(/,(?=\s*\w+=)/)) || [];
+  const startCookies = Object.fromEntries(setCookies.map((c) => c.split(';')[0].split('=').map((s) => s.trim())));
+  const cb = await fetch(`${base}/auth/discord/callback?code=${GUEST}&state=${startCookies.gh_oauth}`, { redirect: 'manual', headers: { Cookie: Object.entries(startCookies).map(([k, v]) => `${k}=${v}`).join('; ') } });
+  const guestCookie = `gh_session=${/gh_session=([^;]+)/.exec(cb.headers.get('set-cookie') || '')[1]}`;
+  sessions.guest = guestCookie;
+  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Scorpion' }, 'guest')).status, 200);
+
+  fake.state.dms.length = 0;
+  const posted = await call('/api/vods', 'POST', { url: 'https://youtu.be/ppppppppppp', type: 'Siege', recordedDate: '2026-09-29' }, 'student');
+  // the real (non-guest) coach still gets notified - confirms this run actually exercised the notify path at
+  // all, rather than the guest simply never being reachable in the first place
+  await waitFor(() => fake.state.dms.some((d) => d.to === COACH));
+  assert.equal(fake.state.dms.filter((d) => d.to === GUEST).length, 0, 'the guest coach gets no DM');
+
+  // but they can still see the VOD itself - the exclusion is notification-only, not visibility
+  assert.ok((await state('guest')).vods.some((v) => v.id === posted.body.id), 'visibility is untouched - they can still see it');
+
+  await call(`/api/guest-coaches/${GUEST}`, 'DELETE', null, 'officer');   // tidy up
 });

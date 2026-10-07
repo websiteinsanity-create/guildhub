@@ -1,7 +1,7 @@
 'use strict';
 /* ================= state & helpers ================= */
 const S = { cfg: null, user: null, members: [], events: [], points: [], duties: [], presets: [], loot: [], presetRules: [], users: [], applications: [], application: null, notices: [], leaves: [], warnings: [], explanations: [], alert: null, infoBoard: { title: 'Info', categories: [] }, requests: [], changes: [], profiles: {}, series: [], tags: [], playerTags: {}, prefs: {}, settings: { lootFrom: '', lootThreshold: 60, lootRedMax: 59, lootOrangeMax: 80, lootItemDays: 7, pointsEnabled: true, signupCloseDefault: 30, pinOffsetMinutes: 0, pinWindowDefault: 15, reminderMinutes: [300, 120], remindersEnabled: true, approvals: {}, hiddenSections: [], branding: {}, compliance: {} }, now: Date.now() };
-const UI = { vodJump: null, rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
+const UI = { vodJump: null, vodRestore: null, lootCompare: [], lootCompareOpen: false, rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
 // Pages, click actions, change handlers and form handlers can be added from features.js.
 const AFTER_RENDER = [];  // functions run after a page was drawn (page name as argument)
 const VIEWS = {};      // page name -> function that returns the page's HTML
@@ -132,15 +132,27 @@ function myStatus(e) {
   if (answers.includes('no')) return 'declined';
   return over && !onLeaveAt(S.user.key, start) ? 'noreply' : '';
 }
+// A starting attendance baseline decays away linearly, day by day, from cfg.events (split cfg.pct/100
+// attended) at cfg.fromDate down to nothing by cfg.days later - the same math server-side in
+// virtualAttendanceFor() (server-compliance.js), kept in sync with it by hand since this is plain display math
+// with no round trip, not something worth a server call for.
+function virtualAttendanceFor(owner) {
+  const c = (S.attendanceStarting || {})[owner];
+  if (!c || !c.events || !c.days) return { events: 0, came: 0 };
+  const fromMs = Date.parse(c.fromDate + 'T00:00:00Z');
+  if (!Number.isFinite(fromMs)) return { events: 0, came: 0 };
+  const daysRemaining = Math.max(0, c.days - Math.max(0, (Date.now() - fromMs) / 864e5));
+  if (daysRemaining <= 0) return { events: 0, came: 0 };
+  const events = (c.events / c.days) * daysRemaining;
+  return { events, came: events * (c.pct / 100) };
+}
 function attendanceStats(id) {
   const recorded = S.events.filter((e) => new Date(e.start) < Date.now() && rolled(e));
   const n = recorded.filter((e) => e.attended.includes(id)).length;
-  // A migration aid: with no real recorded events yet for this character, fall back to a starting percentage
-  // the leadership carried over from before the guild used Guild Hall, keyed by owner (set in Admin) - this
-  // stops applying the moment there is one real recorded event.
   const owner = (byId(S.members, id) || {}).owner;
-  const startPct = (S.attendanceStarting || {})[owner];
-  const pct = recorded.length ? Math.round(100 * n / recorded.length) : (startPct === undefined ? null : startPct);
+  const virtual = virtualAttendanceFor(owner);
+  const blendedOf = recorded.length + virtual.events, blendedN = n + virtual.came;
+  const pct = blendedOf > 0 ? Math.round(100 * blendedN / blendedOf) : null;
   return { n, of: recorded.length, pct };
 }
 const enc = encodeURIComponent;
@@ -200,18 +212,20 @@ function showLogin() {
   const dc = S.cfg.authMode === 'discord';
   $('#login-discord').classList.toggle('hidden', !dc); $('#login-passcode').classList.toggle('hidden', dc);
   const an = $('#login-apply-note'); if (an) an.classList.toggle('hidden', !S.cfg.applicationsOpen);
-  // Someone who followed a mercenary-signup link in Discord lands here too, before they have signed in. Send
-  // them through a marked version of the same Discord sign-in that is let through even when general guild
-  // applications (a different thing) are switched off, and swap the note so it does not say "send us an
-  // application" to someone who is not trying to become a guild member at all.
+  // Someone who followed a mercenary-signup or guest-coach-invite link in Discord lands here too, before they
+  // have signed in. Send them through a marked version of the same Discord sign-in that is let through even
+  // when general guild applications (a different thing) are switched off, and swap the note so it does not
+  // say "send us an application" to someone who is not trying to become a guild member at all.
   const merc = /^#\/merc\/\d+$/.test(location.hash);
-  const dLink = $('#login-discord a.discord'); if (dLink) dLink.href = merc ? '/auth/discord?merc=1' : '/auth/discord';
+  const guestCoach = location.hash === '#/guest-coach';
+  const dLink = $('#login-discord a.discord'); if (dLink) dLink.href = merc ? '/auth/discord?merc=1' : guestCoach ? '/auth/discord?guestcoach=1' : '/auth/discord';
   const mn = $('#login-merc-note'); if (mn) mn.classList.toggle('hidden', !merc);
-  if (an && merc) an.classList.add('hidden');
+  const gn = $('#login-guestcoach-note'); if (gn) gn.classList.toggle('hidden', !guestCoach);
+  if (an && (merc || guestCoach)) an.classList.add('hidden');
   // The Discord round trip (this app -> Discord -> /auth/discord/callback -> this app again) is a full page
-  // reload through a different path, which drops the #/merc/... hash along the way - save it here, before the
-  // person leaves for Discord, and start() below restores it once they are actually signed in.
-  if (merc) localStorage.setItem('gh_pending_hash', location.hash);
+  // reload through a different path, which drops the #/merc/... or #/guest-coach hash along the way - save it
+  // here, before the person leaves for Discord, and start() below restores it once they are actually signed in.
+  if (merc || guestCoach) localStorage.setItem('gh_pending_hash', location.hash);
   const q = new URLSearchParams(location.search);
   if (q.get('loginError')) { $('#login-err').textContent = q.get('loginError'); history.replaceState(null, '', location.pathname + location.hash); }
   applyBranding();
@@ -242,6 +256,7 @@ function route() { const [, page = 'dashboard', id] = location.hash.split('/'); 
 const NAV = [
   { key: 'apply', label: () => 'My application' },
   { key: 'merc', label: () => 'My mercenary signup' },
+  { key: 'guest-coach', label: () => 'My guest coaching' },
   { key: 'dashboard', label: () => 'Dashboard' },
   { key: 'member', label: () => 'Member', hide: 'member' },
   { key: 'loot', label: () => 'Loot', hide: 'loot' },
@@ -259,7 +274,7 @@ const NAV = [
 ];
 const hiddenFromMembers = (key) => (S.settings.hiddenSections || []).includes(key);
 function canSee(page) {
-  if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc';       // not accepted: only the application, or a mercenary signup link they followed - canSee allows reaching it even before S.mercEventId exists (their very first visit, before they have signed up at all); the nav link itself is shown separately, only once they actually are a mercenary
+  if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc' || page === 'guest-coach' || (page === 'vods' && S.isCoach);       // not accepted: only the application, a mercenary signup link they followed, the guest-coach page, or (once they are a guest coach) the VODs they coach
   if (page === 'apply') return false;
   const n = NAV.find((x) => x.key === page);
   if (!n) return page === 'roster';
@@ -269,7 +284,9 @@ function canSee(page) {
 function renderNav(page) {
   // "merc" is the one nav entry that needs an id in its link (which event) - shown at all only once someone
   // actually is a mercenary (S.mercEventId set by applicantState() server-side), not to every applicant.
-  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key) && (n.key !== 'merc' || S.mercEventId)).map((n) => {
+  // "guest-coach" is similar: shown once someone actually is one (S.isCoach, since the only way an applicant
+  // has that is by joining), not to a random applicant who has never touched the invite link.
+  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key) && (n.key !== 'merc' || S.mercEventId) && (n.key !== 'guest-coach' || (S.user.role === 'applicant' && S.isCoach))).map((n) => {
     const b = n.badge ? n.badge() : 0;
     const href = n.key === 'merc' ? `#/merc/${S.mercEventId}` : `#/${n.key}`;
     return `<a class="nav ${n.key === page ? 'active' : ''} ${n.gap ? 'gap' : ''}" href="${href}" data-nav="${n.key}">${esc(n.label())}${b ? `<span class="count">${b}</span>` : ''}</a>`;
@@ -278,7 +295,7 @@ function renderNav(page) {
 function render() {
   let { page, id } = route();
   if (page === 'roster') page = 'member';
-  if (S.user.role === 'applicant' && page !== 'merc') page = 'apply';
+  if (S.user.role === 'applicant' && page !== 'merc' && page !== 'guest-coach' && !(page === 'vods' && S.isCoach)) page = 'apply';
   if (!canSee(page) || !VIEWS[page]) page = 'dashboard';
   applyBranding();
   renderNav(page);
@@ -365,7 +382,11 @@ function lootPanel() {
     return { m, n, total: mine.length, pct, disq, onLeave: onLeaveAt(m.owner, Date.now()), ok: pct !== null && pct >= ls.need && !disq, band: pct === null ? 'none' : bandOf(pct, ls) };
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.m.name.localeCompare(b.m.name));
   const okCount = rows.filter((r) => r.ok).length;
-  const shown = off && UI.lootOnlyOk ? rows.filter((r) => r.ok) : rows;
+  // Picking specific characters to compare (officer only) overrides the plain qualified/everyone toggle - the
+  // whole point is to look at a short, hand-picked list side by side (one qualified, one not, say), not to
+  // further filter whatever the toggle already shows.
+  const compareIds = off ? UI.lootCompare.filter((id) => rows.some((r) => r.m.id === id)) : [];
+  const shown = compareIds.length ? rows.filter((r) => compareIds.includes(r.m.id)) : (off && UI.lootOnlyOk ? rows.filter((r) => r.ok) : rows);
 
   const row = (r) => {
     const items = itemsOf(r.m.id);
@@ -378,6 +399,7 @@ function lootPanel() {
           <div><span class="k">Lucent received in the same time</span><b>${sum.toLocaleString()}</b>${lucent.length ? ` <span class="muted small">(${lucent.length} ${lucent.length === 1 ? 'payment' : 'payments'})</span>` : ''}</div>`; })()}
         ${r.disq ? `<div class="warn-line">Disqualified from loot: ${activeWarn(r.m.owner).length} active warnings (the limit is ${S.settings.compliance.disqualifyAt}).</div>` : ''}
         <div class="muted small">${r.total ? `Attended ${r.n} of ${r.total} mandatory ${r.total === 1 ? 'event' : 'events'}${r.total < counted.length ? ' (events during a leave of absence are left out)' : ''}.` : 'No mandatory events with recorded attendance yet.'}</div>
+        ${off ? `<a href="#/loot" class="btn sm primary" data-act="loot-give" data-id="${r.m.id}">Give loot to ${esc(r.m.name)}</a>` : ''}
       </div></details>`;
   };
 
@@ -391,9 +413,17 @@ function lootPanel() {
     <div class="small" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center">
       ${off ? `<span><b>${okCount}</b> of ${rows.length} members qualify, based on ${counted.length} mandatory ${counted.length === 1 ? 'event' : 'events'}.</span>` : ''}
       <span class="band red">Red 0-${ls.redMax}%</span><span class="band orange">Orange ${ls.redMax + 1}-${ls.orangeMax}%</span><span class="band green">Green ${ls.orangeMax + 1}-100%</span>
-      ${off ? `<button class="btn sm" data-act="loot-all">${UI.lootOnlyOk ? 'Show everyone' : 'Only qualified'}</button>` : ''}
+      ${off ? `<button class="btn sm" data-act="loot-all" ${compareIds.length ? 'disabled' : ''}>${UI.lootOnlyOk ? 'Show everyone' : 'Only qualified'}</button>` : ''}
       ${skipped ? `<span class="muted">${skipped} more mandatory ${skipped === 1 ? 'event has' : 'events have'} no attendance recorded yet and ${skipped === 1 ? 'is' : 'are'} not counted.</span>` : ''}
     </div>
+    ${off && rows.length ? `<details class="lootrules" data-fold="loot-compare" ${(UI.fold && UI.fold['loot-compare']) || compareIds.length ? 'open' : ''}>
+      <summary>Compare specific characters${compareIds.length ? ` <span class="muted small">(${compareIds.length} picked)</span>` : ''}</summary>
+      <div style="padding-bottom:14px">
+        <div class="muted small" style="margin:-2px 0 8px">Pick two or more to decide between them for one item, side by side - this replaces the list below with just your picks, regardless of the "only qualified" toggle.</div>
+        <div class="pp"><input type="search" class="pp-filter" placeholder="Search players" aria-label="Search players"><div class="scrollbox">${rows.map((r) => `<label class="tagpick" data-n="${esc(r.m.name.toLowerCase())}"><input type="checkbox" data-act="loot-compare-pick" value="${r.m.id}" ${compareIds.includes(r.m.id) ? 'checked' : ''}> ${esc(r.m.name)}${r.ok ? ' <span class="qtag">Qualified</span>' : ''}</label>`).join('')}</div></div>
+        ${compareIds.length ? '<button class="btn sm" data-act="loot-compare-clear" style="margin-top:8px">Clear selection</button>' : ''}
+      </div>
+    </details>` : ''}
     ${off ? `<details class="lootrules" ${UI.rulesOpen ? 'open' : ''}><summary>Loot rules</summary>
       <form data-form="lootrules" class="rules-grid">
         <div class="field"><label for="lr-need">Attendance needed (%)</label><input id="lr-need" name="lootThreshold" type="number" min="1" max="100" value="${ls.need}" required></div>
@@ -501,14 +531,33 @@ function viewRoster() {
       <td>${canEdit(m) ? `<button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button>` : ''}</td>
     </tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">No characters match. ${S.members.length ? 'Clear the filters to see everyone.' : 'Add the first one with "Add character".'}</div>`}
+  ${isOfficer() ? guestCoachesSection() : ''}
   ${isOfficer() ? mercenariesSection() : ''}`;
+}
+// Guest class coaches: never guild members, so (like mercenaries below) they never mix into the roster above.
+// Sits between the roster and Mercenaries - its own small dropdown-per-row list, not a full table, since there
+// is only ever a name and one class to show per person.
+function guestCoachesSection() {
+  const list = (S.guestCoaches || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  const link = `${location.origin}/#/guest-coach`;
+  return `<details class="fold" data-fold="guest-coaches" ${(UI.fold && UI.fold['guest-coaches']) ? 'open' : ''} style="margin-top:20px;border-top:1px solid var(--line)"><summary>Guest coaches (${list.length})</summary>
+    <div class="fold-body">
+      <div class="muted small" style="margin-bottom:10px">Someone outside the guild who reviews VODs for one class. Share this link to invite one - it works even if general applications are closed, and does not make them a guild member.</div>
+      <div class="link-row" style="margin-bottom:14px"><input readonly value="${esc(link)}" style="flex:1" onclick="this.select()" aria-label="Guest coach invite link"><button class="btn sm" data-act="copy-guestcoach-link" data-link="${esc(link)}">Copy link</button></div>
+      ${list.length ? list.map((g) => `<div class="rule-row"><span><b>${esc(g.name)}</b></span>
+        <select data-act="guestcoach-class" data-id="${esc(g.discordId)}">${opts(classes, g.class)}</select>
+        <button class="btn sm danger" data-act="guestcoach-remove" data-id="${esc(g.discordId)}" data-name="${esc(g.name)}">Remove</button></div>`).join('')
+        : '<div class="muted small">No guest coaches yet.</div>'}
+    </div>
+  </details>`;
 }
 // Mercenaries never mix into the roster above (not even with "show inactive" ticked) - they get their own
 // dropdown here instead, so the regular Member list stays about guild members only.
 function mercenariesSection() {
   const mercs = S.members.filter((m) => m.mercenary);
   if (!mercs.length) return '';
-  return `<details class="fold" style="margin-top:20px;border-top:1px solid var(--line)"><summary>Mercenaries (${mercs.length})</summary>
+  return `<details class="fold" data-fold="mercenaries" ${(UI.fold && UI.fold['mercenaries']) ? 'open' : ''} style="margin-top:20px;border-top:1px solid var(--line)"><summary>Mercenaries (${mercs.length})</summary>
     <div class="fold-body"><div class="tbl-wrap"><table>
       <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th>For event</th><th></th></tr></thead>
       <tbody>${mercs.map((m) => { const ev = byId(S.events, m.mercFor); return `<tr>
@@ -1293,6 +1342,12 @@ document.addEventListener('click', async (e) => {
     const reason = prompt('Reason (optional, kept for your own records)', '') || '';
     act(async () => { await api('/api/admin/kick', 'POST', { ownerKey: d.owner, reason }); closeDialog(); }, `${d.name} kicked`);
   }
+  else if (a === 'copy-guestcoach-link') {
+    navigator.clipboard?.writeText(d.link).then(() => toast('Link copied')).catch(() => toast('Could not copy - select and copy the link by hand'));
+  }
+  else if (a === 'guestcoach-remove') {
+    if (confirm(`Remove ${d.name} as a guest coach? They lose VOD access immediately and can no longer sign in at all.`)) act(() => api(`/api/guest-coaches/${d.id}`, 'DELETE'), 'Removed');
+  }
   else if (a === 'event-new') eventDialog();
   else if (a === 'event-edit') eventDialog(byId(S.events, d.id));
   else if (a === 'event-delete') {
@@ -1341,6 +1396,8 @@ document.addEventListener('click', async (e) => {
   else if (a === 'cal-week') { UI.calView = 'week'; UI.calRef = Date.parse(tzToIso(d.date + 'T12:00')); render(); }
   else if (a === 'loot-today') act(() => api('/api/settings', 'PUT', { lootFrom: '' }), 'Counting back from today');
   else if (a === 'loot-all') { UI.lootOnlyOk = !UI.lootOnlyOk; render(); }
+  else if (a === 'loot-compare-clear') { UI.lootCompare = []; render(); }
+  else if (a === 'loot-give') { UI.lootMember = d.id; }
   else if (a === 'test-dm') act(async () => { const r = await api('/api/admin/test-dm', 'POST', {}); if (!r.ok) throw new Error(r.error || 'The message could not be sent.'); toast('Test message sent. Check your Discord messages.'); });
   else if (a === 'link-owner') act(async () => { const r = await api('/api/admin/link-owner', 'POST', { from: d.from, to: $('#lk-' + d.i).value }); toast(`${r.moved} characters linked`); });
   else if (a === 'pin-send') act(() => api(`/api/events/${d.id}/pin/send`, 'POST', { mode: d.mode }), d.mode === 'new' ? 'New PIN created and sent' : 'PIN sent');
@@ -1366,6 +1423,11 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+CHANGES['loot-compare-pick'] = (el) => {
+  const id = Number(el.value);
+  UI.lootCompare = el.checked ? [...UI.lootCompare, id] : UI.lootCompare.filter((x) => x !== id);
+  render();
+};
 document.addEventListener('change', (e) => {
   const el = e.target;
   if (CHANGES[el.dataset.act]) { CHANGES[el.dataset.act](el); return; }
@@ -1389,6 +1451,7 @@ document.addEventListener('change', (e) => {
   else if (el.dataset.act === 'preset-rename') act(() => api('/api/presets/' + el.dataset.id, 'PUT', { name: el.value }));
   else if (el.dataset.act === 'preset-desc') act(() => api('/api/presets/' + el.dataset.id, 'PUT', { description: el.value }));
   else if (el.dataset.act === 'party-note-save') act(() => api('/api/party-builder-note', 'PUT', { note: el.value }));
+  else if (el.dataset.act === 'guestcoach-class') act(() => api(`/api/guest-coaches/${el.dataset.id}/class`, 'PUT', { class: el.value }), 'Updated');
   else if (el.name === 'primaryWeapon' || el.name === 'secondaryWeapon') {
     const f = el.form, c = classFor(f.elements.primaryWeapon.value, f.elements.secondaryWeapon.value);
     $('#class-preview').textContent = classPreviewText(f.elements.primaryWeapon.value, f.elements.secondaryWeapon.value);
@@ -1489,23 +1552,28 @@ function viewVods() {
   // goes looking for footage ("show me Oracle VODs"), not by hunting through every player one at a time. A
   // class folder exists only once a VOD from someone currently playing it actually exists; it is never created
   // or managed by hand. Players with no resolvable class (an unmapped weapon pair, or no active character at
-  // all) land in one "Other" folder rather than being silently dropped.
+  // all) land in one "Other" folder rather than being silently dropped. A spectator/overview recording is not
+  // really about whoever posted it at all - marking it as such (see the posting form) pulls it out of the
+  // class grouping entirely into its own folder, shown first since it tends to be what a coach checks for
+  // whole-fight analysis before drilling into any one player's own view.
+  const spectatorVods = vods.filter((v) => v.spectator);
   const byClass = {};
-  for (const v of vods) { const cls = classOfOwner(v.owner) || 'Other'; (byClass[cls] ??= []).push(v); }
+  for (const v of vods) { if (v.spectator) continue; const cls = classOfOwner(v.owner) || 'Other'; (byClass[cls] ??= []).push(v); }
   const classFolders = Object.entries(byClass).sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
   return `
   <div class="page-head"><div><h1>VODs</h1><div class="muted">Post a YouTube link for a coach to review live over Discord, or browse what has been shared with you.</div></div></div>
   <button class="btn primary" style="margin-bottom:16px" data-act="vod-post-open">+ Post a VOD</button>
-  ${classFolders.length ? classFolders.map(([cls, list]) => vodClassFolder(cls, list)).join('') : '<div class="empty">No VODs yet.</div>'}`;
+  ${spectatorVods.length ? vodClassFolder('Spectator PoV', spectatorVods, '🎥') : ''}
+  ${classFolders.length ? classFolders.map(([cls, list]) => vodClassFolder(cls, list)).join('') : (spectatorVods.length ? '' : '<div class="empty">No VODs yet.</div>')}`;
 }
-function vodClassFolder(cls, vods) {
-  const classDef = (S.cfg.classes || []).find((c) => c.name === cls);
-  const icons = classDef ? `<span class="wicons">${classDef.weapons.map(weaponIcon).join('')}</span>` : '';
+function vodClassFolder(label, vods, fixedIcon) {
+  const classDef = !fixedIcon && (S.cfg.classes || []).find((c) => c.name === label);
+  const icons = fixedIcon ? `<span class="wicons" style="font-size:18px">${fixedIcon}</span>` : classDef ? `<span class="wicons">${classDef.weapons.map(weaponIcon).join('')}</span>` : '';
   const byOwner = {};
   for (const v of vods) (byOwner[v.owner] ??= []).push(v);
   const ownerFolders = Object.entries(byOwner).map(([owner, list]) => ({ owner, list: list.slice().sort((a, b) => b.recordedDate.localeCompare(a.recordedDate) || b.id - a.id) }))
     .sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
-  return `<details class="fold" style="margin-bottom:12px"><summary>${icons}${esc(cls)} <span class="muted small">(${vods.length})</span></summary>
+  return `<details class="fold" style="margin-bottom:12px"><summary>${icons}${esc(label)} <span class="muted small">(${vods.length})</span></summary>
     <div class="fold-body">${ownerFolders.map((f) => vodFolder(f.owner, f.list)).join('')}</div>
   </details>`;
 }
@@ -1527,6 +1595,7 @@ function vodPostDialog() {
       </div>
       <div class="field slidefield ${needsEnemy ? '' : 'off'}" id="vf-enemy-field"><label for="vf-enemy">Enemy guild</label><input id="vf-enemy" name="enemyGuild" maxlength="60"></div>
       <div class="field"><label for="vf-note">Note (optional)</label><textarea id="vf-note" name="note" maxlength="500" placeholder="Anything worth pointing out"></textarea></div>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="spectator" id="vf-spectator"> Spectator/overview recording (not one player's own view - goes in its own folder, not a class folder)</label>
       <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Post</button></div>
     </form>`);
 }
@@ -1744,7 +1813,18 @@ AFTER_RENDER.push(async (page) => {
       onReady: () => {
         // Clicking a coaching point before the player existed yet (e.g. the API was still loading) is
         // remembered and honoured the moment it becomes ready, rather than silently doing nothing.
-        if (UI.vodJump !== null) { ytPlayer.seekTo(UI.vodJump, true); ytPlayer.pauseVideo(); UI.vodJump = null; }
+        // Separately: a render can happen after saving a coaching point, and recreating the YouTube iframe
+        // normally restarts it at 0:00 - vodRestore (set in FORMS['vod-marker'] below) puts the viewer back
+        // where they actually were, and whether it was playing. A deliberate marker jump always wins over this
+        // passive restoration, since someone clicking a marker wants to go there, not stay where they were.
+        if (UI.vodJump !== null) {
+          ytPlayer.seekTo(UI.vodJump, true); ytPlayer.pauseVideo(); UI.vodJump = null;
+          UI.vodRestore = null;
+        } else if (UI.vodRestore) {
+          const restore = UI.vodRestore; UI.vodRestore = null;
+          ytPlayer.seekTo(Math.max(0, Number(restore.time) || 0), true);
+          if (restore.playing) ytPlayer.playVideo(); else ytPlayer.pauseVideo();
+        }
         syncVodMarkerDisplay();
       },
       onStateChange: syncVodMarkerDisplay,
@@ -1807,10 +1887,15 @@ FORMS['vod-post'] = (f, fd) => act(async () => { await api('/api/vods', 'POST', 
 FORMS['vod-marker'] = (f, fd) => act(async () => {
   const v = (S.vods || []).find((x) => x.id === Number(route().id));
   if (!v || !ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') throw new Error('The VOD player is not ready yet.');
+  const currentTime = Number(ytPlayer.getCurrentTime()) || 0;
+  const playerState = typeof ytPlayer.getPlayerState === 'function' ? ytPlayer.getPlayerState() : null;
   const beforeSeconds = Number(fd.beforeSeconds), afterSeconds = Number(fd.afterSeconds);
   if (!Number.isFinite(beforeSeconds) || beforeSeconds < 0 || beforeSeconds > 10 || !Number.isFinite(afterSeconds) || afterSeconds < 0 || afterSeconds > 10) throw new Error('Marking duration must be between 0 and 10 seconds.');
   const strokes = vodDraw ? (vodDraw.strokes || []).map((s) => ({ color: s.color, points: s.points })) : [];
-  await api(`/api/vods/${v.id}/markers`, 'POST', { timestamp: Number(ytPlayer.getCurrentTime()) || 0, beforeSeconds, afterSeconds, note: fd.note, strokes });
+  // Saving triggers a refresh and re-render, which recreates the VOD iframe - preserve the exact position and
+  // whether it was playing (see onReady above) so this does not unexpectedly throw the viewer back to 0:00.
+  UI.vodRestore = { time: currentTime, playing: playerState === 1 };
+  await api(`/api/vods/${v.id}/markers`, 'POST', { timestamp: currentTime, beforeSeconds, afterSeconds, note: fd.note, strokes });
   f.reset();
 }, 'Coaching point saved');
 FORMS['vod-vis'] = (f, fd, id) => act(() => api(`/api/vods/${id}`, 'PUT', { visibility: fd.visibility, visibleClass: fd.visibleClass }), 'Saved');

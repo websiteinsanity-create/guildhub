@@ -622,15 +622,32 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 /* ---------- mobile phones (≈320-640px): the sidebar becomes a horizontal top bar, the calendar becomes touch-usable ---------- */
 @media (max-width: 640px) {
   #app { grid-template-columns: 1fr; }
-  .rail { position: sticky; top: 0; z-index: 20; padding: 0; border-right: 0; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; }
-  .rail .brand, .rail .who { display: none; }          /* logo and sign-out: kept for the vertical desktop rail, not worth the width here - Sign out still reachable from My profile */
-  #nav-links { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; padding: 8px 10px; gap: 2px; }
+  nav.rail { position: sticky; top: 0; z-index: 20; padding: 0; border-right: 0; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; flex-wrap: nowrap; }
+  .rail .brand { display: none; }          /* logo: kept for the vertical desktop rail, not worth the width here */
+  /* The player's own name is dropped here to save space (it is already shown in the page the person is on),
+     but Sign out itself stays reachable - it sits outside the scrolling nav row below so it is always visible
+     without having to scroll sideways to find it, unlike on the desktop rail where there is room for both. */
+  .rail .who { display: flex; align-items: center; margin: 0; padding: 0 10px; border: 0; flex: none; }
+  .rail .who span, .rail .who br { display: none; }
+  .rail .who a { padding: 8px 10px; border-radius: 6px; color: var(--text); text-decoration: none; white-space: nowrap; }
+  .rail .who a:hover { background: var(--panel-2); }
+  #nav-links { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; padding: 8px 10px; gap: 2px; flex: 1 1 auto; min-width: 0; }
   .rail a.nav { flex: none; padding: 8px 12px; border-left: 0; border-bottom: 3px solid transparent; border-radius: 6px 6px 0 0; }
   .rail a.nav.active { border-left: 0; border-bottom-color: var(--accent); }
   .rail a.nav.gap { margin-top: 0; border-top: 0; padding-top: 8px; }
   main { padding: 14px 12px 40px; }
   body { overflow-x: hidden; }
   .page-head { flex-wrap: wrap; }
+
+  /* Starting attendance panel: no room for five aligned columns, so the header row disappears (each field's
+     own placeholder - "events", "days" - says what it is instead) and each player's row wraps its four inputs
+     onto their own line below the name, rather than squeezing them illegibly narrow. */
+  .att-start-grid .att-start-head { display: none; }
+  .att-start-grid .att-start-row { grid-template-columns: 1fr; gap: 4px; }
+  .att-start-grid .att-start-row > span { white-space: normal; font-weight: 600; }
+  .att-start-grid .att-start-fields { display: flex; gap: 6px; flex-wrap: wrap; }
+  .att-start-grid .att-start-fields input { width: auto; flex: 1 1 70px; }
+  .att-start-grid .att-start-fields input[type="date"] { flex-basis: 140px; }
 
   /* week view: one full-width day per row instead of 7 cramped side-by-side columns - fully readable, no horizontal scroll */
   .events-layout { grid-template-columns: 1fr; gap: 14px; }
@@ -685,13 +702,19 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 
 /* Weapon icons: simple inline glyphs, grouped together right before whatever text follows them (the class
    name once it is known, or the weapon names themselves when it is not) */
-.wicons { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; vertical-align: middle; }
-.wicon { width: 18px; height: 18px; flex: none; object-fit: cover; border-radius: 4px; vertical-align: middle; }
+.wicons { display: inline-flex; align-items: center; gap: 4px; margin-right: 7px; vertical-align: middle; }
+.wicon { width: 24px; height: 24px; flex: none; object-fit: cover; border-radius: 5px; vertical-align: middle; }
 
-.att-start-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; }
-.att-start-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
-.att-start-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.att-start-row input { width: 64px; flex: none; }
+/* One row per player: name, then the four baseline fields (%, events, days, start date), aligned into columns
+   wide enough to allow it; narrower than that (see the mobile breakpoint below) each row wraps its own fields
+   instead, relying on their placeholders rather than the column header row to say what each one is. */
+.att-start-grid { display: flex; flex-direction: column; gap: 6px; }
+.att-start-head, .att-start-row { display: grid; grid-template-columns: minmax(90px, 1.4fr) auto; gap: 8px; align-items: center; }
+.att-start-head, .att-start-fields { font-size: 12px; color: var(--muted); font-weight: 600; }
+.att-start-head { padding: 0 2px 2px; }
+.att-start-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-start-fields { display: grid; grid-template-columns: 56px 68px 60px 142px; gap: 8px; }
+.att-start-fields input { width: 100%; font: inherit; color: var(--text); font-weight: 400; }
 
 /* VOD coaching points: the player (left/top) plus a running list of timestamped notes (right/below), each
    optionally with a saved drawing that reappears on its own as playback reaches that moment again. */

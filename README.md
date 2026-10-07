@@ -73,7 +73,11 @@ no dependencies: just Node 18+ and one JSON file of data.
   dropdown with the player's Questlog link, the items they received in the last 7 days (read live from
   the Loot section) and their attendance. Officers see everyone and can change, in "Loot rules": the
   attendance needed (default 60%), the colour ranges, the item period, and the day the 14 days count back
-  from. A normal member only sees their own characters.
+  from. A normal member only sees their own characters. An officer can also **compare specific characters**:
+  pick two or more by name (searchable) and the list narrows to just those picks, side by side, for deciding
+  who gets one particular item - clearing the pick list goes back to the normal view. Each player's dropdown
+  also has a **Give loot to [name]** button that jumps straight to the Loot page with that player already
+  selected in the form, ready to record the entry.
 - **Loot** (below Member): a log of who received which item, of which **type** (Skillcore, Item, Shard or **Lucent**), and on which day.
   For Lucent the item field slides away and you type the amount. When a Lucent or item request is marked paid out / handed over, the entry
   is added here by itself. Officers add, edit and delete
@@ -143,10 +147,15 @@ no dependencies: just Node 18+ and one JSON file of data.
   they said Going but did **not show up** ("no-show"), and how often they **never answered** Going or Can't. Click a row for the
   event-by-event list. Filter by period, mandatory only, role, colour, no-shows or unanswered events; sort by any column. Officers tick who showed up; when points are switched on they are awarded automatically and
   can be adjusted by hand (loot spent, corrections, decay). Attendance rate is tracked per character. For a guild moving its whole
-  history onto Guild Hall, the **Starting attendance %** panel on this page lets officers give every player a starting percentage
-  carried over from wherever they tracked it before, instead of everyone showing a blank "-" until real events build up - it only
-  ever fills in until a player has one real counted event here, at which point their actual attendance takes over completely and
-  the starting value stops mattering on its own, with nothing to turn off by hand.
+  history onto Guild Hall, the **Starting attendance %** panel on this page lets officers give a player a starting baseline -
+  a percentage, how many events it is based on, how many days those were spread across, and the date it starts counting from
+  (for example "50% over their last 30 events across 14 days, starting Oct 1"). It decays away **linearly, day by day** rather
+  than vanishing the moment one real event happens - which would otherwise let a single event swing someone from 5% to 100%
+  overnight - or sitting there forever unchanged. By the start date plus the day count it has fully aged out and only real
+  attendance counts from then on, with nothing to turn off by hand. Until then it blends directly into the normal percentage
+  alongside whatever real events exist, and it can never trigger the attendance compliance warning by itself - that specific
+  warning stays suspended for a player for as long as any of their baseline is still in effect, resuming normally the moment
+  it has fully decayed away. No-show and no-reply counts are unaffected either way, since those are based on real events only.
 - **Admin**: the defaults for sign-up closing, the PIN and the reminders, a test message to yourself, the list of
   players, linking old characters to Discord players, backup and restore, and a switch to turn **points for attending** on or off (they are **off** as standard). Every section of the Admin page is a dropdown, and
   "Open all" / "Close all" at the top opens or closes them together.
@@ -253,6 +262,15 @@ Good to know:
   After signing up, a mercenary lands on a simple waiting-hall page instead of the roster: just their own status, and once an
   officer places them into a party, just that one party - not anyone else's. When parties are posted to Discord, every mercenary
   already placed into a party also gets a DM with a picture of just their own party, automatically.
+- **Guest class coaches**: similar to mercenaries, but for ongoing VOD review access instead of one event - someone outside the
+  guild who coaches a single class. In a **"Guest coaches"** section on the Member page, between the roster and Mercenaries, copy
+  the invite link and share it; the same trust model as a mercenary's link applies (it works even with general applications
+  closed, there is no separate approval step). Whoever follows it signs in with Discord and picks the one class they are coaching
+  from a dropdown; from then on they see VODs - and can leave coaching points on them - for whoever currently plays that class,
+  the exact same access a real guild-member coach linked to that class would have, just without ever becoming a guild member
+  themselves. They never appear in the roster, attendance, loot or anywhere else normal characters do. An officer can switch their
+  class or remove them entirely (revoking access immediately) from the same section, each guest coach shown with their own
+  dropdown; nothing expires on its own.
 - **Extra officers from Admin, not only .env**: Admin > Officers can grant officer status to a Discord role or to specific players,
   on top of whatever DISCORD_OFFICER_ROLE_IDS / DISCORD_OFFICER_USER_IDS already say in .env - no restart needed. Like any other
   sign-in detail, it takes effect the next time that person signs in, not to an already-open session.
@@ -275,7 +293,12 @@ Good to know:
   playing it exists; nobody creates or manages these by hand. Opening a class folder shows one smaller folder
   per player within it. Someone who has respecced moves to their new class's folder on its own, the same way
   they move in and out of a coach's roster elsewhere; a player with no resolvable class lands in one "Other"
-  folder instead of being silently dropped.
+  folder instead of being silently dropped. Checking **"Spectator/overview recording"** on the posting form
+  pulls a VOD out of the class grouping entirely into its own **Spectator PoV** folder (shown first, above the
+  class folders) - for wide-angle footage of a whole fight that is not really about whoever happened to post it.
+  Posting a (non-spectator) VOD DMs whoever currently coaches that player's class - not the poster themselves if
+  a coach posted it for their student, and not a guest coach, who can still see it but is not pinged about every
+  upload the way a real guild-member coach is.
   Opening a VOD plays it with the normal YouTube controls, plus a **Fullscreen** button and a free-hand **drawing overlay** open to
   anyone watching, for a coach to sketch over the video while talking it through on Discord voice - nothing here is saved, it is for
   the moment only, unless it is turned into a **coaching point**: whoever can manage the VOD (its owner or their coach) can save the

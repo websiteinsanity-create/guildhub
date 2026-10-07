@@ -24,6 +24,7 @@ module.exports = function install(ctx) {
   const notify = (ownerKey, text) => { discord.sendDM(ownerKey, text).catch(() => {}); };   // best effort, never blocks a request
   const community = require('./server-community')(ctx);                                       // applications and the Discord tools
   const coaching = require('./server-coaching')(ctx);                                         // class coaches, student VODs and screenshots
+  ctx.coaching = coaching;   // server-community.js's applicantState() needs this for guest coaches - set after install so the reference is there by the time anyone actually calls it, even though community itself was installed first
   const compliance = require('./server-compliance')(ctx);                                   // leave of absence, warnings, the event chart
 
   // ============================================================ who sees what

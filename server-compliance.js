@@ -33,6 +33,23 @@ module.exports = function install(ctx) {
   const isOnLeave = (owner, ms) => { const d = zoneDate(ms); return db().leaves.some((l) => l.ownerKey === owner && l.status === 'approved' && l.from <= d && d <= l.to); };
   hooks.skipReminder.push((owner, ev) => isOnLeave(owner, Date.parse(ev.start)));
 
+  // A starting attendance baseline decays away linearly, day by day, rather than vanishing the moment one
+  // real event happens (which would let a single event swing someone from 5% to 100% overnight) or sitting
+  // there forever (which would mean a years-old guess still half-deciding someone's real attendance). At
+  // cfg.fromDate the full cfg.events (split cfg.pct/100 attended) are all still "there"; cfg.days later,
+  // evenly, all of them are gone and this stops contributing anything at all - by then real events have had
+  // the same number of days to actually replace it.
+  function virtualAttendanceFor(owner, atMs) {
+    const c = db().attendanceStarting[owner];
+    if (!c || !c.events || !c.days) return { events: 0, came: 0, active: false };
+    const fromMs = Date.parse(c.fromDate + 'T00:00:00Z');
+    if (!Number.isFinite(fromMs)) return { events: 0, came: 0, active: false };
+    const daysRemaining = Math.max(0, c.days - Math.max(0, (atMs - fromMs) / 864e5));
+    if (daysRemaining <= 0) return { events: 0, came: 0, active: false };
+    const events = (c.events / c.days) * daysRemaining;
+    return { events, came: events * (c.pct / 100), active: true };
+  }
+
   // ---------------------------------------------------------------- what every player did
   //   came     one of their characters attended
   //   noshow   said Going with a character, but none of them came
@@ -56,13 +73,15 @@ module.exports = function install(ctx) {
       if (attended) { status = 'attended'; came++; } else if (going) { status = 'noshow'; noshow++; } else if (no) status = 'declined'; else status = 'noreply';
       list.push({ ev: e, status, replied });
     }
-    // A migration aid: with no real counted events yet, fall back to a starting percentage carried over from
-    // before the guild used Guild Hall, rather than showing nothing at all. The moment there is one real
-    // counted event, this stops being used - counted stays the real (zero) count either way, so nothing here
-    // can trigger a warning off a starting value alone (triggersFor requires counted >= minEvents).
-    const startPct = db().attendanceStarting[owner];
-    const pct = counted ? Math.floor(100 * came / counted) : (startPct === undefined ? null : startPct);
-    return { counted, came, noshow, noreply, pct, list };
+    // A migration aid: a still-decaying starting baseline (see virtualAttendanceFor above) blends in here
+    // alongside the real counted/came - counted and came themselves stay real-only (used as-is for no-show and
+    // no-reply, which this baseline has no opinion about), while pct reflects the blend. virtualActive says
+    // whether any of the baseline is still "in effect" right now, which is what decides whether the attendance
+    // warning below is allowed to fire at all.
+    const virtual = virtualAttendanceFor(owner, t);
+    const blendedCounted = counted + virtual.events, blendedCame = came + virtual.came;
+    const pct = blendedCounted > 0 ? Math.floor(100 * blendedCame / blendedCounted) : null;
+    return { counted, came, noshow, noreply, pct, list, virtualActive: virtual.active };
   }
 
   function triggersFor(s) {
@@ -70,7 +89,9 @@ module.exports = function install(ctx) {
     if (!s.counted) return out;
     if (c.noShowLimit > 0 && s.noshow >= c.noShowLimit) out.push({ kind: 'noshow', value: s.noshow, limit: c.noShowLimit });
     if (c.noReplyLimit > 0 && s.noreply >= c.noReplyLimit) out.push({ kind: 'noreply', value: s.noreply, limit: c.noReplyLimit });
-    if (c.minAttendance > 0 && s.counted >= c.minEvents && s.pct < c.minAttendance) out.push({ kind: 'attendance', value: s.pct, limit: c.minAttendance });
+    // Suspended for as long as a starting baseline is still decaying - a guessed number should not be able to
+    // trigger a real warning until it has fully aged out and the percentage behind it is entirely real again.
+    if (c.minAttendance > 0 && s.counted >= c.minEvents && !s.virtualActive && s.pct < c.minAttendance) out.push({ kind: 'attendance', value: s.pct, limit: c.minAttendance });
     return out;
   }
   const lastMiss = (s) => s.list.filter((x) => x.status !== 'attended' && x.status !== 'leave').map((x) => x.ev.start).sort().pop() || '';

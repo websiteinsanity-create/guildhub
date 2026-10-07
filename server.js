@@ -224,10 +224,15 @@ function migrate() {
   db.loot = db.loot || [];
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
-  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers']) db[k] = db[k] || [];
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers', 'guestCoaches']) db[k] = db[k] || [];
   for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
   db.partyBuilderNote = typeof db.partyBuilderNote === 'string' ? db.partyBuilderNote : '';
+  // { pct, events, days, fromDate } per player - a linearly-decaying starting baseline, not a flat number
+  // (see /api/admin/attendance-starting). An older save from before this had just a plain number per player;
+  // there is no sound way to guess the events/days/fromDate it never had, so those entries are dropped here
+  // rather than carried over as something misleading.
   db.attendanceStarting = (db.attendanceStarting && typeof db.attendanceStarting === 'object') ? db.attendanceStarting : {};
+  for (const [k, v] of Object.entries(db.attendanceStarting)) if (typeof v !== 'object' || v === null) delete db.attendanceStarting[k];
   db.infoBoard = db.infoBoard && Array.isArray(db.infoBoard.categories) ? db.infoBoard : { categories: [] };
   db.infoBoard.title = db.infoBoard.title || 'Info';
   db.settings.compliance = { ...SETTING_DEFAULTS.compliance, ...(db.settings.compliance || {}) };
@@ -578,21 +583,27 @@ route('DELETE', '/api/points/:id', ({ params, user }) => {
 }, { officer: true });
 
 // Guild-wide settings (officers only).
-// A one-off migration aid for a guild moving its whole roster onto Guild Hall: lets the leadership give
-// everyone a starting attendance percentage, carried over from wherever they tracked it before, instead of
-// everyone showing a blank "-" until real event history builds up. It only ever fills in for a player with
-// no real counted events yet - the moment they have one, their actual attendance takes over completely and
-// this value stops mattering, so there is nothing to "turn off" later.
+// A one-off migration aid for a guild moving its whole history onto Guild Hall: lets the leadership give a
+// player a starting baseline - "50% over their last 30 events across 14 days, starting Oct 1" - instead of
+// everyone showing a blank "-" until real event history builds up, and instead of one flat number that would
+// let a single real event swing someone from 5% to 100% overnight. See virtualAttendanceFor() in
+// server-compliance.js for how this baseline actually decays away, linearly, day by day, back to nothing.
 route('PUT', '/api/admin/attendance-starting', ({ body, user }) => {
   const values = body.values && typeof body.values === 'object' ? body.values : {};
   let changed = 0;
   for (const [owner, raw] of Object.entries(values)) {
-    if (raw === null || raw === '') { if (owner in db.attendanceStarting) { delete db.attendanceStarting[owner]; changed++; } continue; }
-    const pct = Math.round(Number(raw));
-    need(Number.isFinite(pct) && pct >= 0 && pct <= 100, 400, `${raw} is not a percentage between 0 and 100.`);
-    if (db.attendanceStarting[owner] !== pct) { db.attendanceStarting[owner] = pct; changed++; }
+    if (raw === null || (typeof raw === 'object' && raw.pct === '')) { if (owner in db.attendanceStarting) { delete db.attendanceStarting[owner]; changed++; } continue; }
+    need(raw && typeof raw === 'object', 400, 'Each player needs a percentage, event count, day count and start date, or none at all.');
+    const pct = Math.round(Number(raw.pct)), events = Math.round(Number(raw.events)), days = Math.round(Number(raw.days));
+    need(Number.isFinite(pct) && pct >= 0 && pct <= 100, 400, `${raw.pct} is not a percentage between 0 and 100.`);
+    need(Number.isFinite(events) && events >= 1 && events <= 1000, 400, `${raw.events} is not a sensible number of events.`);
+    need(Number.isFinite(days) && days >= 1 && days <= 1000, 400, `${raw.days} is not a sensible number of days.`);
+    const fromDate = String(raw.fromDate || '').trim();
+    need(/^\d{4}-\d{2}-\d{2}$/.test(fromDate) && !isNaN(new Date(fromDate + 'T00:00:00Z')), 400, 'Pick a valid start date.');
+    const next = { pct, events, days, fromDate };
+    if (JSON.stringify(db.attendanceStarting[owner] || null) !== JSON.stringify(next)) { db.attendanceStarting[owner] = next; changed++; }
   }
-  if (changed) { save(); audit.log(user, 'attendance.starting', { type: 'settings' }, `${user.name} set a starting attendance percentage for ${changed} ${changed === 1 ? 'player' : 'players'}.`); }
+  if (changed) { save(); audit.log(user, 'attendance.starting', { type: 'settings' }, `${user.name} set a starting attendance baseline for ${changed} ${changed === 1 ? 'player' : 'players'}.`); }
   return db.attendanceStarting;
 }, { officer: true });
 route('PUT', '/api/party-builder-note', ({ body }) => {
@@ -1023,21 +1034,29 @@ http.createServer(async (req, res) => {
     // ?merc=1 (from a mercenary-signup link) is remembered the same way the CSRF state is, across the trip to
     // Discord and back, so the callback below can let this one sign-in through even if general guild
     // applications are switched off - joining for one event as a mercenary is a different thing from applying.
+    // ?guestcoach=1 (from the guest-coach invite link in Admin) works the same way, for someone outside the
+    // guild who is only ever there to review VODs for one class, never a member in any other sense.
     const cookies = [cookieHeader('gh_oauth', state, 600)];
     if (url.searchParams.get('merc') === '1') cookies.push(cookieHeader('gh_merc', '1', 600));
+    if (url.searchParams.get('guestcoach') === '1') cookies.push(cookieHeader('gh_guestcoach', '1', 600));
     res.writeHead(302, { Location: discord.authorizeUrl(state), 'Set-Cookie': cookies });
     return res.end();
   }
   if (url.pathname === '/auth/discord/callback' && req.method === 'GET') {
-    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': [cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] }); res.end(); };
+    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': [cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0)] }); res.end(); };
     try {
       if (!discord.loginEnabled) return fail('Discord sign-in is not set up on this server.');
       if (url.searchParams.get('error')) return fail('Discord sign-in was cancelled.');
       const state = url.searchParams.get('state'), code = url.searchParams.get('code');
       if (!state || !code || !safeEqual(state, cookieOf(req, 'gh_oauth'))) return fail('The sign-in link expired. Please try again.');
       const merc = cookieOf(req, 'gh_merc') === '1';
+      const guestCoachLink = cookieOf(req, 'gh_guestcoach') === '1';
       const u = await discord.resolveUser(code);
       const known = db.users[u.id];
+      // A guest coach is never a guild member, in any sense - whether they arrived just now via the invite
+      // link or are signing back in afterwards, they always land as an applicant with nothing beyond coaching
+      // access for their chosen class (picked once they land on the guest-coach page - see /api/guest-coaches).
+      const isGuestCoach = db.guestCoaches.some((g) => g.discordId === u.id);
       // A kicked player is sent to the application page like anyone new, regardless of their Discord role or
       // having been accepted before - overrides everything else below. Accepting a fresh application from
       // them clears this (see /api/applications/:id), which is the only way back in.
@@ -1051,12 +1070,12 @@ http.createServer(async (req, res) => {
       // A coach is a separate, narrower flag, not a role - someone can be a normal member and a coach, or an
       // officer and a coach, at the same time. Neither this nor officer status above can override a kick -
       // being in either list from before does not let a kicked player back in through the side door.
-      const isCoach = !kicked && (coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r)));
-      if (u.role === 'applicant' && !merc && !db.settings.applications.enabled) return fail(u.whyNot);
+      const isCoach = !kicked && (coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r)) || isGuestCoach);
+      if (u.role === 'applicant' && !merc && !guestCoachLink && !isGuestCoach && !db.settings.applications.enabled) return fail(u.whyNot);
       db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, discordRoles: Array.isArray(u.roles) ? u.roles : (known?.discordRoles || []), lastLogin: new Date().toISOString() };
       save();
       const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 7);
-      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0)] });
+      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
   }
