@@ -108,6 +108,10 @@ test('a VOD link is recognized in every common YouTube URL shape, not just youtu
     ['https://www.youtube.com/shorts/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
     ['https://www.youtube.com/embed/dQw4w9WgXcQ', 'dQw4w9WgXcQ'],
     ['https://m.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // mobile subdomain
+    ['https://www.youtube.com/live/ dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // a stray space from how the link got pasted/shared
+    ['  https://youtu.be/dQw4w9WgXcQ\n', 'dQw4w9WgXcQ'],                // leading/trailing whitespace from the same
+    ['https://www.youtube.com/live/%dQw4w9WgXcQ', 'dQw4w9WgXcQ'],       // a stray "%" right before the id, same kind of paste glitch
+    ['https://www.youtube.com/live/%20dQw4w9WgXcQ', 'dQw4w9WgXcQ'],     // a wrapped line copied back out as a literal "%20" instead of a space
   ];
   for (const [url, expectedId] of cases) {
     const r = await call('/api/vods', 'POST', { url, type: 'Testing', recordedDate: '2026-09-26' }, 'student');

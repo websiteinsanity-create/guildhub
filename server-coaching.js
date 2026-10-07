@@ -208,14 +208,25 @@ module.exports = function install(ctx) {
   // ---------------------------------------------------------------- VODs
   function parseYoutube(url) {
     try {
-      const u = new URL(String(url || '').trim());
+      // A real YouTube URL never contains whitespace, but a pasted one sometimes picks up a stray space or
+      // line break anyway - from how a link got shared, wrapped in a chat message, or copied out of one -
+      // most often right after "/live/", "/shorts/" or "/embed/". A line that wraps and gets copied back out
+      // often turns that same stray space into a literal "%20" instead (its URL-encoded form), which looks
+      // like normal id characters at a glance (digits are "word" characters) and needs stripping on its own,
+      // not just whitespace. Either way, strip it rather than rejecting an otherwise perfectly good link.
+      const u = new URL(String(url || '').trim().replace(/\s+/g, '').replace(/%20/gi, ''));
       if (!/(^|\.)youtube\.com$/.test(u.hostname) && u.hostname !== 'youtu.be') return null;
       // youtu.be/ID and youtube.com/watch?v=ID are the two most common forms, but a VOD is very often a
       // livestream replay, which YouTube gives out as youtube.com/live/ID instead - and shorts/embed links get
       // pasted in sometimes too. All of these just put the id in a different place in the same URL.
       const pathMatch = /^\/(live|shorts|embed)\/([^/]+)/.exec(u.pathname);
-      const id = u.hostname === 'youtu.be' ? u.pathname.slice(1) : pathMatch ? pathMatch[2] : u.searchParams.get('v');
-      return /^[\w-]{11}$/.test(id || '') ? id : null;
+      const raw = u.hostname === 'youtu.be' ? u.pathname.slice(1) : pathMatch ? pathMatch[2] : u.searchParams.get('v');
+      // A real video id is exactly 11 letters/digits/-/_ characters, nothing else - but the same way a stray
+      // space sometimes rides along with a pasted link, so can a stray leading or trailing character like a
+      // lone "%" (seen in the wild right after "/live/"). Rather than rejecting the whole link over one odd
+      // character next to an otherwise-valid id, look for the 11-character id itself within it.
+      const id = /([\w-]{11})/.exec(raw || '');
+      return id ? id[1] : null;
     } catch { return null; }
   }
 
