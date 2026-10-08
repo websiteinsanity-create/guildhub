@@ -638,13 +638,21 @@ const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.get
 const goingCount = (e) => Object.values(e.rsvps).filter((s) => s === 'yes').length;
 const timeOf = (iso) => fmtTime(iso);
 
+// A small corner badge on top of the background tint - a check for the two "you're in" states, a cross for
+// the two "you're not" states, nothing for a plain no-answer (there is nothing to confirm yet). Spelled out as
+// its own function since both the month grid and the week list need exactly the same icon for the same status.
+const STATUS_ICON = { attended: '✓', going: '✓', noshow: '✕', declined: '✕' };
+// The month grid's chips are a single tight row (time + title, no room to spare), so a corner badge there would
+// either get clipped or crowd out the title - the background tint alone still shows who's in or out at a
+// glance. The fully-detailed week view (see weekCard below) is where the check/cross badge actually belongs.
 function monthChip(e, sel, now) {
   const st = myStatus(e);
   return `<a class="cal-ev ${sel && sel.id === e.id ? 'sel' : ''} ${new Date(e.start) < now ? 'past' : ''}" data-st="${st}" href="#/events/${e.id}" style="--c:${typeColor(e.type)}" title="${esc(e.title)}${e.mandatory ? ' (mandatory)' : ''}, ${goingCount(e)} going${st ? '. ' + STATUS_TEXT[st] : ''}">${e.mandatory ? '<i class="mdot"></i>' : ''}<span class="tm">${timeOf(e.start)}</span><span class="ttl">${esc(e.title)}</span></a>`;
 }
 function weekCard(e, sel, now) {
-  const st = myStatus(e);
+  const st = myStatus(e), icon = STATUS_ICON[st] || '';
   return `<a class="wk-ev ${sel && sel.id === e.id ? 'sel' : ''} ${new Date(e.start) < now ? 'past' : ''}" data-st="${st}" href="#/events/${e.id}" style="--c:${typeColor(e.type)}" ${st ? `title="${esc(STATUS_TEXT[st])}"` : ''}>
+    ${icon ? `<span class="stbadge">${icon}</span>` : ''}
     <span class="top"><span>${timeOf(e.start)}</span>${e.mandatory ? '<i class="mdot" title="Mandatory"></i>' : ''}</span>
     <span class="ttl">${esc(e.title)}</span><span class="sub"><i class="tdot"></i>${esc(e.type)}<br>${goingCount(e)} going</span></a>`;
 }
