@@ -534,10 +534,15 @@ details.usepreset[open] { padding-bottom: 14px; }
 .events-layout .cal-cell { min-height: 130px; }
 @media (max-width: 1180px) { .events-layout { grid-template-columns: 1fr; } .ev-side { position: static; max-height: none; } }
 
-[data-st="attended"] { --sc: #6fcf8b; } [data-st="noshow"] { --sc: #e2685c; } [data-st="noreply"] { --sc: #eba23c; } [data-st="declined"] { --sc: #8b95a7; }
-.cal-ev:not([data-st=""]), .wk-ev:not([data-st=""]) { background: color-mix(in srgb, var(--sc) 24%, var(--panel-2)); border-left-color: var(--sc); }
-.cal-ev[data-st="declined"], .wk-ev[data-st="declined"] { opacity: .75; }
-.cal-ev[data-st="attended"] .ttl, .wk-ev[data-st="attended"] .ttl { color: #d9f5e2; }
+/* Whole-background colour, not just a tinted border: greyed out (the plain default look) with no answer yet,
+   green once you are going (whether that is just your own RSVP or the leadership's later recorded attendance),
+   orange if you said you are not coming. No-show (said Going, but not recorded once the event passed) keeps its
+   own red - a real problem, not the same thing as plainly declining - rather than being folded into either. */
+[data-st="attended"], [data-st="going"] { --sc: #6fcf8b; } [data-st="noshow"] { --sc: #e2685c; } [data-st="declined"] { --sc: #eba23c; }
+.cal-ev:not([data-st=""]), .wk-ev:not([data-st=""]) { background: color-mix(in srgb, var(--sc) 55%, var(--panel-2)); border-left-color: var(--sc); }
+.cal-ev[data-st="declined"], .wk-ev[data-st="declined"] { opacity: .85; }
+.cal-ev:not([data-st=""]) .ttl, .wk-ev:not([data-st=""]) .ttl { color: #fff; }
+.cal-ev:not([data-st=""]) .tm, .wk-ev:not([data-st=""]) .sub { color: rgba(255,255,255,.8); }
 .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 5px; }
 .status-legend { border-top: 0; padding-top: 0; align-items: center; }
 .st-key { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
