@@ -38,7 +38,13 @@ async function startServer(seedDb) {
     proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
   });
 }
-function stopServer() { proc && proc.kill(); fake && fake.close(); dir && fs.rmSync(dir, { recursive: true, force: true }); }
+// Waits for the process to actually exit before clearing its data directory - it now flushes a final save on
+// SIGTERM (see server.js), so deleting the directory out from under that write would be a race.
+async function stopServer() {
+  if (proc) { proc.kill(); await new Promise((r) => proc.once('exit', r)); }
+  fake && fake.close();
+  dir && fs.rmSync(dir, { recursive: true, force: true });
+}
 
 // Walks through the OAuth redirect exactly like a browser would and returns the session cookie.
 async function discordLogin(id, roles = [], { state: forceState, authQuery = '' } = {}) {
@@ -227,6 +233,49 @@ test('the attendance PIN defaults to following Mandatory, but can be switched in
   assert.equal(edited.pinEnabled, false, 'an explicit pinEnabled on the request is kept, not overridden by the new Mandatory value');
 });
 
+test('reopening the PIN window keeps the same code, clears wrong-PIN strikes, and does not re-send DMs', async () => {
+  // A previous test left pinOffsetMinutes at -10 (PIN due 10 minutes before the start) - reset it here so the
+  // scheduler does not race in and auto-generate a PIN before this test gets to do it explicitly below.
+  await call('/api/settings', 'PUT', { pinOffsetMinutes: 0 }, 'A');
+  const ev = (await call('/api/events', 'POST', { title: 'Reopen night', type: 'Wargames', start: inMinutes(5), pinWindowMinutes: 10, pinEnabled: true }, 'A')).body;
+  const dee = (await state('A')).members.find((m) => m.name === 'Dee');   // D's one character, already created in an earlier test
+  assert.equal((await call(`/api/events/${ev.id}/pin/send`, 'POST', { mode: 'reopen' }, 'A')).status, 409, 'nothing to reopen before a PIN exists');
+  const created = (await call(`/api/events/${ev.id}/pin/send`, 'POST', { mode: 'new' }, 'A')).body;
+  for (let i = 0; i < 5; i++) await call(`/api/events/${ev.id}/pin`, 'POST', { memberId: dee.id, pin: '9999' }, 'D');   // burn through the 5 tries
+  assert.equal((await call(`/api/events/${ev.id}/pin`, 'POST', { memberId: dee.id, pin: created.pin.code }, 'D')).status, 429, 'locked out after 5 wrong tries');
+
+  assert.equal((await call(`/api/events/${ev.id}/pin/send`, 'POST', { mode: 'reopen' }, 'D')).status, 403, 'officers only');
+  fake.state.dms.length = 0;
+  const reopened = (await call(`/api/events/${ev.id}/pin/send`, 'POST', { mode: 'reopen' }, 'A')).body;
+  assert.equal(reopened.pin.code, created.pin.code, 'same code, not a new one');
+  assert.notEqual(reopened.pin.at, created.pin.at, 'the window restarted from now');
+  assert.equal(fake.state.dms.length, 0, 'reopening is quiet - it does not relay a new code by DM');
+  assert.equal((await call(`/api/events/${ev.id}/pin`, 'POST', { memberId: dee.id, pin: created.pin.code }, 'D')).status, 200, 'the old lock is gone and the same code still works');
+});
+
+test('an event not using the PIN automatically counts its "Going" players as attended once it is over', async () => {
+  await call('/api/settings', 'PUT', { pointsEnabled: true }, 'A');
+  const st0 = await state('A');
+  const lead = st0.members.find((m) => m.name === 'Lead'), cee = st0.members.find((m) => m.name === 'Cee');
+  // Backdated well past the compliance "final after" delay (60 minutes by default) so the very next tick
+  // (300ms, see SCHEDULER_INTERVAL_MS above) judges it as over, without the test actually waiting an hour.
+  const ev = (await call('/api/events', 'POST', { title: 'No-PIN raid', type: 'Wargames', start: inMinutes(-65), pinEnabled: false }, 'A')).body;
+  assert.equal(ev.pinEnabled, false);
+  await call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: lead.id, status: 'yes' }, 'A');
+  await call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: cee.id, status: 'no' }, 'A');
+  const after = await waitFor(async () => { const e = (await state('A')).events.find((x) => x.id === ev.id); return e.attended.length ? e : null; });
+  assert.ok(after.attended.includes(lead.id), 'said Going, so counted as attended with nobody having to tick a box');
+  assert.ok(!after.attended.includes(cee.id), "said Can't, so not counted");
+  assert.ok((await state('A')).points.some((p) => p.eventId === ev.id && p.memberId === lead.id), 'the automatic attendance pays out points same as a manual one would');
+
+  // An officer correcting this by hand (lead actually left early and should not count, say) must stick - the
+  // automatic fill-in only ever runs once and must never undo a deliberate human correction on a later tick.
+  await call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: [] }, 'A');
+  await sleep(600);
+  const corrected = (await state('A')).events.find((x) => x.id === ev.id);
+  assert.deepEqual(corrected.attended, [], "the officer's correction is not overwritten by a later tick");
+});
+
 test('reminders go only to players who have not answered, at the editable times', async () => {
   const st0 = await state('A');
   const lead = st0.members.find((m) => m.name === 'Lead'), cee = st0.members.find((m) => m.name === 'Cee');
@@ -280,6 +329,38 @@ test('reminders go only to players who have not answered, at the editable times'
   const later = (await call('/api/events', 'POST', { title: 'Reminder test disabled', type: 'Other', start: inMinutes(180) }, 'A')).body;
   await sleep(1000);
   assert.equal(dmsFor('Reminder test disabled').length, 0);
+  await call('/api/settings', 'PUT', { remindersEnabled: true }, 'A');
+});
+
+test('an officer can send a reminder by hand, any time, regardless of the automatic schedule', async () => {
+  const cee = (await state('A')).members.find((m) => m.name === 'Cee');
+  assert.equal((await call('/api/settings', 'PUT', { remindersEnabled: false }, 'A')).status, 200);   // automatic reminders fully off
+  const ev = (await call('/api/events', 'POST', { title: 'Manual reminder test', type: 'Other', start: inMinutes(180), reminders: false }, 'A')).body;   // also off for this one event
+  await call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: cee.id, status: 'yes' }, 'C');   // C has answered, B and D have not
+
+  assert.equal((await call(`/api/events/${ev.id}/reminders/send`, 'POST', {}, 'B')).status, 403, 'only an officer can press the button');
+
+  const dmsFor = (title) => fake.state.dms.filter((d) => d.content.includes(title));
+  const sent = await call(`/api/events/${ev.id}/reminders/send`, 'POST', {}, 'A');
+  assert.equal(sent.status, 200);
+  const dms = dmsFor('Manual reminder test');
+  assert.deepEqual(dms.map((d) => d.to).sort(), [B, D].sort(), 'only those who have not answered get one, same as the automatic reminders');
+  assert.ok(dms.every((d) => d.content.includes('Reminder:')), 'not numbered like the automatic schedule - this one has no N/M of its own');
+
+  const officerName = (await state('A')).user.name;
+  const log = (await state('A')).events.find((e) => e.id === ev.id).reminderLog;
+  assert.equal(log.length, 1);
+  assert.equal(log[0].manual, true);
+  assert.equal(log[0].by, officerName);
+  assert.equal(log[0].sent, 2);
+
+  // pressing it again sends another round - it is not a one-shot like the automatic schedule
+  await call(`/api/events/${ev.id}/reminders/send`, 'POST', {}, 'A');
+  assert.equal((await state('A')).events.find((e) => e.id === ev.id).reminderLog.length, 2);
+
+  const past = (await call('/api/events', 'POST', { title: 'Manual reminder on a past event', type: 'Other', start: inMinutes(-5) }, 'A')).body;
+  assert.equal((await call(`/api/events/${past.id}/reminders/send`, 'POST', {}, 'A')).status, 409, 'cannot nudge people about an event that has already started');
+
   await call('/api/settings', 'PUT', { remindersEnabled: true }, 'A');
 });
 

@@ -32,7 +32,13 @@ before(async () => {
     proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
   });
 });
-after(() => { proc && proc.kill(); fake && fake.close(); dir && fs.rmSync(dir, { recursive: true, force: true }); });
+// Waits for the process to actually exit before clearing its data directory - it now flushes a final save on
+// SIGTERM (see server.js), so deleting the directory out from under that write would be a race.
+after(async () => {
+  if (proc) { proc.kill(); await new Promise((r) => proc.once('exit', r)); }
+  fake && fake.close();
+  dir && fs.rmSync(dir, { recursive: true, force: true });
+});
 
 async function login(id, roles) {
   fake.state.guildMembers[id] = roles === null ? undefined : { roles };

@@ -25,9 +25,9 @@ async function startServer() {
     return { status: res.status, body: await res.json().catch(() => null) };
   };
   const login = async (name, code) => (await call('/api/login', 'POST', { name, passcode: code })).body.token;
-  return { base, call, officer: await login('Boss', 'o1'), ann: await login('Ann', 'm1'), bob: await login('Bob', 'm1'), cat: await login('Cat', 'm1'), stop: () => { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { base, call, officer: await login('Boss', 'o1'), ann: await login('Ann', 'm1'), bob: await login('Bob', 'm1'), cat: await login('Cat', 'm1'), stop: async () => { proc.kill(); await new Promise((r) => proc.once('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
-const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { s.stop(); } });
+const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { await s.stop(); } });
 const state = async (s, who) => (await s.call('/api/state', 'GET', null, s[who])).body;
 const inDays = (n) => new Date(Date.now() + n * 864e5).toISOString();
 // The server judges "today" (zoneDate() in server-compliance.js) in the guild's own configured time zone

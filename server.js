@@ -98,11 +98,55 @@ const SETTING_DEFAULTS = {
 let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], auditLog: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };
 if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
 
-function save() {
+// Writing the whole db to disk on every single change used to be synchronous - fine one at a time, but with
+// dozens of players all doing something at once (everyone typing an attendance PIN in during the same minute,
+// say) each of those blocking disk writes queues up behind the last, and the single-threaded server cannot even
+// start answering the next request until the current write (stringify + write + rename, all synchronous) is
+// done - that pile-up is what "nearly crashed the server". Fixed by only ever marking the data dirty here and
+// actually writing it out a short moment later, asynchronously, so a whole burst of changes within that window
+// collapses into one disk write instead of one per request, and no request ever blocks on disk I/O at all.
+let dirty = false, writing = false, flushTimer = null;
+const SAVE_DEBOUNCE_MS = Number(process.env.SAVE_DEBOUNCE_MS || 200);
+function scheduleFlush() {
+  if (flushTimer || writing) return;            // a flush is already queued or in progress - it will pick up this change too
+  flushTimer = setTimeout(flush, SAVE_DEBOUNCE_MS);
+  flushTimer.unref?.();                         // a pending save should never be the reason the process stays alive
+}
+async function flush() {
+  flushTimer = null;
+  if (!dirty) return;
+  dirty = false;
+  writing = true;
+  try {
+    const tmp = DB_FILE + '.tmp';
+    await fs.promises.writeFile(tmp, JSON.stringify(db, null, 2));
+    await fs.promises.rename(tmp, DB_FILE);
+  } catch (e) {
+    console.error('save failed, will retry:', e);
+    dirty = true;                                // don't silently lose the change - try again on the next flush
+  } finally {
+    writing = false;
+    if (dirty) scheduleFlush();                   // more changes arrived while this write was in flight
+  }
+}
+function save() { dirty = true; scheduleFlush(); }
+// Only used right before the process actually exits (see shutdown() below), where "a moment later" is too late -
+// this finishes the write before Node is given the chance to quit, so a deploy/restart never drops the last
+// few changes that were still waiting out their debounce window.
+function saveSync() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (!dirty) return;
+  dirty = false;
   const tmp = DB_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, DB_FILE);
 }
+function shutdown(code) {
+  try { saveSync(); } catch (e) { console.error('final save failed:', e); }
+  process.exit(code);
+}
+process.on('SIGTERM', () => shutdown(0));
+process.on('SIGINT', () => shutdown(0));
 const newId = () => db.nextId++;
 
 // ---------- auth (stateless signed tokens, survive restarts) ----------
@@ -253,6 +297,7 @@ function migrate() {
   for (const l of db.loot) if (!l.type) l.type = LOOT_DEFAULT_TYPE;
   for (const p of db.presets) p.parties = normParties(p.parties);
   db.presetRules = db.presetRules.filter((r) => db.presets.some((p) => p.id === r.presetId));
+  for (const v of db.vods) if (!Array.isArray(v.reviews)) v.reviews = [];
   for (const ev of db.events) {
     ev.parties = normParties(ev.parties);
     ev.rsvps = ev.rsvps || {};
@@ -498,7 +543,7 @@ function applyPresetRule(ev) {
   if (p) ev.parties = normParties(clone(p.parties));
 }
 route('POST', '/api/events', ({ body, user }) => {
-  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
+  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
   applyPresetRule(ev);
   db.events.push(ev);
   audit.log(user, 'event.create', { type: 'event', id: ev.id, name: ev.title }, `${user.name} created the event "${ev.title}" (${ev.type}, ${ev.start}).`);
@@ -554,6 +599,7 @@ route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
   need(ev, 404, 'Event not found.');
   const ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
   ev.attended = [...new Set(ids)];
+  ev.autoAttended = true;   // an officer took the roll by hand - the automatic fill-in (see tick()) must never touch this event again
   syncAttendancePoints(ev);
   audit.log(user, 'attendance.record', { type: 'event', id: ev.id, name: ev.title }, `${user.name} recorded attendance for "${ev.title}": ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
   save();
@@ -926,6 +972,33 @@ async function runReminders(ev, now) {
   console.log(`[reminder ${number}/${offsets.length}] ${ev.title}: ${people.length - failed.length}/${people.length} delivered`);
 }
 
+// An officer's own "Send reminder now" button - the same DM as the automatic schedule above (same recipients,
+// same one-tap buttons), just triggered by hand instead of waiting on reminderMinutes/remindersEnabled. Useful
+// for an event with reminders switched off, or just to nudge stragglers again before sign-ups close. Logged
+// alongside the automatic entries (see automationPanel client-side), marked manual so the two read differently.
+async function sendManualReminders(ev, by) {
+  const people = reminderRecipients(ev);
+  const failed = [];
+  const closeMs = closeAt(ev);
+  for (const r of people) {
+    const text = [
+      `⏰ **Reminder:** you have not answered for **${ev.title}** yet.`,
+      `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeMs / 1000)}:R>.`,
+      `Tap a button below, or open the event here: ${appUrl()}/#/events/${ev.id}`,
+    ].join('\n');
+    const buttons = discord.linkButtons([
+      { label: '✅ Can come', url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'yes', closeMs)}` },
+      { label: "❌ Can't come", url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'no', closeMs)}` },
+    ]);
+    const res = await discord.sendDM(r.id, text, null, buttons);
+    if (!res.ok) failed.push({ id: r.id, name: r.name, error: res.error });
+  }
+  ev.reminderLog.push({ number: 'manual', manual: true, by, at: new Date().toISOString(), sent: people.length - failed.length, failed });
+  save();
+  console.log(`[reminder manual, by ${by}] ${ev.title}: ${people.length - failed.length}/${people.length} delivered`);
+  return { sent: people.length - failed.length, total: people.length, failed };
+}
+
 let ticking = false;
 async function tick() {
   if (ticking) return;
@@ -939,6 +1012,19 @@ async function tick() {
       // Either way, an officer can still always create and send one by hand ("Create and send PIN now" on the
       // event), which has no check of its own, so this only changes what happens with nobody touching it.
       if (!ev.pin && !ev.pinSkip && ev.pinEnabled && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
+      // An event that does not use the attendance PIN has nobody confirming they actually showed up unless an
+      // officer remembers to tick the Attendance box by hand - which leaves everyone who said "Going" wrongly
+      // looking like a no-show. Once the event is comfortably over (the same delay compliance uses to judge
+      // no-shows), count them as attended automatically instead. This runs once per event (autoAttended) and
+      // never again once an officer has recorded attendance by hand, so a deliberate correction always sticks.
+      if (!ev.pinEnabled && !ev.autoAttended && now >= start + db.settings.compliance.finalAfterMinutes * 60000) {
+        const going = Object.entries(ev.rsvps).filter(([, s]) => s === 'yes').map(([id]) => Number(id));
+        const before = ev.attended.length;
+        ev.attended = [...new Set([...ev.attended, ...going])];
+        ev.autoAttended = true;
+        if (ev.attended.length !== before) syncAttendancePoints(ev);
+        save();
+      }
       await runReminders(ev, Date.now());
     }
     for (const h of tickHooks) await h();
@@ -974,8 +1060,30 @@ route('POST', '/api/events/:id/pin', ({ body, user, params }) => {
 route('POST', '/api/events/:id/pin/send', async ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
-  if (!ev.pin || body.mode === 'new') await generatePin(ev, user.name);
+  // "Reopen" restarts the same window (and clears anyone's wrong-PIN strikes) without handing out a new code -
+  // for when the window simply closed too soon (people arrived late, say) and party leaders already have the
+  // code written down, so there is no need to make them relay a fresh one. Checked first, and strictly: it must
+  // never fall through to creating a brand new PIN just because none exists yet.
+  if (body.mode === 'reopen') {
+    need(ev.pin, 409, 'There is no PIN for this event yet.');
+    ev.pin.at = new Date().toISOString();
+    for (const k of [...pinFails.keys()]) if (k.endsWith(':' + ev.id)) pinFails.delete(k);
+    audit.log(user, 'event.pin.reopen', { type: 'event', id: ev.id, name: ev.title }, `${user.name} reopened the attendance PIN window for "${ev.title}".`);
+    save();
+  }
+  else if (!ev.pin || body.mode === 'new') await generatePin(ev, user.name);
   else await sendPinDMs(ev);
+  return eventFor(ev, user);
+}, { officer: true });
+
+// Lets an officer nudge stragglers on demand - does not wait on the configured schedule or care whether
+// reminders are switched off for this event, and can be used as many times as wanted.
+route('POST', '/api/events/:id/reminders/send', async ({ params, user }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  need(Date.now() < Date.parse(ev.start), 409, 'This event has already started.');
+  const result = await sendManualReminders(ev, user.name);
+  audit.log(user, 'event.reminder.send', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually sent a reminder for "${ev.title}" to ${result.sent}/${result.total} player(s).`);
   return eventFor(ev, user);
 }, { officer: true });
 
@@ -1196,7 +1304,7 @@ if (AUTO_UPDATE_MINUTES > 0 && fs.existsSync(path.join(__dirname, '.git'))) {
   const check = async () => {
     if ((await git(['fetch', '--quiet'])) === null) return;              // offline or no remote: try again later
     const behind = Number(await git(['rev-list', '--count', 'HEAD..@{u}']));
-    if (behind > 0) { console.log(`Update found (${behind} new commit${behind === 1 ? '' : 's'}). Restarting to apply it...`); process.exit(75); }
+    if (behind > 0) { console.log(`Update found (${behind} new commit${behind === 1 ? '' : 's'}). Restarting to apply it...`); shutdown(75); }
   };
   setTimeout(check, 15000);
   setInterval(check, AUTO_UPDATE_MINUTES * 60e3);

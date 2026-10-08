@@ -34,12 +34,14 @@ async function startServer(seedDb) {
   return {
     base, call, login,
     officer: await login('Boss', 'o1'), member: await login('Zed', 'm1'), other: await login('Other', 'm1'),
-    stop: () => { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); },
+    // Waits for the process to actually exit before clearing its data directory - it now flushes a final save
+    // on SIGTERM (see server.js), so deleting the directory out from under that write would be a race.
+    stop: async () => { proc.kill(); await new Promise((r) => proc.once('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); },
   };
 }
 
 // Runs a test body against a fresh server and always cleans up.
-const withServer = (name, fn, seed) => test(name, async () => { const s = await startServer(seed); try { await fn(s); } finally { s.stop(); } });
+const withServer = (name, fn, seed) => test(name, async () => { const s = await startServer(seed); try { await fn(s); } finally { await s.stop(); } });
 
 withServer('login needs the right passcode and a proper name', async ({ call }) => {
   assert.equal((await call('/api/login', 'POST', { name: 'Zed', passcode: 'nope' })).status, 401);
