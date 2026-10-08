@@ -41,6 +41,14 @@ module.exports = function install(ctx) {
   // to share with "everyone" or with a different class. That broader sharing is meant for guild members
   // browsing each other's VODs, not for someone outside the guild entirely.
   function isGuestCoach(user) { return db().guestCoaches.some((g) => g.discordId === user.key); }
+  // Resolving a review's author to a display name has to cover both a real (in-guild) coach - an active member
+  // - and a guest coach, who never has a member record at all.
+  function reviewerName(key) {
+    const m = db().members.find((x) => x.owner === key && x.active);
+    if (m) return m.name;
+    const g = db().guestCoaches.find((x) => x.discordId === key);
+    return g ? g.name : key;
+  }
   function canSeeVod(user, v) {
     if (isOfficer(user) || v.owner === user.key || v.postedBy === user.key) return true;
     if (isGuestCoach(user)) return coachesOf(v.owner).includes(user.key);
@@ -61,6 +69,10 @@ module.exports = function install(ctx) {
   // picker, since cross-class sharing is sometimes exactly what they want (showing one class a strong example
   // from another, say).
   function promoteOwnClassOnly(user, v) { return v.owner === user.key && !isOfficer(user) && !coachesOf(v.owner).includes(user.key); }
+  // "Finished reviewing" is deliberately narrower than canManageVod: a coach or officer declares themselves
+  // done, never the player the VOD belongs to (they are the one being told, not the one confirming it), and
+  // never on a spectator/overview recording, which is not really any one player's review to finish.
+  function canReviewVod(user, v) { return !v.spectator && (isOfficer(user) || coachesOf(v.owner).includes(user.key)); }
   // A coaching point: a note pinned to an exact moment in the VOD, with an optional drawing that reappears on
   // its own during playback for a short window around that moment (see syncVodMarkerDisplay client-side) -
   // distinct from the live drawing overlay, which is never saved. Anyone who can manage the VOD can add one.
@@ -104,7 +116,11 @@ module.exports = function install(ctx) {
         ownerName: owner ? owner.name : v.owner,
         ownerClass: owner ? classOf(owner) : '',
         markers: D.vodMarkers.filter((m) => m.vodId === v.id).map(markerForClient).sort((a, b) => a.timestamp - b.timestamp || a.id - b.id),
+        // Each entry's canEdit/canResend is its own author only - even an officer cannot touch another coach's
+        // review note, so the client never offers an Edit/Resend button it would just get a 403 from.
+        reviews: (Array.isArray(v.reviews) ? v.reviews : []).map((r) => ({ ...r, byName: reviewerName(r.by), canEdit: r.by === user.key })),
         canManage: canManageVod(user, v), canPromote: canPromoteVisibility(user, v), promoteOwnClassOnly: promoteOwnClassOnly(user, v),
+        canReview: canReviewVod(user, v),
       };
     });
     const myStudents = coach ? studentsOf(user.key) : [];
@@ -289,7 +305,7 @@ module.exports = function install(ctx) {
     const v = {
       id: newId(), owner, postedBy: user.key, postedAt: now(), url: String(body.url).trim(), videoId,
       type, recordedDate, enemyGuild, spectator, title: vodTitle(type, recordedDate, enemyGuild), note: clean(body.note, 500),
-      visibility: 'private', visibleClass: '',
+      visibility: 'private', visibleClass: '', reviews: [],
     };
     D.vods.push(v);
     save();
@@ -366,6 +382,62 @@ module.exports = function install(ctx) {
     need(i >= 0, 404, 'Coaching point not found.');
     D.vodMarkers.splice(i, 1);
     save();
+    return { ok: true };
+  }, { applicant: true });
+
+  // ---------------------------------------------------------------- VOD reviews ("finished review" / "add-on")
+  // One append-only list per VOD. The first entry is "finished review"; any entry added after that is a second
+  // (or third...) coach's "add-on" instead - same action, same data shape, just different button wording and
+  // audit phrasing client- and server-side, since there is nothing to actually overwrite or merge.
+  route('POST', '/api/vods/:id/reviews', ({ body, user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    need(canReviewVod(user, v), 403, 'Only a coach or officer can finish a review on this VOD.');
+    const note = clean(body.note, 1000);
+    need(note, 400, 'Add a note before finishing the review.');
+    if (!Array.isArray(v.reviews)) v.reviews = [];
+    const isFirst = v.reviews.length === 0;
+    const review = { id: newId(), by: user.key, at: now(), note };
+    v.reviews.push(review);
+    save();
+    audit(user, isFirst ? 'vod.review.finish' : 'vod.review.addon', { type: 'vod', id: v.id, name: v.title }, `${user.name} ${isFirst ? 'finished reviewing' : 'added to the review of'} the VOD "${v.title}".`);
+    const markerCount = D.vodMarkers.filter((mk) => mk.vodId === v.id).length;
+    const points = markerCount ? ` (${markerCount} coaching point${markerCount === 1 ? '' : 's'})` : '';
+    if (v.owner !== user.key) {
+      notify(v.owner, `✅ ${user.name} ${isFirst ? 'finished reviewing' : 'added more to the review of'} your VOD "${v.title}"${points}.\n${note}\n${appUrl()}/#/vods/${v.id}`);
+    }
+    return { ...review, byName: reviewerName(review.by), canEdit: true };
+  }, { applicant: true });
+
+  route('PUT', '/api/vods/:id/reviews/:reviewId', ({ body, user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    const review = (v.reviews || []).find((r) => r.id === Number(params.reviewId));
+    need(review, 404, 'Review not found.');
+    // Only the coach/officer who actually wrote this entry can touch it - not even another officer, and not
+    // the VOD's own owner, matching canReviewVod's "the one being told, not the one confirming it" split.
+    need(review.by === user.key, 403, 'You can only edit your own review note.');
+    const note = clean(body.note, 1000);
+    need(note, 400, 'Add a note.');
+    review.note = note;
+    review.editedAt = now();
+    save();
+    return { ...review, byName: reviewerName(review.by), canEdit: true };
+  }, { applicant: true });
+
+  route('POST', '/api/vods/:id/reviews/:reviewId/resend', ({ user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    const review = (v.reviews || []).find((r) => r.id === Number(params.reviewId));
+    need(review, 404, 'Review not found.');
+    need(review.by === user.key, 403, 'You can only resend your own review note.');
+    const markerCount = D.vodMarkers.filter((mk) => mk.vodId === v.id).length;
+    const points = markerCount ? ` (${markerCount} coaching point${markerCount === 1 ? '' : 's'})` : '';
+    if (v.owner !== user.key) {
+      const lead = review.editedAt ? `${user.name} updated their review note on your VOD "${v.title}"` : `${user.name}'s review of your VOD "${v.title}"`;
+      notify(v.owner, `✅ ${lead}${points}.\n${review.note}\n${appUrl()}/#/vods/${v.id}`);
+    }
+    audit(user, 'vod.review.resend', { type: 'vod', id: v.id, name: v.title }, `${user.name} resent their review note on the VOD "${v.title}".`);
     return { ok: true };
   }, { applicant: true });
 

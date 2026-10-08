@@ -390,9 +390,14 @@ function lootPanel() {
   const rows = S.members.filter((m) => m.active && (off || m.owner === S.user.key)).map((m) => {
     const mine = counted.filter((e) => !onLeaveAt(m.owner, new Date(e.start).getTime()));            // events during a leave of absence do not count against anybody
     const n = mine.filter((e) => e.attended.includes(m.id)).length;
-    const pct = mine.length ? Math.floor(100 * n / mine.length) : null;   // rounded down so 59.6% is not shown as 60%
+    // A still-decaying starting-attendance baseline (set in Admin as a migration aid) blends in here too, the
+    // same way it does on the Attendance page and the member's own profile (see attendanceStats) - otherwise a
+    // guild that just migrated would see everyone's real stats include it everywhere except here.
+    const virtual = virtualAttendanceFor(m.owner);
+    const blendedOf = mine.length + virtual.events, blendedN = n + virtual.came;
+    const pct = blendedOf > 0 ? Math.floor(100 * blendedN / blendedOf) : null;   // rounded down so 59.6% is not shown as 60%
     const disq = isDisqualified(m.owner);
-    return { m, n, total: mine.length, pct, disq, onLeave: onLeaveAt(m.owner, Date.now()), ok: pct !== null && pct >= ls.need && !disq, band: pct === null ? 'none' : bandOf(pct, ls) };
+    return { m, n, total: mine.length, pct, disq, onLeave: onLeaveAt(m.owner, Date.now()), ok: pct !== null && pct >= ls.need && !disq, band: pct === null ? 'none' : bandOf(pct, ls), baseline: virtual.events > 0 };
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.m.name.localeCompare(b.m.name));
   const okCount = rows.filter((r) => r.ok).length;
   // Picking specific characters to compare (officer only) overrides the plain qualified/everyone toggle - the
@@ -411,7 +416,7 @@ function lootPanel() {
           return `<div><span class="k">Items received, ${fmtDay(new Date(itemFrom + 'T00:00:00'))} to ${fmtDay(ref)} (${ls.itemDays} ${ls.itemDays === 1 ? 'day' : 'days'})</span><b>${things.length}</b>${things.length ? ` <span class="muted small">(${S.cfg.lootTypes.filter((t) => t !== 'Lucent').map((t) => [t, things.filter((l) => l.type === t).length]).filter(([, n]) => n).map(([t, n]) => `${n} ${esc(t.toLowerCase())}`).join(', ')})</span><ul>${things.map((l) => `<li>${esc(l.item)} <span class="type-pill t-${esc(l.type)}">${esc(l.type || 'Item')}</span> <span class="muted small">${fmtDay(new Date(l.date + 'T00:00:00'))}</span></li>`).join('')}</ul>` : ' <span class="muted">none</span>'}</div>
           <div><span class="k">Lucent received in the same time</span><b>${sum.toLocaleString()}</b>${lucent.length ? ` <span class="muted small">(${lucent.length} ${lucent.length === 1 ? 'payment' : 'payments'})</span>` : ''}</div>`; })()}
         ${r.disq ? `<div class="warn-line">Disqualified from loot: ${activeWarn(r.m.owner).length} active warnings (the limit is ${S.settings.compliance.disqualifyAt}).</div>` : ''}
-        <div class="muted small">${r.total ? `Attended ${r.n} of ${r.total} mandatory ${r.total === 1 ? 'event' : 'events'}${r.total < counted.length ? ' (events during a leave of absence are left out)' : ''}.` : 'No mandatory events with recorded attendance yet.'}</div>
+        <div class="muted small">${r.total ? `Attended ${r.n} of ${r.total} mandatory ${r.total === 1 ? 'event' : 'events'}${r.total < counted.length ? ' (events during a leave of absence are left out)' : ''}.` : 'No mandatory events with recorded attendance yet.'}${r.baseline ? ' The percentage above still includes a decaying starting-attendance baseline (Admin).' : ''}</div>
         ${off ? `<a href="#/loot" class="btn sm primary" data-act="loot-give" data-id="${r.m.id}">Give loot to ${esc(r.m.name)}</a>` : ''}
       </div></details>`;
   };
@@ -728,11 +733,13 @@ function eventDetail(ev) {
     const m = byId(S.members, id); if (!m) continue;
     (st === 'yes' ? going : no).push(m);
   }
+  // Active, non-mercenary characters with no answer at all yet - mercenaries are added straight into the
+  // roster for one event and never go through RSVP, so they do not belong on either list.
+  const noReply = S.members.filter((m) => m.active && !m.mercenary && !(m.id in ev.rsvps));
   const past = new Date(ev.start) < Date.now();
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
   const myRows = mine().map((m) => rsvpRow(ev, m, locked)).join('');
-  const others = isOfficer() ? S.members.filter((m) => m.active && m.owner !== S.user.key && !ev.rsvps[m.id]) : [];
   const cap = ev.maxSignups ? ` of ${ev.maxSignups}` : '';
   const signupNote = past ? '' : closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
 
@@ -744,6 +751,7 @@ function eventDetail(ev) {
         ${g.map((m) => `<div class="mini"><span>${esc(m.name)}</span><small>${esc(classOf(m) || m.primaryWeapon)} ${m.gearScore || ''}</small></div>`).join('') || '<div class="muted small">None yet</div>'}</div>`;
     }).join('')}</div>` : '<div class="muted">Nobody yet.</div>'}
     ${no.length ? `<p class="small" style="margin-bottom:0"><span class="muted">Can't make it (${no.length}):</span> ${no.map((m) => esc(m.name)).join(', ')}</p>` : ''}
+    ${noReply.length ? `<p class="small" style="margin-bottom:0"><span class="muted">No reply yet (${noReply.length}):</span> ${noReply.map((m) => esc(m.name)).join(', ')}</p>` : ''}
   </div>
 
   <div class="panel"><div class="ev-title"><h3>Parties</h3>
@@ -772,7 +780,11 @@ function eventSide(ev) {
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
   const myRows = mine().map((m) => rsvpRow(ev, m, locked)).join('');
-  const others = isOfficer() ? S.members.filter((m) => m.active && m.owner !== S.user.key && !ev.rsvps[m.id]) : [];
+  // Every other active character, not just the ones who have not answered yet - an officer changing someone's
+  // answer (told in Discord they can no longer make it, say) needs to be able to pick them here too, not only
+  // the still-unanswered ones.
+  const others = isOfficer() ? S.members.filter((m) => m.active && m.owner !== S.user.key) : [];
+  const otherStatus = (m) => (ev.rsvps[m.id] === 'yes' ? ' - attending' : ev.rsvps[m.id] === 'no' ? " - can't make it" : ' - no answer yet');
   const signupNote = past ? '' : closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
   const st = myStatus(ev);
   return `<div class="panel side-card" data-st="${st}">
@@ -784,8 +796,8 @@ function eventSide(ev) {
     <h3 class="side-h">Your sign-up</h3>
     ${signupNote ? `<div class="muted small" style="margin:-4px 0 8px">${signupNote}</div>` : ''}
     ${myRows || `<div class="muted small">You have no active characters. <a href="#/profile" data-act="goto-add">Add one</a> to sign up.</div>`}
-    ${others.length ? `<div class="rsvp-row"><select id="other-char" style="max-width:190px" aria-label="Sign up another character">${others.map((m) => `<option value="${m.id}">${esc(m.name)} (${esc(ownerName(m.owner))})</option>`).join('')}</select>
-      <span class="seg"><button class="btn sm" data-act="rsvp-other" data-s="yes" data-ev="${ev.id}">Attend</button><button class="btn sm" data-act="rsvp-other" data-s="no" data-ev="${ev.id}">Not attend</button></span></div>` : ''}
+    ${others.length ? `<div class="rsvp-row"><select id="other-char" style="max-width:230px" aria-label="Change another character's sign-up">${others.map((m) => `<option value="${m.id}">${esc(m.name)} (${esc(ownerName(m.owner))})${otherStatus(m)}</option>`).join('')}</select>
+      <span class="seg"><button class="btn sm" data-act="rsvp-other" data-s="yes" data-ev="${ev.id}">Attend</button><button class="btn sm" data-act="rsvp-other" data-s="no" data-ev="${ev.id}">Not attend</button><button class="btn sm" data-act="rsvp-other" data-s="none" data-ev="${ev.id}">Clear</button></span></div>` : ''}
     ${pinSide(ev)}
   </div>`;
 }
@@ -847,15 +859,17 @@ function automationPanel(ev) {
   const entered = Object.keys(ev.pinEntries || {}).length;
   const hrs = (m) => (m % 60 === 0 ? `${m / 60}h` : `${Math.round(m / 6) / 10}h`);
   return `<div class="panel"><div class="ev-title"><h3>PIN and reminders</h3>
-      <span class="seg"><button class="btn sm" data-act="pin-send" data-mode="send" data-id="${ev.id}">${pin ? 'Send the PIN again' : 'Create and send PIN now'}</button>${pin ? `<button class="btn sm" data-act="pin-send" data-mode="new" data-id="${ev.id}">New PIN</button>` : ''}</span></div>
+      <span class="seg"><button class="btn sm" data-act="pin-send" data-mode="send" data-id="${ev.id}">${pin ? 'Send the PIN again' : 'Create and send PIN now'}</button>${pin ? `<button class="btn sm" data-act="pin-send" data-mode="new" data-id="${ev.id}">New PIN</button>` : ''}${pin && info.state === 'closed' ? `<button class="btn sm" data-act="pin-send" data-mode="reopen" data-id="${ev.id}" title="Keeps the same code, just gives it a fresh window">Reopen window</button>` : ''}</span></div>
     ${pin ? `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin:6px 0 4px"><div class="pin-code" aria-label="PIN">${esc(pin.code)}</div>
         <div class="small muted">Created ${fmtShort(pin.at)} (${esc(pin.by)}).<br>Players can enter it until ${fmtTime(info.closesAt)}. ${info.state === 'open' ? '<span class="ok-text">Open now.</span>' : 'Closed.'}<br>${entered} ${entered === 1 ? 'character has' : 'characters have'} entered it.</div></div>
       <ul class="sent">${(pin.sent || []).map((r) => `<li class="${r.ok ? 'yes' : 'fail'}">${r.ok ? 'Sent to' : 'Not delivered to'} <b>${esc(r.name)}</b> <span class="muted">(${esc(r.why)})</span>${r.ok ? '' : ` - ${esc(r.error)}`}</li>`).join('') || '<li class="muted">Nobody to send it to yet.</li>'}</ul>`
       : ev.pinEnabled
         ? `<div class="muted small">It will be created ${st.pinOffsetMinutes === 0 ? 'when the event starts' : `${Math.abs(st.pinOffsetMinutes)} minutes ${st.pinOffsetMinutes > 0 ? 'after the start' : 'before the start'}`} (around ${fmtTime(info.scheduledAt)}) and sent by Discord to the party leaders and the leadership. Change this in Admin.</div>`
         : `<div class="muted small">The PIN is switched off for this event (see "Attendance PIN" below) - nothing is sent automatically, but you can still create and send one by hand with the button above.</div>`}
-    <div class="small" style="margin-top:12px"><span class="muted">Reminders for players who have not answered:</span> ${!st.remindersEnabled ? 'switched off in Admin' : ev.reminders === false ? 'off for this event' : (st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set')}.
-      ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>
+    <div class="small" style="margin-top:12px">
+      <div class="ev-title"><span class="muted">Reminders for players who have not answered:</span> ${new Date(ev.start) > new Date() ? `<button class="btn sm" data-act="reminder-send" data-id="${ev.id}">Send reminder now</button>` : ''}</div>
+      <div class="muted" style="margin-top:2px">${!st.remindersEnabled ? 'Automatic reminders are switched off in Admin' : ev.reminders === false ? 'Automatic reminders are off for this event' : `Automatic: ${st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set'}`}.</div>
+      ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.manual ? `(sent by ${esc(l.by)})` : l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>
   </div>`;
 }
 
@@ -880,20 +894,23 @@ function memberMenu(m, at, o) {
   </div></details>`;
 }
 
-// One member row. Shows role colour, party-leader crown, and "Class | Specialization".
+// One member row. Shows role colour, party-leader crown, class (with its weapon icons), and - on its own line
+// below, so a long one has room to actually be read instead of getting crushed into "Class | Spec..." - the
+// specialization.
 function memberRow(m, at, o) {
   const off = isOfficer();
   const eff = effectiveBuild(m, o.from === 'party' ? (o.parties || [])[o.i] : null);     // the class this player plays in this party
   const cls = classFor(eff.primaryWeapon, eff.secondaryWeapon);
   const wpns = [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean);
   const icons = wpns.length ? `<span class="wicons">${wpns.map(weaponIcon).join('')}</span>` : '';
-  // Already-safe HTML either way (weapon names and the class/specialization text are both escaped here), so
-  // the render below must not escape this a second time - that would show the icon markup as literal text.
-  const meta = `${icons}${cls ? esc([cls, eff.specialization].filter(Boolean).join(' | ')) : wpns.map((n) => esc(n)).join(' / ')}`;
+  // Already-safe HTML either way (weapon names, the class and the specialization are all escaped here), so the
+  // render below must not escape this a second time - that would show the icon markup as literal text.
+  const meta = `${icons}${cls ? `<span class="cls">${esc(cls)}</span>` : wpns.map((n) => esc(n)).join(' / ')}`;
+  const spec = eff.specialization ? `<div class="mspec spec">${esc(eff.specialization)}</div>` : '';
   const tag = o.ev && o.from === 'pool' ? (o.ev.rsvps[m.id] === 'yes' ? 'going' : '') : '';
   return `<div class="mrow ${o.dim ? 'not-attending' : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${o.dim ? ' (not confirmed for this event)' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}
-    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div></div>
+    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div>${spec}</div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
@@ -1428,7 +1445,8 @@ document.addEventListener('click', async (e) => {
   else if (a === 'loot-give') { UI.lootMember = d.id; }
   else if (a === 'test-dm') act(async () => { const r = await api('/api/admin/test-dm', 'POST', {}); if (!r.ok) throw new Error(r.error || 'The message could not be sent.'); toast('Test message sent. Check your Discord messages.'); });
   else if (a === 'link-owner') act(async () => { const r = await api('/api/admin/link-owner', 'POST', { from: d.from, to: $('#lk-' + d.i).value }); toast(`${r.moved} characters linked`); });
-  else if (a === 'pin-send') act(() => api(`/api/events/${d.id}/pin/send`, 'POST', { mode: d.mode }), d.mode === 'new' ? 'New PIN created and sent' : 'PIN sent');
+  else if (a === 'pin-send') act(() => api(`/api/events/${d.id}/pin/send`, 'POST', { mode: d.mode }), d.mode === 'new' ? 'New PIN created and sent' : d.mode === 'reopen' ? 'PIN window reopened' : 'PIN sent');
+  else if (a === 'reminder-send') act(() => api(`/api/events/${d.id}/reminders/send`, 'POST', {}), 'Reminder sent');
   else if (a === 'loot-proof') act(() => api(`/api/loot/${d.id}/proof`, 'PUT', { confirmed: d.on === '1' }), d.on === '1' ? 'Proof of use confirmed' : 'Confirmation removed');
   else if (a === 'loot-edit') lootDialog(byId(S.loot, d.id));
   else if (a === 'loot-delete') { if (confirm('Delete this loot entry?')) act(async () => { await api('/api/loot/' + d.id, 'DELETE'); closeDialog(); }, 'Entry deleted'); }
@@ -1660,11 +1678,34 @@ function vodReviewSubtitle(v) {
   const visText = v.visibility === 'everyone' ? 'Shared with everyone' : v.visibility === 'class' ? `Shared with ${esc(v.visibleClass)}` : 'Private';
   return `${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''} · ${visText}`;
 }
+// A small checkmark next to the title wherever the VOD is listed or opened - the same "someone has looked at
+// this" signal the event badge gives, not shown at all for a spectator/overview recording (see vodReviewsPanelHtml).
+function vodReviewedBadge(v) { return (Array.isArray(v.reviews) && v.reviews.length) ? '<span class="vod-reviewed-badge" title="Review finished">✓</span>' : ''; }
+function vodReviewEntryHtml(v, r) {
+  return `<div class="vod-review-entry">
+    <div class="vod-review-entry-head"><b>${esc(r.byName)}</b> <span class="muted small">${esc(fmtShort(r.at))}${r.editedAt ? ' · edited' : ''}</span></div>
+    <div class="vod-review-entry-note">${esc(r.note)}</div>
+    ${r.canEdit ? `<div class="link-row" style="margin-top:4px">
+      <button type="button" class="btn sm" data-act="vod-review-edit" data-vod-id="${v.id}" data-review-id="${r.id}">Edit</button>
+      <button type="button" class="btn sm" data-act="vod-review-resend" data-vod-id="${v.id}" data-review-id="${r.id}">Resend</button>
+    </div>` : ''}
+  </div>`;
+}
+// Pulled out of viewVodReview, same as vodMarkerPanelHtml, so it can be patched in place on its own (see
+// vodPatchReview). Not offered at all on a spectator recording - that is not really any one player's review to
+// finish (see canReviewVod server-side).
+function vodReviewsPanelHtml(v) {
+  if (v.spectator) return '';
+  const reviews = Array.isArray(v.reviews) ? v.reviews : [];
+  return `<h3 style="margin-top:0">Review${reviews.length ? vodReviewedBadge(v) : ''}</h3>
+    ${reviews.length ? `<div class="vod-review-list">${reviews.map((r) => vodReviewEntryHtml(v, r)).join('')}</div>` : '<div class="empty">Not reviewed yet.</div>'}
+    ${v.canReview ? `<button type="button" class="btn sm primary" style="margin-top:10px" data-act="vod-review-open" data-id="${v.id}">${reviews.length ? 'Add review' : 'Finish review'}</button>` : ''}`;
+}
 function viewVodReview(id) {
   const v = (S.vods || []).find((x) => x.id === Number(id));
   if (!v) return `<div class="page-head"><h1>VOD not found</h1></div><div class="empty">This VOD may have been deleted, or you may not have access to it.</div>`;
   return `
-  <div class="page-head"><div><h1 id="vod-review-title">${esc(v.title)}</h1><div class="muted" id="vod-review-sub">${vodReviewSubtitle(v)}</div></div>
+  <div class="page-head"><div><h1 id="vod-review-title">${esc(v.title)}${vodReviewedBadge(v)}</h1><div class="muted" id="vod-review-sub">${vodReviewSubtitle(v)}</div></div>
     <a href="#/vods" class="btn sm">← Back to VODs</a></div>
   <div class="vod-review-grid">
     <div class="panel">
@@ -1688,6 +1729,7 @@ function viewVodReview(id) {
         <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" required></textarea></div>
         <div class="link-row"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
       </form>` : ''}
+      ${vodReviewsPanelHtml(v) ? `<div class="panel vod-review-panel" style="margin-top:12px">${vodReviewsPanelHtml(v)}</div>` : ''}
     </div>
     <div class="panel vod-marker-panel">${vodMarkerPanelHtml(v)}</div>
   </div>`;
@@ -1704,10 +1746,11 @@ function viewVodReview(id) {
 function vodPatchReview(id) {
   const v = (S.vods || []).find((x) => x.id === Number(id));
   if (!v) { $('#main').innerHTML = VIEWS['vods'](id); window.__vodReviewId = null; for (const h of AFTER_RENDER) h('vods'); return; }
-  const title = $('#vod-review-title'), sub = $('#vod-review-sub'), panel = document.querySelector('.vod-marker-panel');
-  if (title) title.textContent = v.title;
+  const title = $('#vod-review-title'), sub = $('#vod-review-sub'), panel = document.querySelector('.vod-marker-panel'), reviewPanel = document.querySelector('.vod-review-panel');
+  if (title) title.innerHTML = `${esc(v.title)}${vodReviewedBadge(v)}`;
   if (sub) sub.innerHTML = vodReviewSubtitle(v);
   if (panel) panel.innerHTML = vodMarkerPanelHtml(v);
+  if (reviewPanel) reviewPanel.innerHTML = vodReviewsPanelHtml(v);
 }
 // A transparent canvas sitting over the player - open to anyone watching, for sketching over the paused video
 // while talking it through on Discord voice. Nothing here is saved on its own; it only becomes permanent if a
@@ -1962,7 +2005,7 @@ function vodRow(v) {
   const selfOnly = !!v.promoteOwnClassOnly;
   return `<div class="rule-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
     <div style="flex:1;min-width:220px">
-      <a href="#/vods/${v.id}" class="plain"><b>${esc(v.title)}</b></a>
+      <a href="#/vods/${v.id}" class="plain"><b>${esc(v.title)}</b>${vodReviewedBadge(v)}</a>
       <a href="${esc(v.url)}" target="_blank" rel="noopener" class="muted small" style="margin-left:6px">Open on YouTube ↗</a>
       <div class="muted small">${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''}</div>
     </div>
@@ -2026,6 +2069,32 @@ FORMS['vod-marker'] = (f, fd) => act(async () => {
 }, 'Coaching point saved');
 FORMS['vod-vis'] = (f, fd, id) => act(() => api(`/api/vods/${id}`, 'PUT', { visibility: fd.visibility, visibleClass: fd.visibleClass }), 'Saved');
 ACTIONS['vod-delete'] = (el, d) => { if (confirm('Delete this VOD? This also removes any saved screenshots from it.')) act(() => api('/api/vods/' + d.id, 'DELETE'), 'Deleted'); };
+// "Finished review" / "Add review": a coach or officer declaring themselves done (or a second one adding to an
+// already-finished review) types one overall note, which DMs the player - the per-timestamp coaching points
+// above are for pointing at exact moments, this is the wrap-up.
+function vodReviewDialog(vodId) {
+  const v = (S.vods || []).find((x) => x.id === Number(vodId));
+  if (!v) return;
+  const already = Array.isArray(v.reviews) && v.reviews.length;
+  openDialog(`<form data-form="vod-review" data-id="${v.id}"><h2>${already ? 'Add review' : 'Finish review'}</h2>
+      <div class="muted small" style="margin:-4px 0 10px">${already ? 'Adds another review note and DMs the player again.' : 'Lets the player know their VOD has been reviewed.'}${(v.markers || []).length ? ` There ${(v.markers || []).length === 1 ? 'is' : 'are'} ${(v.markers || []).length} coaching point${(v.markers || []).length === 1 ? '' : 's'} on this VOD.` : ''}</div>
+      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" placeholder="What should they take away from this?" required autofocus></textarea></div>
+      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">${already ? 'Add review' : 'Finish review'}</button></div>
+    </form>`);
+}
+ACTIONS['vod-review-open'] = (el, d) => vodReviewDialog(d.id);
+ACTIONS['vod-review-edit'] = (el, d) => {
+  const v = (S.vods || []).find((x) => x.id === Number(d.vodId));
+  const r = v && (v.reviews || []).find((x) => x.id === Number(d.reviewId));
+  if (!r) return;
+  openDialog(`<form data-form="vod-review-edit" data-id="${d.vodId}" data-review-id="${d.reviewId}"><h2>Edit review note</h2>
+      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" required autofocus>${esc(r.note)}</textarea></div>
+      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
+    </form>`);
+};
+ACTIONS['vod-review-resend'] = (el, d) => act(() => api(`/api/vods/${d.vodId}/reviews/${d.reviewId}/resend`, 'POST'), 'Resent');
+FORMS['vod-review'] = (f, fd, id) => act(async () => { await api(`/api/vods/${id}/reviews`, 'POST', { note: fd.note }); closeDialog(); }, 'Review sent');
+FORMS['vod-review-edit'] = (f, fd, id) => act(async () => { await api(`/api/vods/${id}/reviews/${f.dataset.reviewId}`, 'PUT', { note: fd.note }); closeDialog(); }, 'Saved');
 CHANGES['loot-type'] = (el) => {
   const lu = el.value === 'Lucent', item = $('#lf-item-field'), amt = $('#lf-amt-field');
   item.classList.toggle('off', lu); amt.classList.toggle('off', !lu);

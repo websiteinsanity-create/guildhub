@@ -25,9 +25,9 @@ async function startServer() {
     return { status: res.status, body: await res.json().catch(() => null) };
   };
   const login = async (name, code) => (await call('/api/login', 'POST', { name, passcode: code })).body.token;
-  return { base, call, officer: await login('Boss', 'o1'), member: await login('Zed', 'm1'), stop: () => { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { base, call, officer: await login('Boss', 'o1'), member: await login('Zed', 'm1'), stop: async () => { proc.kill(); await new Promise((r) => proc.once('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
-const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { s.stop(); } });
+const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { await s.stop(); } });
 const audit = (s, qs = '') => s.call('/api/admin/audit' + qs, 'GET', null, s.officer).then((r) => r.body);
 const last = (entries, action) => entries.find((e) => e.action === action);
 
