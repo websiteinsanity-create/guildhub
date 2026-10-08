@@ -1669,7 +1669,7 @@ function vodMarkerPanelHtml(v) {
   return `<h3 style="margin-top:0">Coaching points <span class="muted small">(${markers.length})</span></h3>
       ${markers.length ? `<div class="vod-marker-list">${markers.map((m) => `<div class="vod-marker" data-marker-row="${m.id}">
         <button type="button" class="vod-marker-jump" data-act="vod-marker-jump" data-marker-id="${m.id}" title="Jump to ${fmtVodTimestamp(m.timestamp)}">
-          <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)}</span><span class="vod-marker-note">${esc(m.note)}</span>
+          <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)} <span class="muted small" style="font-weight:400">${esc(m.createdByName || m.createdBy)}</span></span><span class="vod-marker-note">${esc(m.note)}</span>
         </button>
         ${v.canManage ? `<button type="button" class="btn sm danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete</button>` : ''}
       </div>`).join('')}</div>` : '<div class="empty">No coaching points yet.</div>'}`;

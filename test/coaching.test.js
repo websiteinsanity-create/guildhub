@@ -258,6 +258,8 @@ test('VOD coaching points save an exact timestamp, an optional persisted drawing
   assert.equal(created.body.beforeSeconds, 3);
   assert.equal(created.body.afterSeconds, 5);
   assert.deepEqual(created.body.strokes, strokes);
+  assert.equal(created.body.createdBy, COACH, 'who added it is recorded, not just the note itself');
+  assert.equal(created.body.createdByName, COACH, "resolved to a display name where one exists - here there is no character or guest-coach record for this id, so it falls back to the raw id, same as a review's byName would");
 
   // a plain note with nothing drawn is just as valid - strokes are optional, only the note is required
   const plain = await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 10, note: 'Just a reminder, nothing drawn.' }, 'coach');
@@ -269,6 +271,7 @@ test('VOD coaching points save an exact timestamp, an optional persisted drawing
   assert.equal(coachVod.markers.length, 2);
   assert.equal(coachVod.markers[0].note, 'Just a reminder, nothing drawn.', 'sorted by timestamp');
   assert.deepEqual(coachVod.markers[1].strokes, strokes);
+  assert.ok(coachVod.markers.every((m) => m.createdByName), 'every coaching point says who added it, to whoever is looking (not just the author)');
 
   assert.equal((await call(`/api/vods/${v.id}/markers/${created.body.id}`, 'PUT', { timestamp: 764, beforeSeconds: 2, afterSeconds: 2, note: 'Updated.', strokes }, 'student')).status, 200);
   const updated = (await state('student')).vods.find((x) => x.id === v.id).markers.find((m) => m.id === created.body.id);
