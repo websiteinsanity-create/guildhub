@@ -534,15 +534,23 @@ details.usepreset[open] { padding-bottom: 14px; }
 .events-layout .cal-cell { min-height: 130px; }
 @media (max-width: 1180px) { .events-layout { grid-template-columns: 1fr; } .ev-side { position: static; max-height: none; } }
 
-/* Whole-background colour, not just a tinted border: greyed out (the plain default look) with no answer yet,
-   green once you are going (whether that is just your own RSVP or the leadership's later recorded attendance),
-   orange if you said you are not coming. No-show (said Going, but not recorded once the event passed) keeps its
-   own red - a real problem, not the same thing as plainly declining - rather than being folded into either. */
+/* A soft background tint (the corner badge below carries the actual meaning now, so the colour only needs to
+   be a quiet hint, not the whole story) - greyed out (the plain default look) with no answer yet, green once
+   you are going (whether that is just your own RSVP or the leadership's later recorded attendance), orange if
+   you said you are not coming. No-show (said Going, but not recorded once the event passed) keeps its own red -
+   a real problem, not the same thing as plainly declining - rather than being folded into either. */
 [data-st="attended"], [data-st="going"] { --sc: #6fcf8b; } [data-st="noshow"] { --sc: #e2685c; } [data-st="declined"] { --sc: #eba23c; }
-.cal-ev:not([data-st=""]), .wk-ev:not([data-st=""]) { background: color-mix(in srgb, var(--sc) 55%, var(--panel-2)); border-left-color: var(--sc); }
+.cal-ev:not([data-st=""]), .wk-ev:not([data-st=""]) { background: color-mix(in srgb, var(--sc) 20%, var(--panel-2)); border-left-color: var(--sc); }
 .cal-ev[data-st="declined"], .wk-ev[data-st="declined"] { opacity: .85; }
-.cal-ev:not([data-st=""]) .ttl, .wk-ev:not([data-st=""]) .ttl { color: #fff; }
-.cal-ev:not([data-st=""]) .tm, .wk-ev:not([data-st=""]) .sub { color: rgba(255,255,255,.8); }
+/* The check/cross corner badge - the actual "are you in or out" signal, with the tint behind it now just a
+   quiet backdrop. Positioned inside the card's own corner (not hanging off the edge) so it never gets clipped
+   or overlaps the chip above it in a packed month cell. */
+/* Week view only - the month grid's chips are a single tight row with no room for a badge without either
+   clipping it or crowding out the title (see monthChip's comment in app.js), so the tint alone carries the
+   signal there. */
+.wk-ev { position: relative; }
+.wk-ev:not([data-st=""]) { padding-right: 24px; }
+.stbadge { position: absolute; top: 6px; right: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--sc); color: #1b1418; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
 .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 5px; }
 .status-legend { border-top: 0; padding-top: 0; align-items: center; }
 .st-key { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
