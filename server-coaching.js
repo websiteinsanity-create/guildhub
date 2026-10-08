@@ -76,7 +76,7 @@ module.exports = function install(ctx) {
   // A coaching point: a note pinned to an exact moment in the VOD, with an optional drawing that reappears on
   // its own during playback for a short window around that moment (see syncVodMarkerDisplay client-side) -
   // distinct from the live drawing overlay, which is never saved. Anyone who can manage the VOD can add one.
-  function markerForClient(m) { return { ...m, strokes: Array.isArray(m.strokes) ? m.strokes : [] }; }
+  function markerForClient(m) { return { ...m, strokes: Array.isArray(m.strokes) ? m.strokes : [], createdByName: reviewerName(m.createdBy) }; }
   function cleanMarker(body) {
     const timestamp = Number(body.timestamp);
     const before = Number(body.beforeSeconds === undefined ? 2 : body.beforeSeconds);
