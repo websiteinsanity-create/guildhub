@@ -38,7 +38,13 @@ async function startServer(seedDb) {
     proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
   });
 }
-function stopServer() { proc && proc.kill(); fake && fake.close(); dir && fs.rmSync(dir, { recursive: true, force: true }); }
+// Waits for the process to actually exit before clearing its data directory - it now flushes a final save on
+// SIGTERM (see server.js), so deleting the directory out from under that write would be a race.
+async function stopServer() {
+  if (proc) { proc.kill(); await new Promise((r) => proc.once('exit', r)); }
+  fake && fake.close();
+  dir && fs.rmSync(dir, { recursive: true, force: true });
+}
 
 // Walks through the OAuth redirect exactly like a browser would and returns the session cookie.
 async function discordLogin(id, roles = [], { state: forceState, authQuery = '' } = {}) {
@@ -280,6 +286,38 @@ test('reminders go only to players who have not answered, at the editable times'
   const later = (await call('/api/events', 'POST', { title: 'Reminder test disabled', type: 'Other', start: inMinutes(180) }, 'A')).body;
   await sleep(1000);
   assert.equal(dmsFor('Reminder test disabled').length, 0);
+  await call('/api/settings', 'PUT', { remindersEnabled: true }, 'A');
+});
+
+test('an officer can send a reminder by hand, any time, regardless of the automatic schedule', async () => {
+  const cee = (await state('A')).members.find((m) => m.name === 'Cee');
+  assert.equal((await call('/api/settings', 'PUT', { remindersEnabled: false }, 'A')).status, 200);   // automatic reminders fully off
+  const ev = (await call('/api/events', 'POST', { title: 'Manual reminder test', type: 'Other', start: inMinutes(180), reminders: false }, 'A')).body;   // also off for this one event
+  await call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: cee.id, status: 'yes' }, 'C');   // C has answered, B and D have not
+
+  assert.equal((await call(`/api/events/${ev.id}/reminders/send`, 'POST', {}, 'B')).status, 403, 'only an officer can press the button');
+
+  const dmsFor = (title) => fake.state.dms.filter((d) => d.content.includes(title));
+  const sent = await call(`/api/events/${ev.id}/reminders/send`, 'POST', {}, 'A');
+  assert.equal(sent.status, 200);
+  const dms = dmsFor('Manual reminder test');
+  assert.deepEqual(dms.map((d) => d.to).sort(), [B, D].sort(), 'only those who have not answered get one, same as the automatic reminders');
+  assert.ok(dms.every((d) => d.content.includes('Reminder:')), 'not numbered like the automatic schedule - this one has no N/M of its own');
+
+  const officerName = (await state('A')).user.name;
+  const log = (await state('A')).events.find((e) => e.id === ev.id).reminderLog;
+  assert.equal(log.length, 1);
+  assert.equal(log[0].manual, true);
+  assert.equal(log[0].by, officerName);
+  assert.equal(log[0].sent, 2);
+
+  // pressing it again sends another round - it is not a one-shot like the automatic schedule
+  await call(`/api/events/${ev.id}/reminders/send`, 'POST', {}, 'A');
+  assert.equal((await state('A')).events.find((e) => e.id === ev.id).reminderLog.length, 2);
+
+  const past = (await call('/api/events', 'POST', { title: 'Manual reminder on a past event', type: 'Other', start: inMinutes(-5) }, 'A')).body;
+  assert.equal((await call(`/api/events/${past.id}/reminders/send`, 'POST', {}, 'A')).status, 409, 'cannot nudge people about an event that has already started');
+
   await call('/api/settings', 'PUT', { remindersEnabled: true }, 'A');
 });
 

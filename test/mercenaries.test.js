@@ -33,7 +33,13 @@ async function startServer() {
     proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
   });
 }
-function stopServer() { proc && proc.kill(); fake && fake.close(); dir && fs.rmSync(dir, { recursive: true, force: true }); }
+// Waits for the process to actually exit before clearing its data directory - it now flushes a final save on
+// SIGTERM (see server.js), so deleting the directory out from under that write would be a race.
+async function stopServer() {
+  if (proc) { proc.kill(); await new Promise((r) => proc.once('exit', r)); }
+  fake && fake.close();
+  dir && fs.rmSync(dir, { recursive: true, force: true });
+}
 
 // Walks the OAuth redirect like a browser, optionally as a mercenary-signup attempt (?merc=1), and returns the
 // session cookie plus where the callback ultimately sent the browser (so a rejection can be told apart from a

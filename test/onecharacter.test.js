@@ -26,9 +26,9 @@ async function startServer(seedDb) {
     return { status: res.status, body: await res.json().catch(() => null) };
   };
   const login = async (name, code) => (await call('/api/login', 'POST', { name, passcode: code })).body.token;
-  return { base, call, officer: await login('Boss', 'o1'), zed: await login('Zed', 'm1'), stop: () => { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { base, call, officer: await login('Boss', 'o1'), zed: await login('Zed', 'm1'), stop: async () => { proc.kill(); await new Promise((r) => proc.once('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
-const withServer = (name, fn, seed) => test(name, async () => { const s = await startServer(seed); try { await fn(s); } finally { s.stop(); } });
+const withServer = (name, fn, seed) => test(name, async () => { const s = await startServer(seed); try { await fn(s); } finally { await s.stop(); } });
 const state = async (s, who) => (await s.call('/api/state', 'GET', null, s[who])).body;
 
 withServer('a member cannot create a second character themselves, and a helpful message explains why', async (s) => {

@@ -42,7 +42,13 @@ async function startServer() {
     proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
   });
 }
-function stopServer() { proc && proc.kill(); fake && fake.close(); dir && fs.rmSync(dir, { recursive: true, force: true }); }
+// Waits for the process to actually exit before clearing its data directory - it now flushes a final save on
+// SIGTERM (see server.js), so deleting the directory out from under that write would be a race.
+async function stopServer() {
+  if (proc) { proc.kill(); await new Promise((r) => proc.once('exit', r)); }
+  fake && fake.close();
+  dir && fs.rmSync(dir, { recursive: true, force: true });
+}
 async function discordLogin(id, roles) {
   fake.state.guildMembers[id] = { roles };
   const start = await fetch(base + '/auth/discord', { redirect: 'manual' });
@@ -373,4 +379,78 @@ test('a member can promote their own VOD straight to "everyone" or to their own 
   assert.equal((await call(`/api/vods/${v.id}`, 'PUT', { visibility: 'class' }, 'other')).status, 200);
   assert.ok((await state('other')).vods.some((x) => x.id === v.id));
   assert.ok(!(await state('student')).vods.some((x) => x.id === v.id), 'student plays Scorpion, not Oracle - no longer visible to them');
+});
+
+test('only a coach or officer can finish a review, never the VOD\'s own owner, and never on a spectator recording', async () => {
+  await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer').catch(() => {});
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck001', type: 'Siege', recordedDate: '2026-10-02' }, 'student')).body;
+  assert.equal((await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'nice work' }, 'student')).status, 403, 'the owner cannot finish their own review');
+  assert.equal((await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'nice work' }, 'other')).status, 403, 'an unrelated player cannot either');
+  assert.equal((await call(`/api/vods/${v.id}/reviews`, 'POST', { note: '' }, 'coach')).status, 400, 'a note is required');
+
+  const spectatorVod = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck002', type: 'Siege', recordedDate: '2026-10-02', spectator: true }, 'student')).body;
+  assert.equal((await call(`/api/vods/${spectatorVod.id}/reviews`, 'POST', { note: 'nope' }, 'coach')).status, 403, "a spectator recording is not any one player's review to finish");
+  assert.equal((await state('coach')).vods.find((x) => x.id === spectatorVod.id).canReview, false);
+});
+
+test('finishing a review DMs the player, mentions any coaching points, and a second reviewer adds to an already-finished review instead of overwriting it', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck010', type: 'Siege', recordedDate: '2026-10-03' }, 'student')).body;
+  await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 5, note: 'watch your dash' }, 'coach');
+
+  fake.state.dms.length = 0;
+  const r1 = await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'Solid rotation, work on positioning.' }, 'coach');
+  assert.equal(r1.status, 200);
+  const dm1 = await waitFor(() => fake.state.dms.find((d) => d.to === STUDENT));
+  assert.ok(dm1.content.includes('finished reviewing'));
+  assert.ok(dm1.content.includes('1 coaching point'));
+  assert.ok(dm1.content.includes('Solid rotation'));
+
+  let vod = (await state('student')).vods.find((x) => x.id === v.id);
+  assert.equal(vod.reviews.length, 1);
+
+  // a second reviewer (here, an officer - who can review anything) adds to the already-finished review; an
+  // "add-on", not a replacement, and the earlier entry is untouched
+  fake.state.dms.length = 0;
+  const r2 = await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'Agreed, also watch your cooldown usage.' }, 'officer');
+  assert.equal(r2.status, 200);
+  const dm2 = await waitFor(() => fake.state.dms.find((d) => d.to === STUDENT));
+  assert.ok(dm2.content.includes('added more to the review'));
+
+  vod = (await state('student')).vods.find((x) => x.id === v.id);
+  assert.equal(vod.reviews.length, 2, 'both entries are kept, nothing is overwritten');
+  assert.equal(vod.reviews[0].note, 'Solid rotation, work on positioning.');
+
+  // a new coaching point added afterwards does not unmark the review as finished
+  await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 20, note: 'another spot' }, 'coach');
+  assert.equal((await state('student')).vods.find((x) => x.id === v.id).reviews.length, 2);
+});
+
+test('only the coach or officer who wrote a particular review entry can edit or resend it - not even another officer, and not the VOD\'s own owner', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck020', type: 'Siege', recordedDate: '2026-10-04' }, 'student')).body;
+  const created = (await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'First pass.' }, 'coach')).body;
+
+  assert.equal((await state('coach')).vods.find((x) => x.id === v.id).reviews[0].canEdit, true);
+  assert.equal((await state('officer')).vods.find((x) => x.id === v.id).reviews[0].canEdit, false, 'not even an officer sees edit controls on another coach\'s entry');
+
+  assert.equal((await call(`/api/vods/${v.id}/reviews/${created.id}`, 'PUT', { note: 'edited' }, 'officer')).status, 403, 'not even an officer may edit another coach\'s entry');
+  assert.equal((await call(`/api/vods/${v.id}/reviews/${created.id}`, 'PUT', { note: 'edited' }, 'student')).status, 403, "nor the VOD's own owner");
+  assert.equal((await call(`/api/vods/${v.id}/reviews/${created.id}/resend`, 'POST', null, 'officer')).status, 403);
+
+  const edited = await call(`/api/vods/${v.id}/reviews/${created.id}`, 'PUT', { note: 'First pass, revised.' }, 'coach');
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.note, 'First pass, revised.');
+
+  fake.state.dms.length = 0;
+  assert.equal((await call(`/api/vods/${v.id}/reviews/${created.id}/resend`, 'POST', null, 'coach')).status, 200);
+  const dm = await waitFor(() => fake.state.dms.find((d) => d.to === STUDENT));
+  assert.ok(dm.content.includes('updated their review note'), 'a resend of an edited entry gets the "updated" wording');
+  assert.ok(dm.content.includes('First pass, revised.'));
+
+  // a resend of an entry that was never edited does not claim it was "updated"
+  const v2 = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck021', type: 'Siege', recordedDate: '2026-10-05' }, 'student')).body;
+  const created2 = (await call(`/api/vods/${v2.id}/reviews`, 'POST', { note: 'Looks good.' }, 'coach')).body;
+  fake.state.dms.length = 0;
+  await call(`/api/vods/${v2.id}/reviews/${created2.id}/resend`, 'POST', null, 'coach');
+  const dm2 = await waitFor(() => fake.state.dms.find((d) => d.to === STUDENT));
+  assert.ok(!dm2.content.includes('updated their review note'));
 });
