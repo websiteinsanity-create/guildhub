@@ -9,6 +9,23 @@ Object.assign(UI, { attQ: '', attRole: '', attDays: '30', attMand: false, attBan
 const wdOrder = () => { const ws = S.cfg.weekStartsOn ?? 1; return Array.from({ length: 7 }, (_, i) => (ws + i) % 7); };
 const wdName = (n, long) => new Date(2024, 0, 7 + n).toLocaleDateString('en-US', { weekday: long ? 'long' : 'short' });
 const tzShort = (tz) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName').value; } catch { return tz; } };
+// The full list (config.json's timezones, well over a hundred entries once every Europe/Asia zone is in it) is
+// unusable as one flat, alphabetical dropdown - grouping it by continent (the part of the zone id before the
+// slash) the same way every OS/phone timezone picker does makes picking a real country's zone actually findable.
+// "current" (whatever is already selected, even a since-removed zone) is always included so an existing choice
+// is never silently dropped from its own picker.
+const TZ_GROUP_LABEL = { Europe: 'Europe', Asia: 'Asia', America: 'Americas', Australia: 'Australia', Africa: 'Africa', Pacific: 'Pacific', Atlantic: 'Atlantic', Indian: 'Indian Ocean' };
+const TZ_GROUP_ORDER = ['Other', 'Europe', 'Asia', 'Americas', 'Africa', 'Australia', 'Pacific', 'Atlantic', 'Indian Ocean'];
+function tzOptionsHtml(zones, current) {
+  const list = [...new Set([current, ...zones])].filter(Boolean);
+  const groups = {};
+  for (const z of list) {
+    const label = TZ_GROUP_LABEL[z.includes('/') ? z.split('/')[0] : ''] || 'Other';
+    (groups[label] ??= []).push(z);
+  }
+  const labels = Object.keys(groups).sort((a, b) => { const ai = TZ_GROUP_ORDER.indexOf(a), bi = TZ_GROUP_ORDER.indexOf(b); return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi); });
+  return labels.map((label) => `<optgroup label="${esc(label)}">${groups[label].map((z) => `<option value="${esc(z)}" ${z === current ? 'selected' : ''}>${esc(z)} (${esc(tzShort(z))})</option>`).join('')}</optgroup>`).join('');
+}
 function seriesText(se) {
   const days = se.weekdays.map((n) => wdName(n)).join(', ');
   return `${se.intervalWeeks > 1 ? `Every ${se.intervalWeeks} weeks on` : 'Every'} ${days} at ${se.time} (${tzShort(se.tz)})`;
@@ -40,7 +57,7 @@ function seriesDialog(se) {
     <div class="field"><label>On these days</label><div class="wd">${wdOrder().map((n) => `<label class="wdbox"><input type="checkbox" name="wd" value="${n}" ${se.weekdays.includes(n) ? 'checked' : ''}> ${wdName(n)}</label>`).join('')}</div></div>
     <div class="row">
       <div class="field"><label>At (time)</label><input name="time" type="time" value="${esc(se.time)}" required></div>
-      <div class="field"><label>Time zone</label><select name="tz">${[...new Set([se.tz, ...S.cfg.timezones])].map((z) => `<option value="${esc(z)}" ${z === se.tz ? 'selected' : ''}>${esc(z)} (${esc(tzShort(z))})</option>`).join('')}</select></div>
+      <div class="field"><label>Time zone</label><select name="tz">${tzOptionsHtml(S.cfg.timezones, se.tz)}</select></div>
     </div>
     <div class="muted small" style="margin:-4px 0 10px">The time follows the time zone all year, so "21:00 Europe/Berlin" stays 21:00 there when the clocks change.</div>
     <div class="row">
@@ -138,7 +155,7 @@ function viewProfile(key) {
 
   ${own ? `<div class="panel"><h3>Time zone</h3>
     <div class="muted small" style="margin:-6px 0 10px">All times in the app (calendar, events, PIN windows) are shown in this time zone. Nobody else is affected.</div>
-    <form data-form="tzpref" class="link-row"><select name="timezone" aria-label="Time zone" style="min-width:260px">${[...new Set([TZ(), ...S.cfg.timezones])].map((z) => `<option value="${esc(z)}" ${z === TZ() ? 'selected' : ''}>${esc(z)} (${esc(tzShort(z))})</option>`).join('')}</select>
+    <form data-form="tzpref" class="link-row"><select name="timezone" aria-label="Time zone" style="min-width:260px">${tzOptionsHtml(S.cfg.timezones, TZ())}</select>
       <button class="btn primary">Save</button><span class="muted small">Now: ${esc(fmtTime(new Date().toISOString()))} ${esc(tzAbbr(Date.now()))}${S.prefs && S.prefs.timezone ? '' : ' (default)'}</span></form></div>` : ''}
 
   <div class="panel"><h3>Note</h3>
