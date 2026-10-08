@@ -119,18 +119,22 @@ const rankIdx = (r) => { const i = S.cfg.ranks.indexOf(r); return i < 0 ? 99 : i
 const balance = (id) => S.points.filter((p) => p.memberId === id).reduce((a, p) => a + p.delta, 0);
 // A member's list of attended events only holds their own characters, so "roll was taken" comes from the server.
 const rolled = (e) => (e.rollTaken !== undefined ? e.rollTaken : e.attended.length > 0);
-// My own outcome for an event, used to colour it in the calendar:
-//   attended (green) . no-show (red, after the event) . no reply (orange, after the event) . not attending (grey)
-const STATUS_TEXT = { attended: 'You were there', noshow: 'No-show: you said Going but were not recorded', noreply: 'You did not answer', declined: 'You are not attending' };
+// My own outcome for an event, used to colour its whole background in the calendar:
+//   grey (default, no data-st at all) - no answer yet, exactly how an event with nothing recorded has always looked
+//   green - going (either you said Going, or the leadership already recorded you as having attended)
+//   orange - not attending (you said Can't)
+//   red - a no-show: you said Going, but were not recorded as attending once the event passed - kept as its own
+//   distinct colour since it is a real problem, not just a plain "not coming"
+const STATUS_TEXT = { attended: 'You were there', going: 'You are attending', noshow: 'No-show: you said Going but were not recorded', declined: 'You are not attending' };
 function myStatus(e) {
   const ids = mine().map((m) => m.id);
   if (!ids.length) return '';
   if (ids.some((id) => e.attended.includes(id))) return 'attended';
   const answers = ids.map((id) => e.rsvps[id]), start = new Date(e.start).getTime();
   const over = start < Date.now() && rolled(e);                              // the leadership recorded who came, so the outcome is known
-  if (answers.includes('yes')) return over ? 'noshow' : '';
+  if (answers.includes('yes')) return over ? 'noshow' : 'going';
   if (answers.includes('no')) return 'declined';
-  return over && !onLeaveAt(S.user.key, start) ? 'noreply' : '';
+  return '';                                                                 // no answer at all - stays the plain default colour, whether or not the event has passed
 }
 // A starting attendance baseline decays away linearly, day by day, from cfg.events (split cfg.pct/100
 // attended) at cfg.fromDate down to nothing by cfg.days later - the same math server-side in
@@ -703,7 +707,7 @@ function viewEvents(selId) {
       <button class="btn sm" data-act="cal-next" aria-label="Next">Next</button></div>
     ${body}
     <div class="cal-legend">${S.cfg.eventTypes.map((t) => `<span class="chip" style="--c:${typeColor(t.name)}">${esc(t.name)}</span>`).join('')}<span class="small" style="display:inline-flex;align-items:center;gap:7px"><i class="mdot"></i>Mandatory event</span></div>
-    <div class="cal-legend status-legend"><span class="muted small">Your events:</span>${['attended', 'noshow', 'noreply', 'declined'].map((k) => `<span class="st-key" data-st="${k}"><i></i>${{ attended: 'You were there', noshow: 'No-show', noreply: 'No reply', declined: 'Not attending' }[k]}</span>`).join('')}</div>
+    <div class="cal-legend status-legend"><span class="muted small">Your events:</span>${['going', 'noshow', 'declined'].map((k) => `<span class="st-key" data-st="${k}"><i></i>${{ going: 'Attending', noshow: 'No-show', declined: 'Not attending' }[k]}</span>`).join('')}</div>
   </div>
   <aside class="ev-side" aria-label="Event window">${sel ? eventSide(sel) : '<div class="panel side-empty">Click an event in the calendar to see it here: your sign-up and the attendance PIN.</div>'}</aside>
   </div>
@@ -773,7 +777,7 @@ function eventSide(ev) {
     ${signupNote ? `<div class="muted small" style="margin:-4px 0 8px">${signupNote}</div>` : ''}
     ${myRows || `<div class="muted small">You have no active characters. <a href="#/profile" data-act="goto-add">Add one</a> to sign up.</div>`}
     ${others.length ? `<div class="rsvp-row"><select id="other-char" style="max-width:190px" aria-label="Sign up another character">${others.map((m) => `<option value="${m.id}">${esc(m.name)} (${esc(ownerName(m.owner))})</option>`).join('')}</select>
-      <span class="seg"><button class="btn sm" data-act="rsvp-other" data-s="yes" data-ev="${ev.id}">Going</button><button class="btn sm" data-act="rsvp-other" data-s="no" data-ev="${ev.id}">Can't</button></span></div>` : ''}
+      <span class="seg"><button class="btn sm" data-act="rsvp-other" data-s="yes" data-ev="${ev.id}">Attend</button><button class="btn sm" data-act="rsvp-other" data-s="no" data-ev="${ev.id}">Not attend</button></span></div>` : ''}
     ${pinSide(ev)}
   </div>`;
 }
@@ -850,7 +854,7 @@ function automationPanel(ev) {
 function rsvpRow(ev, m, locked) {
   const s = ev.rsvps[m.id] || 'none';
   const b = (val, label) => `<button class="btn sm ${s === val ? 'on' : ''}" ${locked ? 'disabled' : ''} data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="${s === val ? 'none' : val}">${label}</button>`;
-  return `<div class="rsvp-row"><span><b>${esc(m.name)}</b> ${roleChip(m.role)}${s === 'none' ? ' <span class="muted small">no answer yet</span>' : ''}</span><span class="seg">${b('yes', 'Going')}${b('no', "Can't")}</span></div>`;
+  return `<div class="rsvp-row"><span><b>${esc(m.name)}</b> ${roleChip(m.role)}${s === 'none' ? ' <span class="muted small">no answer yet</span>' : ''}</span><span class="seg">${b('yes', 'Attend')}${b('no', 'Not attend')}</span></div>`;
 }
 
 const CROWN = '<svg class="crown" viewBox="0 0 24 24" width="15" height="15" role="img" aria-label="Party leader"><path fill="currentColor" d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>';
