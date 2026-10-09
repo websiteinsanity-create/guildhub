@@ -3,7 +3,7 @@
    approvals, tags, attendance filters, the personalised dashboard and the extra Admin panels.
    They register themselves in VIEWS / ACTIONS / CHANGES / FORMS, which app.js reads. */
 
-Object.assign(UI, { attQ: '', attRole: '', attDays: '30', attMand: false, attBand: '', attSort: 'name', reqStatus: '', reqQ: '' });
+Object.assign(UI, { attQ: '', attRole: '', attDays: '14', attMand: false, attBand: '', attSort: 'name', reqStatus: '', reqQ: '' });
 
 /* ================= recurring events ================= */
 const wdOrder = () => { const ws = S.cfg.weekStartsOn ?? 1; return Array.from({ length: 7 }, (_, i) => (ws + i) % 7); };
@@ -294,6 +294,11 @@ VIEWS.requests = () => {
 };
 CHANGES['req-char'] = (el) => { const m = byId(S.members, el.value); $('#rq-b').innerHTML = m ? buildOptionsFor(m) : ''; };
 CHANGES['req-kind'] = (el) => { $('#rq-lucent').classList.toggle('hidden', el.value !== 'Lucent'); $('#rq-item').classList.toggle('hidden', el.value === 'Lucent'); };
+// Any number of days the guild wants, not just the fixed presets this used to offer - 14 is just the starting
+// point for a new session. "All time" disables the day box rather than clearing it, so flipping it back off
+// goes back to a sensible number instead of an empty field.
+CHANGES['att-days'] = (el) => { UI.attDays = String(Math.max(1, Math.min(3650, Math.round(Number(el.value)) || 14))); render(); };
+CHANGES['att-alltime'] = (el) => { UI.attDays = el.checked ? 'all' : '14'; render(); };
 FORMS.request = (f, fd) => act(async () => { await api('/api/requests', 'POST', fd); }, 'Request sent');
 ACTIONS['req-set'] = (el, d) => {
   const note = d.s === 'rejected' ? prompt('Reason for the player (optional)', '') : '';
@@ -461,7 +466,8 @@ VIEWS.points = () => {
   <div class="toolbar">
     ${off ? `<input type="search" placeholder="Search player, character or class" value="${esc(UI.attQ)}" data-ui="attQ" aria-label="Search">
     <select data-ui="attRole" aria-label="Role">${opts(S.cfg.roles, UI.attRole, 'All roles')}</select>` : ''}
-    <select data-ui="attDays" aria-label="Period">${[['7', 'Last 7 days'], ['14', 'Last 14 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['all', 'All time']].map(([v, l]) => `<option value="${v}" ${UI.attDays === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <label style="margin:0;display:flex;gap:6px;align-items:center"><span class="muted small">Last</span><input type="number" min="1" max="3650" data-act="att-days" value="${UI.attDays === 'all' ? '' : UI.attDays}" ${UI.attDays === 'all' ? 'disabled' : ''} style="width:76px" aria-label="Number of days"><span class="muted small">days</span></label>
+    <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-act="att-alltime" ${UI.attDays === 'all' ? 'checked' : ''}> All time</label>
     <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ui="attMand" ${UI.attMand ? 'checked' : ''}> Mandatory only</label>
     ${off ? `<select data-ui="attBand" aria-label="Attendance colour"><option value="">Any attendance</option><option value="red" ${UI.attBand === 'red' ? 'selected' : ''}>Red (0-${ls.redMax}%)</option><option value="orange" ${UI.attBand === 'orange' ? 'selected' : ''}>Orange (${ls.redMax + 1}-${ls.orangeMax}%)</option><option value="green" ${UI.attBand === 'green' ? 'selected' : ''}>Green (${ls.orangeMax + 1}-100%)</option></select>
     <select data-ui="attFlag" aria-label="Problems"><option value="">Everybody</option><option value="noshow" ${UI.attFlag === 'noshow' ? 'selected' : ''}>With no-shows</option><option value="noreply" ${UI.attFlag === 'noreply' ? 'selected' : ''}>With unanswered events</option></select>` : ''}

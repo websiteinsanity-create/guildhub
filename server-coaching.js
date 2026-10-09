@@ -305,7 +305,7 @@ module.exports = function install(ctx) {
     const v = {
       id: newId(), owner, postedBy: user.key, postedAt: now(), url: String(body.url).trim(), videoId,
       type, recordedDate, enemyGuild, spectator, title: vodTitle(type, recordedDate, enemyGuild), note: clean(body.note, 500),
-      visibility: 'private', visibleClass: '', reviews: [],
+      visibility: 'private', visibleClass: '', reviews: [], finished: false,
     };
     D.vods.push(v);
     save();
@@ -385,26 +385,26 @@ module.exports = function install(ctx) {
     return { ok: true };
   }, { applicant: true });
 
-  // ---------------------------------------------------------------- VOD reviews ("finished review" / "add-on")
-  // One append-only list per VOD. The first entry is "finished review"; any entry added after that is a second
-  // (or third...) coach's "add-on" instead - same action, same data shape, just different button wording and
-  // audit phrasing client- and server-side, since there is nothing to actually overwrite or merge.
+  // ---------------------------------------------------------------- VOD reviews ("review note" / "add-on")
+  // One append-only list per VOD. Writing a note here no longer marks the VOD as finished by itself (see the
+  // dedicated /finished route below) - a coach can leave a note any time, including a quick one on a VOD they
+  // are not done looking at yet, without it jumping the folder to "finished" behind their back.
   route('POST', '/api/vods/:id/reviews', ({ body, user, params }) => {
     const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
     need(v, 404, 'VOD not found.');
-    need(canReviewVod(user, v), 403, 'Only a coach or officer can finish a review on this VOD.');
+    need(canReviewVod(user, v), 403, 'Only a coach or officer can review this VOD.');
     const note = clean(body.note, 1000);
-    need(note, 400, 'Add a note before finishing the review.');
+    need(note, 400, 'Add a note before saving the review.');
     if (!Array.isArray(v.reviews)) v.reviews = [];
     const isFirst = v.reviews.length === 0;
     const review = { id: newId(), by: user.key, at: now(), note };
     v.reviews.push(review);
     save();
-    audit(user, isFirst ? 'vod.review.finish' : 'vod.review.addon', { type: 'vod', id: v.id, name: v.title }, `${user.name} ${isFirst ? 'finished reviewing' : 'added to the review of'} the VOD "${v.title}".`);
+    audit(user, isFirst ? 'vod.review.write' : 'vod.review.addon', { type: 'vod', id: v.id, name: v.title }, `${user.name} ${isFirst ? 'wrote a review for' : 'added to the review of'} the VOD "${v.title}".`);
     const markerCount = D.vodMarkers.filter((mk) => mk.vodId === v.id).length;
     const points = markerCount ? ` (${markerCount} coaching point${markerCount === 1 ? '' : 's'})` : '';
     if (v.owner !== user.key) {
-      notify(v.owner, `✅ ${user.name} ${isFirst ? 'finished reviewing' : 'added more to the review of'} your VOD "${v.title}"${points}.\n${note}\n${appUrl()}/#/vods/${v.id}`);
+      notify(v.owner, `✅ ${user.name} ${isFirst ? 'reviewed' : 'added more to the review of'} your VOD "${v.title}"${points}.\n${note}\n${appUrl()}/#/vods/${v.id}`);
     }
     return { ...review, byName: reviewerName(review.by), canEdit: true };
   }, { applicant: true });
@@ -439,6 +439,20 @@ module.exports = function install(ctx) {
     }
     audit(user, 'vod.review.resend', { type: 'vod', id: v.id, name: v.title }, `${user.name} resent their review note on the VOD "${v.title}".`);
     return { ok: true };
+  }, { applicant: true });
+
+  // Whether this VOD shows as finished in the folder - its own flag, deliberately separate from writing a
+  // review note. Writing the first review note used to flip this on by itself, with no way back if a coach
+  // did not actually mean to close it out yet; now a coach decides when it is done, and can just as easily
+  // undo that if it was ticked by mistake.
+  route('PUT', '/api/vods/:id/finished', ({ body, user, params }) => {
+    const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
+    need(v, 404, 'VOD not found.');
+    need(canReviewVod(user, v), 403, 'Only a coach or officer can mark a review as finished.');
+    v.finished = !!body.finished;
+    save();
+    audit(user, v.finished ? 'vod.review.finish' : 'vod.review.unfinish', { type: 'vod', id: v.id, name: v.title }, `${user.name} marked the VOD "${v.title}" as ${v.finished ? 'finished' : 'not finished'}.`);
+    return { finished: v.finished };
   }, { applicant: true });
 
   route('DELETE', '/api/vods/:id', ({ user, params }) => {
