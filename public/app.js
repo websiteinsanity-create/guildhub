@@ -75,6 +75,24 @@ async function act(fn, okMsg) {
   try { await fn(); if (okMsg) toast(okMsg); await refresh(true); return true; }
   catch (e) { toast(e.message, true); return false; }
 }
+// RSVP is tapped a lot (it's the main button people hit on their phone), and the result is already known on
+// screen before the server even sees it, so we flip it immediately instead of making someone wait out a full
+// round trip plus a full state refresh. The server reply is merged in once it arrives (it can differ from the
+// guess, e.g. a capped event that just filled up), and a rejection quietly puts the button back.
+async function rsvpNow(evId, memberId, status) {
+  const e = byId(S.events, evId);
+  const prev = e ? e.rsvps[memberId] : undefined;
+  if (e) { if (status === 'none') delete e.rsvps[memberId]; else e.rsvps[memberId] = status; render(); }
+  try {
+    const updated = await api(`/api/events/${evId}/rsvp`, 'POST', { memberId, status });
+    if (e) Object.assign(e, updated);
+    render();
+    refresh(true).catch(() => {});
+  } catch (err) {
+    if (e) { if (prev === undefined) delete e.rsvps[memberId]; else e.rsvps[memberId] = prev; render(); }
+    toast(err.message, true);
+  }
+}
 
 const roleColor = (role) => `var(--role${Math.max(0, S.cfg.roles.indexOf(role)) % 5})`;
 const roleChip = (role) => `<span class="chip" style="--c:${roleColor(role)}">${esc(role)}</span>`;
@@ -1453,8 +1471,8 @@ document.addEventListener('click', async (e) => {
   else if (a === 'duty-cycle') act(() => api('/api/duties/' + d.id, 'PUT', { status: d.s }));
   else if (a === 'duty-del') act(() => api('/api/duties/' + d.id, 'DELETE'));
   else if (a === 'toggle-past') { UI.showPast = !UI.showPast; render(); }
-  else if (a === 'rsvp') act(() => api(`/api/events/${d.ev}/rsvp`, 'POST', { memberId: d.m, status: d.s }));
-  else if (a === 'rsvp-other') act(() => api(`/api/events/${d.ev}/rsvp`, 'POST', { memberId: $('#other-char').value, status: d.s }));
+  else if (a === 'rsvp') rsvpNow(d.ev, d.m, d.s);
+  else if (a === 'rsvp-other') rsvpNow(d.ev, $('#other-char').value, d.s);
   else if (a === 'parties-build') {
     const e2 = ev(); if (e2.parties.length && !confirm('Replace the current parties?')) return;
     const p = autoParties(e2);
