@@ -404,12 +404,13 @@ test('finishing a review DMs the player, mentions any coaching points, and a sec
   const r1 = await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'Solid rotation, work on positioning.' }, 'coach');
   assert.equal(r1.status, 200);
   const dm1 = await waitFor(() => fake.state.dms.find((d) => d.to === STUDENT));
-  assert.ok(dm1.content.includes('finished reviewing'));
+  assert.ok(dm1.content.includes('reviewed'));
   assert.ok(dm1.content.includes('1 coaching point'));
   assert.ok(dm1.content.includes('Solid rotation'));
 
   let vod = (await state('student')).vods.find((x) => x.id === v.id);
   assert.equal(vod.reviews.length, 1);
+  assert.equal(vod.finished, false, 'writing a review note does not by itself mark the VOD as finished any more');
 
   // a second reviewer (here, an officer - who can review anything) adds to the already-finished review; an
   // "add-on", not a replacement, and the earlier entry is untouched
@@ -423,9 +424,29 @@ test('finishing a review DMs the player, mentions any coaching points, and a sec
   assert.equal(vod.reviews.length, 2, 'both entries are kept, nothing is overwritten');
   assert.equal(vod.reviews[0].note, 'Solid rotation, work on positioning.');
 
-  // a new coaching point added afterwards does not unmark the review as finished
+  // a new coaching point added afterwards does not touch the review notes at all
   await call(`/api/vods/${v.id}/markers`, 'POST', { timestamp: 20, note: 'another spot' }, 'coach');
   assert.equal((await state('student')).vods.find((x) => x.id === v.id).reviews.length, 2);
+});
+
+test('marking a VOD as finished is its own explicit, undoable choice - separate from writing a review note', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck015', type: 'Siege', recordedDate: '2026-10-03' }, 'student')).body;
+  assert.equal(v.finished, false, 'a freshly posted VOD starts out not finished');
+
+  // writing a review note is not the same thing as finishing - it must not flip this on by itself
+  await call(`/api/vods/${v.id}/reviews`, 'POST', { note: 'Looks good overall.' }, 'coach');
+  assert.equal((await state('coach')).vods.find((x) => x.id === v.id).finished, false);
+
+  assert.equal((await call(`/api/vods/${v.id}/finished`, 'PUT', { finished: true }, 'student')).status, 403, 'only a coach or officer can mark it finished');
+
+  const marked = (await call(`/api/vods/${v.id}/finished`, 'PUT', { finished: true }, 'coach')).body;
+  assert.equal(marked.finished, true);
+  assert.equal((await state('coach')).vods.find((x) => x.id === v.id).finished, true, 'the folder now shows it as finished');
+
+  // undoing it (a mistaken click) is just as explicit and just as available
+  const unmarked = (await call(`/api/vods/${v.id}/finished`, 'PUT', { finished: false }, 'coach')).body;
+  assert.equal(unmarked.finished, false);
+  assert.equal((await state('coach')).vods.find((x) => x.id === v.id).finished, false, 'unmarking takes it back out of the folder\'s finished state');
 });
 
 test('only the coach or officer who wrote a particular review entry can edit or resend it - not even another officer, and not the VOD\'s own owner', async () => {

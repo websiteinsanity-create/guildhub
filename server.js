@@ -1087,6 +1087,23 @@ route('POST', '/api/events/:id/reminders/send', async ({ params, user }) => {
   return eventFor(ev, user);
 }, { officer: true });
 
+// The "send reminders for all of today's events" button - the client works out which events share a calendar
+// day (in the viewer's own time zone) and are still upcoming, and hands over just those ids; the server only
+// has to trust that list and re-check each one is still actually upcoming before nudging it, same as the
+// single-event button above.
+route('POST', '/api/events/reminders/send-many', async ({ body, user }) => {
+  const ids = Array.isArray(body.ids) ? body.ids : [];
+  const events = ids.map((id) => findEvent(id)).filter((ev) => ev && Date.now() < Date.parse(ev.start));
+  need(events.length, 409, 'None of those events can be reminded any more (already started).');
+  let sent = 0, total = 0;
+  for (const ev of events) {
+    const result = await sendManualReminders(ev, user.name);
+    sent += result.sent; total += result.total;
+    audit.log(user, 'event.reminder.send', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually sent a reminder for "${ev.title}" to ${result.sent}/${result.total} player(s) (sent together with ${events.length - 1} other event${events.length === 2 ? '' : 's'} that day).`);
+  }
+  return { events: events.length, sent, total };
+}, { officer: true });
+
 // Admin helpers
 route('POST', '/api/admin/test-dm', async ({ user }) => {
   const res = await discord.sendDM(user.key, '✅ Guild Hall can send you direct messages. PINs and reminders will arrive like this.');
