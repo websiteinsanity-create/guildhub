@@ -340,10 +340,24 @@ Placeholder parties are skipped by Shotcaller entirely - no voice channel is cre
 count toward the bot's 12-party limit - whether starting from the Post-to-Discord dialog, the Shotcaller page's
 own Start dialog matched to an event or preset, or from the automatic 3-or-fewer rule. A party only stops being
 a placeholder once it's unmarked (party menu > "Unmark as placeholder"), even if it still has 3 or fewer members.
+The one party that's never skipped is whichever voice channel you pick yourself as "Party 1" - it's an existing
+channel you chose, not one Shotcaller has to decide whether to create, so it always counts and is never renamed,
+regardless of its own member count or placeholder flag.
+
+The picture posted to Discord (and each mercenary's individual DM picture) only draws members who have actually
+confirmed for that event - RSVP'd "yes", or a mercenary, same rule the live Parties board uses - as real rows.
+Anyone else still sitting in a preset's party slot shows up instead in a small "Not confirmed: ..." line under
+that party's card, so the line-up you post never implies someone is in when they haven't actually signed up.
+
+Clicking **Post to Discord** now also checks that every non-placeholder party has a leader, independent of
+whether "Also start Shotcaller" is ticked - if any don't, you get a confirmation prompt naming them before the
+announcement goes out, instead of it posting silently with an unled party.
 
 Starting a session can legitimately take a while - the bot creates a new voice channel and logs in a relay bot
 for each party, one at a time - so starting (unlike the other quick status/mute/stop calls) gives it up to 45
-seconds before Guild Hall reports it as unreachable.
+seconds before Guild Hall reports it as unreachable. The Start dialog closes the moment you click Start rather
+than sitting there for that whole stretch, and the Shotcaller page itself shows a "Starting…" state until the
+bot answers either way.
 
 1. Set up Shotcaller itself (its own repo, its own `docker-compose.yml`) and generate a shared secret for it:
    `openssl rand -hex 32`. Put that value in Shotcaller's own `CONTROL_API_KEY`.

@@ -1200,23 +1200,33 @@ let PARTY_IMG = '';
 // below), so each card gets the image's full width and the text stays a readable size once the dialog scales
 // the image down to fit a phone screen - cramming 3-4 narrow columns into a 340px-wide dialog would make the
 // player names and classes too small to read, which defeats the entire point of a mobile-friendly view.
-async function renderPartiesImage(ev, { maxCols = 4 } = {}) {
+async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {}) {
   if (document.fonts && document.fonts.ready) await document.fonts.ready;
   const css = getComputedStyle(document.documentElement);
   const roleCol = (role) => css.getPropertyValue('--role' + (Math.max(0, S.cfg.roles.indexOf(role)) % 5)).trim() || '#8b95a7';
   const accent = css.getPropertyValue('--accent').trim() || '#ac2d4c';
   const sans = '"Source Sans 3", system-ui, "Segoe UI", Arial, sans-serif', serif = 'Marcellus, Georgia, serif';
   const parties = ev.parties;
+  // A member only counts as locked in for THIS event once they've confirmed (mercenaries are always treated as
+  // confirmed, same rule the live board's partyCard() uses) - everyone else in the preset's member list is still
+  // just a placeholder slot, not a real attendee, so the picture posted to Discord should not draw them as if
+  // they were. Precomputed per party so both the card body and its "X/Y" header count agree.
+  const attendingOf = (p) => p.members.filter((id) => { const m = byId(S.members, id); return m && (m.mercenary || ev.rsvps[m.id] === 'yes'); });
+  const notConfirmedOf = (p) => p.members.filter((id) => !attendingOf(p).includes(id)).map((id) => { const m = byId(S.members, id); return m ? m.name : null; }).filter(Boolean);
   const cols = Math.min(maxCols, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 46, headH = 42, titleH = 108;
   const W = pad * 2 + cols * cardW + (cols - 1) * gap;
   const gridRows = Math.ceil(parties.length / cols);
-  const cardH = (p) => headH + Math.max(p.members.length, 1) * rowH + 10;
-  const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map(cardH)));
   const measure = document.createElement('canvas').getContext('2d');
   const wrap = (g, text, max) => { const out = []; let line = ''; for (const w of text.split(' ')) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; } if (line) out.push(line); return out; };
+  measure.font = `400 13px ${sans}`;
+  // Per-party "Not confirmed" footer - wrapped to the card's own width, computed up front so the card height can
+  // account for it (otherwise the footer text would spill out past the card's bottom edge).
+  const notConfirmedLines = parties.map((p) => { const nc = notConfirmedOf(p); return nc.length ? wrap(measure, 'Not confirmed: ' + nc.join(', '), cardW - 28) : []; });
+  const cardH = (p, i) => headH + Math.max(attendingOf(p).length, 1) * rowH + 14 + (notConfirmedLines[i].length ? 10 + notConfirmedLines[i].length * 17 : 0);
+  const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map((p, j) => cardH(p, r * cols + j))));
   // going, but not in a party
   const placed = new Set(parties.flatMap((p) => p.members));
-  const unplaced = S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes' && !placed.has(m.id)).map((m) => m.name);
+  const unplaced = showUnplaced ? S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes' && !placed.has(m.id)).map((m) => m.name) : [];
   measure.font = `400 15px ${sans}`;
   const unLines = unplaced.length ? wrap(measure, 'Going, but not in a party: ' + unplaced.join(', '), W - 2 * pad) : [];
   const H = pad + titleH + rowHeights.reduce((a, b) => a + b, 0) + (gridRows - 1) * gap + (unLines.length ? 16 + unLines.length * 21 : 0) + 42 + pad;
@@ -1234,20 +1244,21 @@ async function renderPartiesImage(ev, { maxCols = 4 } = {}) {
   g.fillStyle = accent; g.fillRect(pad, pad, 52, 4);
   g.fillStyle = '#ebe5e3'; g.font = `400 ${narrow ? 26 : 34}px ${serif}`; g.fillText(fit(ev.title, W - 2 * pad - (narrow ? 0 : 200)), pad, pad + (narrow ? 38 : 46));
   g.fillStyle = '#a39499'; g.font = `400 17px ${sans}`;
-  const total = parties.reduce((a, p) => a + p.members.length, 0);
+  const total = parties.reduce((a, p) => a + attendingOf(p).length, 0);
   g.fillText(`${fmtDate(ev.start)}  ·  ${ev.type}  ·  ${parties.length} ${parties.length === 1 ? 'party' : 'parties'}, ${total} players`, pad, pad + 76);
   if (!narrow) { g.textAlign = 'right'; g.fillStyle = '#a39499'; g.font = `400 16px ${sans}`; g.fillText(guildName(), W - pad, pad + 20); g.textAlign = 'left'; }
   // parties
   let y0 = pad + titleH;
   const rowTop = []; rowHeights.forEach((h, i) => { rowTop[i] = y0; y0 += h + gap; });
   parties.forEach((p, i) => {
-    const x = pad + (i % cols) * (cardW + gap), y = rowTop[Math.floor(i / cols)], h = cardH(p);
+    const attending = attendingOf(p), ncLines = notConfirmedLines[i];
+    const x = pad + (i % cols) * (cardW + gap), y = rowTop[Math.floor(i / cols)], h = cardH(p, i);
     g.fillStyle = '#1b1418'; rr(x, y, cardW, h, 10); g.fill(); g.strokeStyle = '#3a2a31'; g.lineWidth = 1; rr(x + .5, y + .5, cardW - 1, h - 1, 10); g.stroke();
     g.fillStyle = '#ebe5e3'; g.font = `600 18px ${sans}`; g.fillText(fit(p.name, cardW - 90), x + 14, y + 27);
-    g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; g.textAlign = 'right'; g.fillText(`${p.members.length}/${S.cfg.partySize || 6}`, x + cardW - 14, y + 27); g.textAlign = 'left';
+    g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; g.textAlign = 'right'; g.fillText(`${attending.length}/${S.cfg.partySize || 6}`, x + cardW - 14, y + 27); g.textAlign = 'left';
     g.fillStyle = '#3a2a31'; g.fillRect(x + 1, y + headH - 1, cardW - 2, 1);
-    if (!p.members.length) { g.fillStyle = '#6f6268'; g.font = `italic 400 15px ${sans}`; g.fillText('Empty', x + 14, y + headH + 28); return; }
-    p.members.forEach((id, j) => {
+    if (!attending.length) { g.fillStyle = '#6f6268'; g.font = `italic 400 15px ${sans}`; g.fillText(p.members.length ? 'No one confirmed yet' : 'Empty', x + 14, y + headH + 28); }
+    attending.forEach((id, j) => {
       const m = byId(S.members, id); if (!m) return;
       const eff = effectiveBuild(m, p), ry = y + headH + j * rowH, col = roleCol(eff.role);
       g.globalAlpha = 0.24; g.fillStyle = col; g.fillRect(x + 1, ry, cardW - 2, rowH - 2); g.globalAlpha = 1;
@@ -1264,6 +1275,15 @@ async function renderPartiesImage(ev, { maxCols = 4 } = {}) {
       const cls = classFor(eff.primaryWeapon, eff.secondaryWeapon), meta = [cls, eff.specialization].filter(Boolean).join(' | ') || [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / ');
       g.fillStyle = '#c9bfc2'; g.font = `400 13px ${sans}`; g.fillText(fit(meta, cardW - (nx - x) - 14), nx, ry + 37);
     });
+    // "Not confirmed" footer - preset members who have not RSVP'd yes (and are not a mercenary) for THIS event.
+    // Keeps that information visible rather than silently dropping them from the picture, mirroring the
+    // top-level "Going, but not in a party" footer below.
+    if (ncLines.length) {
+      const fy = y + headH + Math.max(attending.length, 1) * rowH + 6;
+      g.fillStyle = '#3a2a31'; g.fillRect(x + 1, fy, cardW - 2, 1);
+      g.fillStyle = '#8b7f83'; g.font = `italic 400 13px ${sans}`;
+      ncLines.forEach((l, k) => g.fillText(l, x + 14, fy + 16 + k * 17));
+    }
   });
   let yy = y0 - gap + 16;
   if (unLines.length) { g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; unLines.forEach((l, i) => g.fillText(l, pad, yy + 14 + i * 21)); yy += unLines.length * 21 + 14; }
@@ -1376,6 +1396,13 @@ ACTIONS['parties-post'] = async (el, d) => {
 };
 CHANGES['pp-sc-toggle'] = (el) => { $('#pp-sc-fields').classList.toggle('hidden', !el.checked); };
 FORMS.postparties = (f, fd, id) => {
+  const ev = byId(S.events, Number(id));
+  // Block the post - independent of whether Shotcaller is being started - unless the officer explicitly accepts
+  // posting with parties that have no leader yet. Same "which parties count" rule as everywhere else
+  // (placeholders are exempt): a native confirm() here matches how the codebase already gates other
+  // risky/irreversible actions, rather than introducing a new dialog just for this.
+  const missingLeaders = ev ? ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader) : [];
+  if (missingLeaders.length && !confirm(`${missingLeaders.map((p) => `"${p.name}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet. Post the announcement anyway?`)) return;
   const sel = f.elements.channelId, name = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.replace(/^#/, '') : '';
   const scOn = f.elements.scEnabled && f.elements.scEnabled.checked;
   const shotcaller = scOn ? { enabled: true, channelId: fd.scChannelId, dedicatedCallerId: fd.scDedicatedCallerId || null } : undefined;
@@ -1394,12 +1421,13 @@ async function dmMercsTheirParty(ev) {
   const mercsPlaced = ev.parties.flatMap((p) => p.members).map((id) => byId(S.members, id)).filter((m) => m && m.mercenary);
   for (const merc of mercsPlaced) {
     const party = ev.parties.find((p) => p.members.includes(merc.id));
-    // rsvps cleared too: renderPartiesImage also lists everyone "going but not placed" using the full guild's
+    // showUnplaced: false - renderPartiesImage also lists everyone "going but not placed" using the full guild's
     // RSVPs, which has nothing to do with this mercenary's own party and would otherwise leak the rest of the
-    // roster into what is meant to be just their own picture.
-    const cropped = { ...ev, parties: [party], rsvps: {} };
+    // roster into what is meant to be just their own picture. Keep the real ev.rsvps (not wiped) so the
+    // attending/not-confirmed split still works correctly for this merc's own actual teammates.
+    const cropped = { ...ev, parties: [party] };
     try {
-      const img = await blobToDataUrl(await renderPartiesImage(cropped, { maxCols: 1 }));
+      const img = await blobToDataUrl(await renderPartiesImage(cropped, { maxCols: 1, showUnplaced: false }));
       const r = await api(`/api/events/${ev.id}/merc-dm/${merc.id}`, 'POST', { image: img });
       if (!r.ok) toast(`Could not DM ${merc.name}: ${r.error}`, true);
     } catch (e) { toast(`Could not DM ${merc.name}: ${e.message}`, true); }

@@ -43,8 +43,9 @@ function startFakeBot(startDelayMs = 0) {
   return new Promise((resolve) => server.listen(0, () => resolve({ server, url: `http://localhost:${server.address().port}`, calls })));
 }
 
-async function startServer(bot) {
+async function startServer(bot, seedDb) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-sc-'));
+  if (seedDb) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(seedDb));
   const port = 40000 + Math.floor(Math.random() * 20000);
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
@@ -72,9 +73,9 @@ async function startServer(bot) {
   };
 }
 
-const withServer = (name, fn) => test(name, async () => {
+const withServer = (name, fn, seedDb) => test(name, async () => {
   const bot = await startFakeBot();
-  const s = await startServer(bot);
+  const s = await startServer(bot, seedDb);
   try { await fn(s, bot); } finally { await s.stop(); bot.server.close(); }
 });
 
