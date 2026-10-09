@@ -268,13 +268,22 @@ function normParties(arr) {
         if (k !== 'main' && m && (m.builds || []).some((b) => String(b.id) === k)) builds[id] = k;
       }
     }
-    // placeholder: an officer's manual flag that this party is not a real line-up yet (so the "post to Discord +
-    // start Shotcaller" leader check, in server-features.js, does not block on it). Separate from the automatic
-    // ≤3-member exemption applied there, which is computed from members.length rather than stored.
+    // placeholder / placeholderOverride: whether this party is a real line-up yet. Left alone
+    // (placeholderOverride: false), a party counts as a placeholder automatically once it has 3 or fewer
+    // members - see partyIsPlaceholder() below. placeholderOverride: true means an officer explicitly toggled
+    // it (party menu > "Mark/Unmark as placeholder"), and placeholder then says which way, overriding the
+    // automatic member-count rule either direction - including forcing a 3-or-fewer party to NOT count as one.
+    // Used by the "post to Discord + start Shotcaller" leader check (server-community.js) and by Shotcaller
+    // itself to decide which parties get skipped entirely (no voice channel, not counted toward its 12-party
+    // cap) - see server-community.js's post-parties route and public/shotcaller.js's Start dialog.
+    const placeholderOverride = !Array.isArray(p) && !!(p && p.placeholderOverride);
     const placeholder = !Array.isArray(p) && !!(p && p.placeholder);
-    return { name, members, leader, builds, placeholder };
+    return { name, members, leader, builds, placeholder, placeholderOverride };
   });
 }
+// Single source of truth for "is this party a placeholder right now" - mirrored in public/app.js's copy of the
+// same function (keep both in sync; each is commented to point at the other).
+function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length <= 3; }
 // Brings data written by older versions up to date. Runs on start and after a backup is restored.
 function migrate() {
   db.duties = db.duties || [];
@@ -1152,7 +1161,7 @@ const shotcallerApi = require('./server-shotcaller')({
 require('./server-features')({
   route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
-  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi,
+  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi, partyIsPlaceholder,
   get db() { return db; },
 });
 

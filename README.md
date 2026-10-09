@@ -328,12 +328,22 @@ an event's or preset's line-up, renaming the created channels to each party's le
 session can still be started the usual way, with `/shotcaller start` in Discord.
 
 Parties also get a **placeholder** flag (in each party's "..." menu on the Parties/board pages - a party with 3 or
-fewer members counts as one automatically too), and events/recurring events get an "Also start Shotcaller when
-posting this event's parties to Discord" checkbox that pre-ticks the same option in the Post-to-Discord dialog
-(still changeable there each time). When that option is on, every party with more than 3 members needs a leader
-before the post goes through - posting is blocked entirely until that's fixed, with the exception of any party
-flagged as a placeholder. An already-running Shotcaller session is stopped and replaced automatically; the
-Discord post itself always goes through even if Shotcaller then fails to start, which is reported separately.
+fewer members counts as one automatically too, unless an officer overrides that for that party either way), and
+events/recurring events get an "Also start Shotcaller when posting this event's parties to Discord" checkbox
+that pre-ticks the same option in the Post-to-Discord dialog (still changeable there each time). When that
+option is on, every party with more than 3 members needs a leader before the post goes through - posting is
+blocked entirely until that's fixed, with the exception of any party flagged as a placeholder. An already-running
+Shotcaller session is stopped and replaced automatically; the Discord post itself always goes through even if
+Shotcaller then fails to start, which is reported separately.
+
+Placeholder parties are skipped by Shotcaller entirely - no voice channel is created for them, and they don't
+count toward the bot's 12-party limit - whether starting from the Post-to-Discord dialog, the Shotcaller page's
+own Start dialog matched to an event or preset, or from the automatic 3-or-fewer rule. A party only stops being
+a placeholder once it's unmarked (party menu > "Unmark as placeholder"), even if it still has 3 or fewer members.
+
+Starting a session can legitimately take a while - the bot creates a new voice channel and logs in a relay bot
+for each party, one at a time - so starting (unlike the other quick status/mute/stop calls) gives it up to 45
+seconds before Guild Hall reports it as unreachable.
 
 1. Set up Shotcaller itself (its own repo, its own `docker-compose.yml`) and generate a shared secret for it:
    `openssl rand -hex 32`. Put that value in Shotcaller's own `CONTROL_API_KEY`.

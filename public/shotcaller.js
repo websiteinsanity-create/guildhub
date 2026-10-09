@@ -199,11 +199,11 @@ async function scStartDialog() {
         ${presetsWithParties.length ? '<option value="preset">Use preset - match a saved line-up</option>' : ''}
       </select></div>
     <div class="field hidden" id="sc-setup-event"><label>Event</label>
-      <select name="eventId">${upcomingEvents.map((e) => `<option value="${e.id}">${esc(e.title)} - ${fmtShort(e.start)} (${e.parties.length} ${e.parties.length === 1 ? 'party' : 'parties'})</option>`).join('')}</select>
-      <div class="muted small" style="margin-top:6px">Party count comes from this event, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
+      <select name="eventId">${upcomingEvents.map((e) => { const n = e.parties.filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}">${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+      <div class="muted small" style="margin-top:6px">Party count comes from this event's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field hidden" id="sc-setup-preset"><label>Preset</label>
-      <select name="presetId">${presetsWithParties.map((p) => `<option value="${p.id}">${esc(p.name)} (${p.parties.length} ${p.parties.length === 1 ? 'party' : 'parties'})</option>`).join('')}</select>
-      <div class="muted small" style="margin-top:6px">Party count comes from this preset, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
+      <select name="presetId">${presetsWithParties.map((p) => { const n = p.parties.filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}">${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+      <div class="muted small" style="margin-top:6px">Party count comes from this preset's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field"><label>Shotcaller</label>
       <select name="dedicatedCallerId">
         <option value="">No dedicated caller - anyone can call out</option>
@@ -231,11 +231,15 @@ FORMS['shotcaller-start'] = (f, fd) => {
   if (fd.setupKind === 'event' || fd.setupKind === 'preset') {
     const chosen = fd.setupKind === 'event' ? byId(S.events, fd.eventId) : byId(S.presets, fd.presetId);
     if (!chosen || !chosen.parties.length) return toast('Pick a valid event or preset.', true);
-    if (chosen.parties.length > 12) return toast(`"${chosen.title || chosen.name}" has ${chosen.parties.length} parties - Shotcaller supports at most 12.`, true);
-    count = chosen.parties.length;
+    // Placeholder parties are skipped entirely - no voice channel for them, and they don't count toward the
+    // 12-party cap - same rule the combined Post-to-Discord+Start flow uses (server-community.js).
+    const realParties = chosen.parties.filter((p) => !partyIsPlaceholder(p));
+    if (!realParties.length) return toast(`"${chosen.title || chosen.name}" has no non-placeholder parties to start.`, true);
+    if (realParties.length > 12) return toast(`"${chosen.title || chosen.name}" has ${realParties.length} non-placeholder parties - Shotcaller supports at most 12.`, true);
+    count = realParties.length;
     // channels[0] is always the picked voice channel above (Party 1) and is never renamed - partyNames[0] names
     // channels[1] (Party 2), and so on, matching the bot's own /start endpoint indexing.
-    partyNames = chosen.parties.slice(1).map((p) => { const ld = p.leader ? byId(S.members, p.leader) : null; return ld ? `${ld.name}'s Party` : null; });
+    partyNames = realParties.slice(1).map((p) => { const ld = p.leader ? byId(S.members, p.leader) : null; return ld ? `${ld.name}'s Party` : null; });
   } else {
     count = fd.mode === 'custom' ? Math.round(Number(fd.customCount)) : Number(fd.mode);
   }

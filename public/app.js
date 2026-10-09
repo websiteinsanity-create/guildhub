@@ -984,10 +984,14 @@ function memberRow(m, at, o) {
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
-// A party counts as a placeholder (not a real line-up yet) if an officer flagged it manually, OR it has 3 or
-// fewer members - either way, server-features.js's "post to Discord + start Shotcaller" leader check skips it.
-// members.length (raw assigned count), not confirmed/attending, matches how that check reads parties too.
-function partyIsPlaceholder(p) { return !!p.placeholder || p.members.length <= 3; }
+// A party counts as a placeholder (not a real line-up yet) automatically once it has 3 or fewer members,
+// unless an officer has explicitly overridden that (party menu > "Mark/Unmark as placeholder") - which can go
+// either way, including forcing a 3-or-fewer party to NOT count as one. Mirrors server.js's partyIsPlaceholder()
+// (keep both in sync; each is commented to point at the other). Used by the "post to Discord + start
+// Shotcaller" leader check and by Shotcaller itself to skip placeholder parties entirely (no voice channel,
+// not counted toward its 12-party cap). members.length is the raw assigned count, not confirmed/attending,
+// matching how both of those checks read parties.
+function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length <= 3; }
 function partyCard(ctx, parties, p, i, ev) {
   const off = isOfficer();
   const at = `data-kind="${ctx.kind}" data-owner="${ctx.id}" data-i="${i}"`;
@@ -1005,10 +1009,10 @@ function partyCard(ctx, parties, p, i, ev) {
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
       ${off ? `<input class="party-name" ${at} data-act="party-rename" value="${esc(p.name)}" maxlength="40" aria-label="Party name">` : `<span class="party-title">${esc(p.name)}</span>`}
       <span class="muted small ${ms.length > size ? 'over-cap' : ''}">${ms.length}/${size}</span>
-      ${ph ? `<span class="muted small" title="${p.placeholder ? 'Marked as placeholder' : 'Treated as a placeholder automatically (3 or fewer members)'}">Placeholder</span>` : ''}
+      ${ph ? `<span class="muted small" title="${p.placeholderOverride ? 'Marked as placeholder' : 'Treated as a placeholder automatically (3 or fewer members)'}">Placeholder</span>` : ''}
       ${off ? `<details class="menu"><summary aria-label="Options for ${esc(p.name)}">&hellip;</summary><div class="menu-list">
         <button data-act="p-left" ${at}>Move party left</button><button data-act="p-right" ${at}>Move party right</button>
-        <button data-act="party-placeholder-toggle" ${at}>${p.placeholder ? 'Unmark as placeholder' : 'Mark as placeholder'}</button>
+        <button data-act="party-placeholder-toggle" ${at}>${ph ? 'Unmark as placeholder' : 'Mark as placeholder'}</button>
         <button data-act="p-clear" ${at}>Remove all members</button><button class="danger" data-act="party-del" ${at}>Delete party</button></div></details>` : ''}
     </div>
     <div class="pdrop" ${off ? 'data-drop="party"' : ''} data-i="${i}">
@@ -1549,7 +1553,11 @@ document.addEventListener('click', async (e) => {
   else if (a === 'm-build') { const mid = Number(d.m); mutateParties(el, (ps, i) => { ps[i].builds = ps[i].builds || {}; if (d.b === 'main') delete ps[i].builds[mid]; else ps[i].builds[mid] = d.b; }); }
   else if (a === 'm-move') { const mid = Number(d.m), to = Number(d.to); mutateParties(el, (ps) => { const carried = (ps.find((p) => p.members.includes(mid)) || {}).builds?.[mid]; ps.forEach((p) => { p.members = p.members.filter((x) => x !== mid); if (p.leader === mid) p.leader = null; if (p.builds) delete p.builds[mid]; }); ps[to].members.push(mid); if (carried) (ps[to].builds = ps[to].builds || {})[mid] = carried; }); }
   else if (a === 'p-clear') mutateParties(el, (ps, i) => { ps[i].members = []; ps[i].leader = null; ps[i].builds = {}; });
-  else if (a === 'party-placeholder-toggle') mutateParties(el, (ps, i) => { ps[i].placeholder = !ps[i].placeholder; });
+  // Always forces the explicit opposite of whatever the party currently reads as (ph in partyCard) - so this
+  // can override the automatic 3-or-fewer rule in either direction, not just toggle a flag that rule ignores.
+  // Reads the effective state BEFORE flipping placeholderOverride on - otherwise partyIsPlaceholder() would
+  // read back the override itself as already active and compute against the wrong (stale) placeholder value.
+  else if (a === 'party-placeholder-toggle') mutateParties(el, (ps, i) => { const was = partyIsPlaceholder(ps[i]); ps[i].placeholderOverride = true; ps[i].placeholder = !was; });
   else if (a === 'p-left' || a === 'p-right') mutateParties(el, (ps, i) => { const j = i + (a === 'p-right' ? 1 : -1); if (j >= 0 && j < ps.length) [ps[i], ps[j]] = [ps[j], ps[i]]; });
   else if (a === 'cal-day') { if (!e.target.closest('a') && isOfficer()) eventDialog(null, d.date); }
   else if (a === 'points-focus') { UI.pointsFocus = d.id ? Number(d.id) : null; render(); }

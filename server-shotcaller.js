@@ -19,7 +19,13 @@ module.exports = function install(ctx) {
   // One call out to the bot's control API. Network trouble (bot down, wrong URL, Docker networking) is folded
   // into one clean message instead of a raw fetch/TypeError reaching the officer looking at the panel.
   // path is relative to the guild, e.g. '/session', '/session/mute', '/voice-channels'.
-  async function callBot(path, method = 'GET', body) {
+  //
+  // timeoutMs defaults to 5s, which is plenty for every call here EXCEPT starting a session: the bot has to
+  // create up to 11 new voice channels and log in a relay bot for each one, one at a time, which the bot's own
+  // project docs call out as easily taking longer than 3 seconds with several relays - with a full 12-party
+  // session that can add up to well past 5 seconds. START_TIMEOUT_MS below gives that one call much more room,
+  // so a slow-but-working bot reads back as a real error ("something went wrong") far less often.
+  async function callBot(path, method = 'GET', body, timeoutMs = 5000) {
     need(configured(), 400, "Shotcaller is not set up yet. Set SHOTCALLER_URL and SHOTCALLER_API_KEY in the server's environment (DISCORD_GUILD_ID is reused from the existing Discord setup).");
     let res;
     try {
@@ -27,16 +33,18 @@ module.exports = function install(ctx) {
         method,
         headers: { 'content-type': 'application/json', authorization: `Bearer ${shotcaller.apiKey}` },
         body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
-      throw new HttpError(502, 'Shotcaller is unreachable right now.');
+      throw new HttpError(502, 'Shotcaller is unreachable right now, or took too long to respond.');
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new HttpError(res.status, data.error || 'Shotcaller rejected the request.');
     return data;
   }
-  const callSession = (subpath, method = 'GET', body) => callBot(`/session${subpath}`, method, body);
+  const callSession = (subpath, method = 'GET', body, timeoutMs) => callBot(`/session${subpath}`, method, body, timeoutMs);
+  // Starting a session creates channels and logs in relay bots one at a time - see the comment on callBot above.
+  const START_TIMEOUT_MS = 45000;
 
   // Shared by the manual Start dialog's route below and by server-community.js's combined "Post to Discord +
   // start Shotcaller" flow (passed through as shotcallerApi - see server.js). Validates the same way either
@@ -59,7 +67,7 @@ module.exports = function install(ctx) {
       try { current = await callSession(''); } catch { /* couldn't read status - try to start anyway, same as a fresh guild */ }
       if (current && current.active) { try { await callSession('/stop', 'POST'); } catch { /* best effort - /start below still reports a real problem */ } }
     }
-    return callSession('/start', 'POST', { count, channelId: chId, dedicatedCallerId: callerId, partyNames: names });
+    return callSession('/start', 'POST', { count, channelId: chId, dedicatedCallerId: callerId, partyNames: names }, START_TIMEOUT_MS);
   }
 
   // ---------------------------------------------------------------- live panel

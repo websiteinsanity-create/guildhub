@@ -7,7 +7,7 @@
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, findMember, appUrl, audit, shotcallerApi } = ctx;
+  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, findMember, appUrl, audit, shotcallerApi, partyIsPlaceholder } = ctx;
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
   const yes = (v) => v === true || v === 'true';
@@ -168,11 +168,6 @@ module.exports = function install(ctx) {
     return { ok: !!r.ok, error: r.error || '' };
   }, { officer: true });
 
-  // A party counts as a placeholder (not a real line-up yet) the same way public/app.js's partyIsPlaceholder()
-  // reads it client-side: an officer's manual flag, OR 3 or fewer members. Only used to decide which parties
-  // the Shotcaller leader check (below) is allowed to skip.
-  const partyIsPlaceholder = (p) => !!p.placeholder || p.members.length <= 3;
-
   // ---------------------------------------------------------------- "Post to Discord": the picture of an event's parties
   route('POST', '/api/events/:id/post-parties', async ({ body, user, params }) => {
     const D = db(), ev = findEvent(params.id), pp = D.settings.partyPost;
@@ -215,12 +210,15 @@ module.exports = function install(ctx) {
     // undone), so a Shotcaller problem comes back as shotcaller.ok:false instead of an error response.
     let shotcaller = null;
     if (sc) {
-      // channels[0] is always the picked voice channel (Party 1) and is never renamed - partyNames[0] names
-      // channels[1] (Party 2), and so on, matching the bot's own /start endpoint and the manual Start dialog.
-      const partyNames = ev.parties.slice(1).map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
+      // Placeholder parties are skipped entirely here - no voice channel is created for them and they don't
+      // count toward the bot's 12-party cap, same rule the manual Start dialog's preset/event matching uses
+      // (public/shotcaller.js). channels[0] is always the picked voice channel (Party 1) and is never renamed -
+      // partyNames[0] names channels[1] (Party 2), and so on, matching the bot's own /start endpoint.
+      const realParties = ev.parties.filter((p) => !partyIsPlaceholder(p));
+      const partyNames = realParties.slice(1).map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
       try {
         const started = await shotcallerApi.startSession({
-          channelId: sc.channelId, count: ev.parties.length, partyNames,
+          channelId: sc.channelId, count: realParties.length, partyNames,
           dedicatedCallerId: sc.dedicatedCallerId || null, autoReplace: true,
         });
         audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session for "${ev.title}" while posting its parties to Discord.`);
