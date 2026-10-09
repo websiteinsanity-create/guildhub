@@ -682,7 +682,7 @@ function dayCard(e, sel, now) {
   // Quick RSVP right on the card is a phone-only convenience - on a wider screen the event's own sign-up
   // panel is already right there next to the calendar, so these would just be a second, redundant set of
   // buttons cluttering every card for no reason.
-  const quickRsvp = isMobileViewport() && my.length && !locked ? `<div class="day-rsvp" onclick="event.stopPropagation()">${my.map((m) => {
+  const quickRsvp = isMobileViewport() && my.length && !locked ? `<div class="day-rsvp">${my.map((m) => {
     const s = e.rsvps[m.id] || 'none';
     const b = (val, label) => `<button class="btn sm ${s === val ? 'on' : ''}" data-act="rsvp" data-ev="${e.id}" data-m="${m.id}" data-s="${s === val ? 'none' : val}">${label}</button>`;
     return `<span class="day-rsvp-row">${my.length > 1 ? `<span class="muted small">${esc(m.name)}</span>` : ''}${b('yes', 'Attend')}${b('no', 'Not attend')}</span>`;
