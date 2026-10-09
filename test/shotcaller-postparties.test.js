@@ -82,18 +82,27 @@ async function startServer() {
 
 const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { await s.stop(); } });
 
+let makeEventWithPartiesCalls = 0;
 async function makeEventWithParties(s, partiesSpec) {
   const total = partiesSpec.reduce((n, spec) => n + spec.members, 0);
   const memberIds = [];
   // owner must be distinct per character - the officer token itself can only ever own one character, same as
   // any other player (see test/api.test.js's "party presets keep names and leaders" test for the same pattern).
-  for (let i = 0; i < total; i++) memberIds.push((await s.call('/api/members', 'POST', { name: 'Player' + i, role: 'DPS', owner: 'Player' + i }, s.officer)).body.id);
+  // The call counter keeps owners unique across multiple calls within the same test (same server, same db),
+  // not just within one call - otherwise a second call's "PlayerN" owners collide with the first call's.
+  const batch = makeEventWithPartiesCalls++;
+  for (let i = 0; i < total; i++) memberIds.push((await s.call('/api/members', 'POST', { name: `Player${batch}_${i}`, role: 'DPS', owner: `Player${batch}_${i}` }, s.officer)).body.id);
   const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: '2999-01-01T20:00:00Z' }, s.officer)).body;
   let cursor = 0;
   const parties = partiesSpec.map((spec, i) => {
     const members = memberIds.slice(cursor, cursor + spec.members);
     cursor += spec.members;
-    return { name: 'Party ' + (i + 1), members, leader: spec.leader ? members[0] : null, placeholder: !!spec.placeholder };
+    return {
+      name: 'Party ' + (i + 1), members, leader: spec.leader ? members[0] : null,
+      // placeholderOverride lets a spec force the opposite of the automatic ≤3-member rule, either direction -
+      // omit it to just rely on that automatic rule (the default for every existing spec/test).
+      ...(spec.placeholderOverride !== undefined ? { placeholderOverride: true, placeholder: !!spec.placeholder } : {}),
+    };
   });
   await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties }, s.officer);
   return ev;
@@ -119,11 +128,37 @@ withServer('enabling shotcaller blocks the WHOLE post when a non-placeholder par
   assert.equal(s.bot.calls.length, 0, 'the Shotcaller bot was never even contacted');
 });
 
-withServer('a manually-flagged placeholder party is exempt from the leader check even with more than 3 members', async (s) => {
-  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 6, leader: false, placeholder: true }]);
+withServer('a manually-flagged placeholder party is exempt from the leader check, AND skipped entirely from the Shotcaller session', async (s) => {
+  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 6, leader: false, placeholderOverride: true, placeholder: true }]);
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
   assert.equal(r.status, 200);
   assert.equal(r.body.shotcaller.ok, true);
+  const sent = s.bot.calls.find((c) => c.url.endsWith('/session/start'));
+  assert.equal(sent.body.count, 1, 'only the anchor party - the flagged placeholder gets no voice channel at all');
+  assert.equal(sent.body.partyNames.length, 0);
+});
+
+withServer('a party with 3 or fewer members is skipped from Shotcaller automatically, same as an explicitly-flagged one', async (s) => {
+  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: false }]);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.shotcaller.ok, true);
+  const sent = s.bot.calls.find((c) => c.url.endsWith('/session/start'));
+  assert.equal(sent.body.count, 1, 'the 2-member party is auto-placeholder and gets no channel');
+});
+
+withServer('an officer can override a ≤3-member party to NOT be a placeholder, so it is included (and then needs a leader like any other real party)', async (s) => {
+  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: false, placeholderOverride: true, placeholder: false }]);
+  const blocked = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
+  assert.equal(blocked.status, 400, 'forced out of placeholder status, this 2-member party now needs a leader too');
+  assert.match(blocked.body.error, /Party 2/);
+
+  const ev2 = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: true, placeholderOverride: true, placeholder: false }]);
+  const r = await s.call(`/api/events/${ev2.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
+  assert.equal(r.status, 200);
+  const sent = s.bot.calls.filter((c) => c.url.endsWith('/session/start')).pop();
+  assert.equal(sent.body.count, 2, 'the override makes it a real party, so it gets its own channel despite having only 2 members');
+  assert.equal(sent.body.partyNames.length, 1);
 });
 
 withServer('a valid combined post actually posts to Discord AND starts Shotcaller, with party names from the leaders', async (s) => {

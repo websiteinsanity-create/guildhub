@@ -17,7 +17,10 @@ const KEY = 'test-shotcaller-key';
 // A minimal stand-in for the bot's src/api.js: just enough of /voice-channels and /session/start (plus the
 // plain status/mute/stop/dedicated/additional-callers routes) to exercise Guild Hall's proxy, recording every
 // call it receives so a test can assert on what Guild Hall actually sent.
-function startFakeBot() {
+//
+// startDelayMs simulates the real bot's slow /session/start (creating channels + logging relay bots in one at a
+// time, as its own docs describe) so a test can confirm Guild Hall waits long enough instead of giving up early.
+function startFakeBot(startDelayMs = 0) {
   const calls = [];
   const server = http.createServer((req, res) => {
     let data = '';
@@ -30,7 +33,8 @@ function startFakeBot() {
       if (req.url === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: '200000000000000001', name: 'General Voice' }, { id: '200000000000000002', name: 'Officer Voice' }] });
       if (req.url === `/api/guilds/${GUILD}/session/start`) {
         if (body.channelId === '900000000000000099') return send(400, { error: 'That channel is not a voice channel in this server.' });
-        return send(200, { active: true, muted: false, dedicated: body.dedicatedCallerId ? [body.dedicatedCallerId] : [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) });
+        const reply = () => send(200, { active: true, muted: false, dedicated: body.dedicatedCallerId ? [body.dedicatedCallerId] : [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) });
+        return startDelayMs ? setTimeout(reply, startDelayMs) : reply();
       }
       if (req.url === `/api/guilds/${GUILD}/session`) return send(200, { active: false, lastVoiceChannel: null });
       send(404, { error: 'Not found' });
@@ -110,19 +114,39 @@ withServer('POST /api/shotcaller/start forwards count/channelId/partyNames/dedic
   assert.match(rejected.body.error, /not a voice channel/);
 });
 
+test('POST /api/shotcaller/start waits past the old 5s timeout for a slow-but-working bot (channel creation + relay logins take a while)', { timeout: 15000 }, async () => {
+  // 6.5s comfortably clears the fast calls' 5s timeout but is still well inside startSession's own 45s
+  // allowance for /start specifically - reproduces the user's real "something went wrong" report, where a bot
+  // that is genuinely still working (just slow) used to read back as a 502 instead of succeeding.
+  const bot = await startFakeBot(6500);
+  const s = await startServer(bot);
+  try {
+    const r = await s.call('/api/shotcaller/start', 'POST', { count: 2, channelId: '200000000000000001' }, s.officer);
+    assert.equal(r.status, 200, 'the slow-but-successful bot response is not treated as a timeout/failure: ' + JSON.stringify(r.body));
+    assert.equal(r.body.active, true);
+  } finally {
+    await s.stop(); bot.server.close();
+  }
+});
+
 withServer('GET /api/shotcaller/status still works after generalizing callBot (it now hits /session, not a hardcoded path)', async (s) => {
   const r = await s.call('/api/shotcaller/status', 'GET', null, s.officer);
   assert.equal(r.status, 200);
   assert.equal(r.body.active, false);
 });
 
-withServer('a party can be flagged as a placeholder, independently of its member count', async (s) => {
+withServer('a party can be explicitly overridden as a placeholder, or not, independently of stored defaults', async (s) => {
   const a = (await s.call('/api/members', 'POST', { name: 'Aria', role: 'DPS' }, s.officer)).body.id;
-  const p = (await s.call('/api/presets', 'POST', { name: 'Siege', parties: [{ name: 'Front', members: [a], placeholder: true }, { name: 'Back', members: [] }] }, s.officer)).body;
+  const p = (await s.call('/api/presets', 'POST', { name: 'Siege', parties: [
+    { name: 'Front', members: [a], placeholderOverride: true, placeholder: true },
+    { name: 'Back', members: [] },
+  ] }, s.officer)).body;
+  assert.equal(p.parties[0].placeholderOverride, true);
   assert.equal(p.parties[0].placeholder, true);
-  assert.equal(p.parties[1].placeholder, false, 'placeholder defaults to false - it is a manual flag, not inferred from member count here');
-  const unset = (await s.call(`/api/presets/${p.id}`, 'PUT', { parties: [{ ...p.parties[0], placeholder: false }, p.parties[1]] }, s.officer)).body;
-  assert.equal(unset.parties[0].placeholder, false, 'can be switched back off again');
+  assert.equal(p.parties[1].placeholderOverride, false, 'placeholderOverride defaults to false - no explicit decision was made for this party');
+  assert.equal(p.parties[1].placeholder, false);
+  const unset = (await s.call(`/api/presets/${p.id}`, 'PUT', { parties: [{ ...p.parties[0], placeholderOverride: false }, p.parties[1]] }, s.officer)).body;
+  assert.equal(unset.parties[0].placeholderOverride, false, 'the override itself can be cleared again, falling back to the automatic (member-count) rule');
 });
 
 withServer('an event stores shotcallerAutoStart, and it is pre-ticked but still editable on the generated events of a series', async (s) => {
