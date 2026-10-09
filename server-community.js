@@ -210,15 +210,17 @@ module.exports = function install(ctx) {
     // undone), so a Shotcaller problem comes back as shotcaller.ok:false instead of an error response.
     let shotcaller = null;
     if (sc) {
-      // Placeholder parties are skipped entirely here - no voice channel is created for them and they don't
-      // count toward the bot's 12-party cap, same rule the manual Start dialog's preset/event matching uses
-      // (public/shotcaller.js). channels[0] is always the picked voice channel (Party 1) and is never renamed -
+      // channels[0] is always the picked voice channel (Party 1) and is never renamed - it's an existing
+      // channel the officer explicitly chose, not one Shotcaller creates, so it always counts regardless of
+      // its own placeholder status (ev.parties[0]'s member count/flag is irrelevant here). Placeholder parties
+      // AFTER that are skipped entirely - no voice channel created for them and they don't count toward the
+      // bot's 12-party cap, same rule the manual Start dialog's preset/event matching uses (public/shotcaller.js).
       // partyNames[0] names channels[1] (Party 2), and so on, matching the bot's own /start endpoint.
-      const realParties = ev.parties.filter((p) => !partyIsPlaceholder(p));
-      const partyNames = realParties.slice(1).map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
+      const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+      const partyNames = realRest.map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
       try {
         const started = await shotcallerApi.startSession({
-          channelId: sc.channelId, count: realParties.length, partyNames,
+          channelId: sc.channelId, count: 1 + realRest.length, partyNames,
           dedicatedCallerId: sc.dedicatedCallerId || null, autoReplace: true,
         });
         audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session for "${ev.title}" while posting its parties to Discord.`);

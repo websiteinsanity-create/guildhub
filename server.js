@@ -276,8 +276,16 @@ function normParties(arr) {
     // Used by the "post to Discord + start Shotcaller" leader check (server-community.js) and by Shotcaller
     // itself to decide which parties get skipped entirely (no voice channel, not counted toward its 12-party
     // cap) - see server-community.js's post-parties route and public/shotcaller.js's Start dialog.
-    const placeholderOverride = !Array.isArray(p) && !!(p && p.placeholderOverride);
     const placeholder = !Array.isArray(p) && !!(p && p.placeholder);
+    // Back-compat: data saved before placeholderOverride existed only ever stored a bare `placeholder`
+    // boolean, and the only way it could be `true` was an officer's explicit "Mark as placeholder" click (the
+    // default was always false) - so treat that old `true` as an override too, or it would silently stop being
+    // a placeholder the moment this ran (falling through to the automatic ≤3-member rule instead) and get
+    // counted into a Shotcaller session again, shifting every party name after it by one. An old `false` was
+    // always just the untouched default and already behaved exactly like the automatic rule, so it implies no
+    // override. A request that explicitly sends placeholderOverride (true or false) - from the current party
+    // menu toggle, or anything else written after this version - is honored as-is instead of reinterpreted.
+    const placeholderOverride = !Array.isArray(p) && p && p.placeholderOverride !== undefined ? !!p.placeholderOverride : placeholder;
     return { name, members, leader, builds, placeholder, placeholderOverride };
   });
 }

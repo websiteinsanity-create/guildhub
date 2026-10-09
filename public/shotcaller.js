@@ -11,6 +11,12 @@
 
 let SC = { loading: true, data: null, error: '' };
 let scTimer = null, scActive = false;
+// Set true the instant the Start form submits (before the request even goes out) and cleared once the bot
+// answers - starting can legitimately take up to 45s (see server-shotcaller.js), so the page shows this
+// instead of the plain "Inactive" state for that whole stretch, rather than leaving the dialog open and
+// looking stuck. Persists across a 5s poll tick (viewShotcaller checks it before SC.data.active) since the
+// session genuinely isn't active yet partway through starting.
+let scStarting = false;
 
 async function pollShotcaller() {
   try { SC = { loading: false, data: await api('/api/shotcaller/status'), error: '' }; }
@@ -54,6 +60,7 @@ function viewShotcaller() {
     <div class="panel"><div class="muted">Shotcaller is not set up on this server yet. Set <code>SHOTCALLER_URL</code> and <code>SHOTCALLER_API_KEY</code> in the server's environment to turn this page on.</div></div>`;
   if (SC.loading) return '<div class="page-head"><div><h1>Shotcaller</h1></div></div><div class="panel"><div class="muted">Loading…</div></div>';
   if (SC.error) return `<div class="page-head"><div><h1>Shotcaller</h1></div></div><div class="panel"><div class="warn-line">${esc(SC.error)}</div></div>`;
+  if (scStarting) return scStartingPage();
   return SC.data.active ? scActivePage(SC.data) : scInactivePage();
 }
 VIEWS.shotcaller = () => viewShotcaller();
@@ -104,6 +111,33 @@ function scActivePage(d) {
 
       <div class="panel" style="opacity:.55"><h3>Bridge</h3>
         <div class="muted small" style="margin-top:8px">Cross-guild bridge control is coming in a future update.</div>
+      </div>
+    </aside>
+  </div>`;
+}
+
+function scStartingPage() {
+  return `<div class="page-head"><div><h1>Shotcaller</h1><div class="muted">Starting the session - this can take up to a minute while voice channels are created and the relay bots connect.</div></div></div>
+
+  <div class="stats">
+    <div class="stat" style="--c:#eba23c"><div class="k">Session</div><div class="v" style="font-size:28px">🟡 Starting…</div></div>
+    <div class="stat" style="--c:var(--muted)"><div class="k">Audio</div><div class="v" style="font-size:28px">—</div></div>
+    <div class="stat"><div class="k">Parties</div><div class="v">—</div></div>
+    <div class="stat"><div class="k">Players connected</div><div class="v">—</div></div>
+  </div>
+
+  <div class="events-layout">
+    <div class="cal">
+      <div class="panel"><h3>Parties</h3>
+        <div style="margin-top:12px;padding:40px 20px;text-align:center;border:1px dashed var(--line);border-radius:8px">
+          <strong class="muted" style="font-size:17px">Setting up voice channels…</strong>
+        </div>
+      </div>
+    </div>
+
+    <aside class="ev-side">
+      <div class="panel"><h3>Controls</h3>
+        <div class="seg" style="margin-top:10px"><button class="btn sm" disabled>▶ Starting…</button></div>
       </div>
     </aside>
   </div>`;
@@ -199,10 +233,10 @@ async function scStartDialog() {
         ${presetsWithParties.length ? '<option value="preset">Use preset - match a saved line-up</option>' : ''}
       </select></div>
     <div class="field hidden" id="sc-setup-event"><label>Event</label>
-      <select name="eventId">${upcomingEvents.map((e) => { const n = e.parties.filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}">${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+      <select name="eventId">${upcomingEvents.map((e) => { const n = 1 + e.parties.slice(1).filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}">${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
       <div class="muted small" style="margin-top:6px">Party count comes from this event's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field hidden" id="sc-setup-preset"><label>Preset</label>
-      <select name="presetId">${presetsWithParties.map((p) => { const n = p.parties.filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}">${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+      <select name="presetId">${presetsWithParties.map((p) => { const n = 1 + p.parties.slice(1).filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}">${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
       <div class="muted small" style="margin-top:6px">Party count comes from this preset's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field"><label>Shotcaller</label>
       <select name="dedicatedCallerId">
@@ -231,23 +265,37 @@ FORMS['shotcaller-start'] = (f, fd) => {
   if (fd.setupKind === 'event' || fd.setupKind === 'preset') {
     const chosen = fd.setupKind === 'event' ? byId(S.events, fd.eventId) : byId(S.presets, fd.presetId);
     if (!chosen || !chosen.parties.length) return toast('Pick a valid event or preset.', true);
-    // Placeholder parties are skipped entirely - no voice channel for them, and they don't count toward the
-    // 12-party cap - same rule the combined Post-to-Discord+Start flow uses (server-community.js).
-    const realParties = chosen.parties.filter((p) => !partyIsPlaceholder(p));
-    if (!realParties.length) return toast(`"${chosen.title || chosen.name}" has no non-placeholder parties to start.`, true);
-    if (realParties.length > 12) return toast(`"${chosen.title || chosen.name}" has ${realParties.length} non-placeholder parties - Shotcaller supports at most 12.`, true);
-    count = realParties.length;
-    // channels[0] is always the picked voice channel above (Party 1) and is never renamed - partyNames[0] names
-    // channels[1] (Party 2), and so on, matching the bot's own /start endpoint indexing.
-    partyNames = realParties.slice(1).map((p) => { const ld = p.leader ? byId(S.members, p.leader) : null; return ld ? `${ld.name}'s Party` : null; });
+    // channels[0] is always the picked voice channel above (Party 1) and is never renamed - it's an existing
+    // channel you chose yourself, not one Shotcaller creates, so it always counts regardless of its own
+    // placeholder status. Placeholder parties after that are skipped entirely - no voice channel for them, and
+    // they don't count toward the 12-party cap - same rule the combined Post-to-Discord+Start flow uses
+    // (server-community.js). partyNames[0] names channels[1] (Party 2), and so on, matching the bot's own
+    // /start endpoint indexing.
+    const realRest = chosen.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+    if (1 + realRest.length > 12) return toast(`"${chosen.title || chosen.name}" has ${1 + realRest.length} non-placeholder parties - Shotcaller supports at most 12.`, true);
+    count = 1 + realRest.length;
+    partyNames = realRest.map((p) => { const ld = p.leader ? byId(S.members, p.leader) : null; return ld ? `${ld.name}'s Party` : null; });
   } else {
     count = fd.mode === 'custom' ? Math.round(Number(fd.customCount)) : Number(fd.mode);
   }
   if (!Number.isInteger(count) || count < 1 || count > 12) return toast('Pick a party count from 1 to 12.', true);
-  scAct(async () => {
-    await api('/api/shotcaller/start', 'POST', { channelId: fd.channelId, count, partyNames, dedicatedCallerId: fd.dedicatedCallerId || null });
-    closeDialog();
-  }, 'Shotcaller session started');
+  // Starting can legitimately take up to 45s (server-shotcaller.js) - rather than leaving the dialog open and
+  // looking stuck for that whole stretch, close it immediately and switch the page itself into a "starting"
+  // state (scStartingPage) until the bot answers, same as any other long-running background request here.
+  closeDialog();
+  scStarting = true;
+  render();
+  (async () => {
+    try {
+      await api('/api/shotcaller/start', 'POST', { channelId: fd.channelId, count, partyNames, dedicatedCallerId: fd.dedicatedCallerId || null });
+      toast('Shotcaller session started');
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      scStarting = false;
+      await pollShotcaller();
+    }
+  })();
 };
 
 ACTIONS['sc-dedicated-manage'] = () => {

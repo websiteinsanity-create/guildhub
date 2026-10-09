@@ -45,10 +45,11 @@ function startFakeBot() {
   return new Promise((resolve) => server.listen(0, () => resolve({ server, url: `http://localhost:${server.address().port}`, calls, activeSession: () => session })));
 }
 
-async function startServer() {
+async function startServer(seedDb) {
   const fake = await startFakeDiscord();
   const bot = await startFakeBot();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-scpp-'));
+  if (seedDb) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(seedDb));
   const port = 40000 + Math.floor(Math.random() * 20000);
   const base = `http://localhost:${port}`;
   const proc = spawn(process.execPath, ['server.js'], {
@@ -80,7 +81,7 @@ async function startServer() {
   };
 }
 
-const withServer = (name, fn) => test(name, async () => { const s = await startServer(); try { await fn(s); } finally { await s.stop(); } });
+const withServer = (name, fn, seedDb) => test(name, async () => { const s = await startServer(seedDb); try { await fn(s); } finally { await s.stop(); } });
 
 let makeEventWithPartiesCalls = 0;
 async function makeEventWithParties(s, partiesSpec) {
@@ -205,4 +206,44 @@ withServer('the Discord post still succeeds even when Shotcaller itself rejects 
   assert.equal(s.fake.state.posts.length, 1, 'the Discord post went through');
   assert.equal(r.body.shotcaller.ok, false);
   assert.match(r.body.shotcaller.error, /not a voice channel/);
+});
+
+// Regression test: data saved before placeholderOverride existed only ever stored a bare `placeholder: true`
+// (no override field at all - it didn't exist yet). Without the back-compat handling in server.js's
+// normParties(), that old `true` would stop meaning anything once an officer's party had more than 3 members
+// (placeholderOverride defaults to false, so it falls through to the automatic ≤3-member rule instead) -
+// silently un-flagging it, so it gets counted into the Shotcaller session again AND inserts an extra entry
+// into partyNames, shifting every real party's name after it by one slot.
+const member = (id) => ({ id, owner: 'P' + id, name: 'P' + id, role: 'DPS', rank: 'Member', active: true, gearScore: 1, level: 1 });
+const ids = (...r) => r.map(member);
+withServer('a party saved as a placeholder before placeholderOverride existed (bare `placeholder: true`, no override field) is still skipped by Shotcaller, not just exempted from the leader check', async (s) => {
+  const r = await s.call(`/api/events/10/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
+  assert.equal(r.status, 200, 'not blocked by the leader check either - the old flag still exempts it there too: ' + JSON.stringify(r.body));
+  const sent = s.bot.calls.find((c) => c.url.endsWith('/session/start'));
+  assert.equal(sent.body.count, 2, 'only the anchor and the real leader party - the old-style placeholder (6 members, so NOT auto-exempt by the ≤3 rule) is still skipped despite having no override field');
+  assert.equal(sent.body.partyNames.length, 1);
+  assert.match(sent.body.partyNames[0], /^P14/, "the real leader party keeps its own name slot - not shifted by an extra entry for the old placeholder (which would otherwise land here first)");
+}, {
+  nextId: 50,
+  members: [...ids(1), ...ids(2, 3, 4, 5, 6, 7), ...ids(14, 15, 16, 17, 18, 19)],
+  events: [{
+    id: 10, title: 'Siege', type: 'Wargames', start: new Date(Date.now() + 86400000).toISOString(), rsvps: {}, attended: [],
+    parties: [
+      { name: 'Anchor', members: [1], leader: 1 },
+      // Pre-upgrade shape: `placeholder: true`, no `placeholderOverride` key at all. 6 members (not auto-exempt
+      // by the ≤3 rule) and a leader already set, the way an officer might have left it after marking a
+      // half-formed party placeholder without clearing out who was already assigned to lead it.
+      { name: 'Old Placeholder', members: [2, 3, 4, 5, 6, 7], leader: 2, placeholder: true },
+      { name: 'Leader Party', members: [14, 15, 16, 17, 18, 19], leader: 14 },
+    ],
+  }],
+});
+
+withServer('the picked anchor channel (Party 1) always counts, even if it has 3 or fewer members itself - it is an existing channel you chose, not one Shotcaller has to decide whether to create', async (s) => {
+  const ev = await makeEventWithParties(s, [{ members: 2, leader: false }, { members: 6, leader: true }]);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const sent = s.bot.calls.find((c) => c.url.endsWith('/session/start'));
+  assert.equal(sent.body.count, 2, 'the anchor (2 members) still counts, plus the real 6-member party - it must not be dropped for having 3 or fewer members itself');
+  assert.equal(sent.body.partyNames.length, 1);
 });
