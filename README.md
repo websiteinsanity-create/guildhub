@@ -319,6 +319,34 @@ Good to know:
   Caddy, or a tunnel such as Cloudflare Tunnel, does that for you).
 - Trying the demo later? `start-demo.bat` always uses the demo mode, whatever is in `.env`.
 
+## Shotcaller (optional)
+
+A live control panel for a separate, self-hosted [Shotcaller](https://github.com/websiteinsanity-create/shotcallerbot)
+Discord bot (voice-session start, mute, stop, and dedicated/extra caller management). Officers get a **Shotcaller**
+page in the nav once it's set up, including a Start dialog that can pick the voice channel, party count (or match
+an event's or preset's line-up, renaming the created channels to each party's leader), and dedicated caller - or a
+session can still be started the usual way, with `/shotcaller start` in Discord.
+
+Parties also get a **placeholder** flag (in each party's "..." menu on the Parties/board pages - a party with 3 or
+fewer members counts as one automatically too), and events/recurring events get an "Also start Shotcaller when
+posting this event's parties to Discord" checkbox that pre-ticks the same option in the Post-to-Discord dialog
+(still changeable there each time). When that option is on, every party with more than 3 members needs a leader
+before the post goes through - posting is blocked entirely until that's fixed, with the exception of any party
+flagged as a placeholder. An already-running Shotcaller session is stopped and replaced automatically; the
+Discord post itself always goes through even if Shotcaller then fails to start, which is reported separately.
+
+1. Set up Shotcaller itself (its own repo, its own `docker-compose.yml`) and generate a shared secret for it:
+   `openssl rand -hex 32`. Put that value in Shotcaller's own `CONTROL_API_KEY`.
+2. In Guild Hall's `.env`, set:
+   - `SHOTCALLER_URL` - where Guild Hall can reach the bot's control API. If Shotcaller runs with
+     `network_mode: host` and Guild Hall runs on the normal Docker network (the default here), that's
+     `http://host.docker.internal:<port>`, where `<port>` is whatever the bot's health server listens on. The
+     provided `docker-compose.yml` already adds the `extra_hosts` entry Guild Hall needs to resolve that hostname.
+   - `SHOTCALLER_API_KEY` - the exact same value as Shotcaller's `CONTROL_API_KEY`.
+   - `DISCORD_GUILD_ID` (already set for Discord sign-in) is reused - Shotcaller only ever runs on that same server.
+3. In Admin > Shotcaller, tick which players can be picked as the dedicated or extra caller(s) - only players who
+   have signed in to Guild Hall at least once can be picked.
+
 ## Quick start on your own PC
 
 1. Install Node.js (LTS) from https://nodejs.org. On Windows 10/11 you can also run

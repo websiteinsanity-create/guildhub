@@ -45,7 +45,7 @@ function seriesPanel() {
 
 function seriesDialog(se) {
   const isNew = !se, st = S.settings, t0 = S.cfg.eventTypes[0];
-  se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, pinEnabled: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true };
+  se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, pinEnabled: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true, shotcallerAutoStart: false };
   openDialog(`
   <form data-form="series" data-id="${se.id || ''}">
     <h2>${isNew ? 'New recurring event' : 'Edit recurring event'}</h2>
@@ -75,6 +75,7 @@ function seriesDialog(se) {
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${se.reminders === false ? '' : 'checked'}> Remind players who have not answered</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${se.mandatory ? 'checked' : ''}> Mandatory (counts toward "Qualified for loot")</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(se.pinEnabled ?? se.mandatory) ? 'checked' : ''}> Attendance PIN for these events (on by default for a mandatory event, off for an optional one)</label>
+    ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${se.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting these events' parties to Discord (can still be switched either way at post time)</label>` : ''}
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(se.description)}</textarea></div>
     <div class="muted small">Dates are created about ${Math.round((S.cfg.recurrenceHorizonDays || 42) / 7)} weeks ahead. Changing the series changes all upcoming dates (sign-ups are kept). Deleting a single date only skips that date.</div>
     <div class="dlg-actions">
@@ -92,6 +93,7 @@ ACTIONS['series-delete'] = () => {
 };
 FORMS.series = (f, fd, id) => {
   const body = { ...fd, weekdays: [...f.querySelectorAll('input[name=wd]:checked')].map((i) => Number(i.value)), reminders: f.elements.reminders.checked, mandatory: f.elements.mandatory.checked, pinEnabled: f.elements.pinEnabled.checked };
+  if (f.elements.shotcallerAutoStart) body.shotcallerAutoStart = f.elements.shotcallerAutoStart.checked;
   delete body.wd;
   let created = 0;
   act(async () => { const r = await api(id ? '/api/series/' + id : '/api/series', id ? 'PUT' : 'POST', body); created = r.created; closeDialog(); })
@@ -1329,6 +1331,22 @@ ACTIONS['parties-post'] = async (el, d) => {
     channels = rc.channels;
     if (rr) mentionNames = (pp.mentionRoleIds || []).map((id) => (rr.roles.find((r) => r.id === id) || { name: id }).name);
   } catch (e) { problem = e.message; }
+  // Shotcaller fields are optional and fetched separately, so a failure loading its voice-channel list only
+  // turns the checkbox off (with an explanation) rather than blocking the plain Discord post above.
+  let scChannels = [], scProblem = '', scLast = null;
+  if (S.cfg.shotcallerOn) {
+    try {
+      const [rv, rs] = await Promise.all([api('/api/shotcaller/voice-channels'), api('/api/shotcaller/status')]);
+      scChannels = rv.channels; scLast = rs.lastVoiceChannel || null;
+    } catch (e) { scProblem = e.message; }
+    if (!scChannels.length && !scProblem) scProblem = 'Could not load the voice channel list.';
+  }
+  const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+  const st = S.settings.shotcaller || {};
+  const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
+  const scLastId = scLast && scChannels.some((c) => c.id === scLast.channelId) ? scLast.channelId : (scChannels[0] || {}).id;
+  const scAvailable = S.cfg.shotcallerOn && !scProblem && !missingLeaders.length;
+  const scChecked = scAvailable && !!ev.shotcallerAutoStart;
   const when = new Date(ev.start);
   const text = (pp.text || '📋 **{event}**: parties for {date} at {time}\n{link}')
     .replace(/\{event\}/g, ev.title).replace(/\{type\}/g, ev.type).replace(/\{parties\}/g, ev.parties.length)
@@ -1340,14 +1358,32 @@ ACTIONS['parties-post'] = async (el, d) => {
     <div class="field"><label for="pp-tx">Text</label><textarea id="pp-tx" name="text" maxlength="1900" style="min-height:90px">${esc(text)}</textarea><div class="muted small">{link} becomes the link to this event.</div></div>
     ${mentionNames.length ? `<div class="muted small" style="margin:-4px 0 12px">Will also @-mention: <b>${mentionNames.map(esc).join(', ')}</b> (set in Admin > Discord).</div>` : ''}
     ${pp.deletePrevious ? `<div class="muted small" style="margin:-4px 0 12px">The last party announcement will be deleted right before this one posts (Admin > Discord).</div>` : ''}
+    ${S.cfg.shotcallerOn ? `<hr style="border-color:var(--line);margin:14px 0">
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:10px"><input type="checkbox" name="scEnabled" id="pp-sc-on" data-act="pp-sc-toggle" ${scChecked ? 'checked' : ''} ${scAvailable ? '' : 'disabled'}> Also start Shotcaller for this event</label>
+    ${scProblem ? `<div class="muted small" style="margin:-4px 0 10px">${esc(scProblem)}</div>` : ''}
+    ${missingLeaders.length ? `<div class="warn-line" style="margin:-4px 0 10px">${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader, so Shotcaller can't start with this post - give ${missingLeaders.length === 1 ? 'it' : 'them'} a leader, or mark ${missingLeaders.length === 1 ? 'it' : 'them'} as a placeholder (party menu > "Mark as placeholder"), first.</div>` : ''}
+    <div id="pp-sc-fields" class="${scChecked ? '' : 'hidden'}">
+      <div class="field"><label>Voice channel (becomes Party 1 - yours)</label>
+        <select name="scChannelId">${scChannels.map((c) => `<option value="${esc(c.id)}" ${c.id === scLastId ? 'selected' : ''}>🔊 ${esc(c.name)}${scLast && c.id === scLast.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
+      <div class="field"><label>Shotcaller</label>
+        <select name="scDedicatedCallerId">
+          <option value="">No dedicated caller - anyone can call out</option>
+          ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === st.defaultCallerId ? 'selected' : ''}>${esc(c.name)}${c.key === st.defaultCallerId ? ' (default)' : ''}</option>`).join('')}
+        </select></div>
+      <div class="muted small" style="margin:-4px 0 12px">Party count and channel names come from this event's parties (as they are right now). If a Shotcaller session is already running, it is stopped and replaced automatically.</div>
+    </div>` : ''}
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary" ${problem ? 'disabled' : ''}>Post it</button></div></form>`, true);
 };
+CHANGES['pp-sc-toggle'] = (el) => { $('#pp-sc-fields').classList.toggle('hidden', !el.checked); };
 FORMS.postparties = (f, fd, id) => {
   const sel = f.elements.channelId, name = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.replace(/^#/, '') : '';
+  const scOn = f.elements.scEnabled && f.elements.scEnabled.checked;
+  const shotcaller = scOn ? { enabled: true, channelId: fd.scChannelId, dedicatedCallerId: fd.scDedicatedCallerId || null } : undefined;
   act(async () => {
-    await api(`/api/events/${id}/post-parties`, 'POST', { image: PARTY_IMG, text: fd.text, channelId: fd.channelId, channelName: name });
+    const r = await api(`/api/events/${id}/post-parties`, 'POST', { image: PARTY_IMG, text: fd.text, channelId: fd.channelId, channelName: name, shotcaller });
     closeDialog(); PARTY_IMG = '';
     dmMercsTheirParty(byId(S.events, Number(id)));   // best-effort, does not block or affect the toast above
+    if (r.shotcaller) toast(r.shotcaller.ok ? 'Shotcaller started' : `Shotcaller could not start: ${r.shotcaller.error}`, !r.shotcaller.ok);
   }, `Posted in #${name}`);
 };
 // Every mercenary currently placed in a party gets a DM with just that one party - same picture style as the
@@ -1489,6 +1525,7 @@ VIEWS.admin = () => {
     + discordAdmin()
     + officersAdmin()
     + coachesAdmin()
+    + shotcallerAdmin()
     + mercenariesAdmin()
     + adminPlayersList()
     + noticesAdmin()

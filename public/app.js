@@ -297,6 +297,7 @@ const NAV = [
   { key: 'leave', label: () => 'Leave of absence', badge: () => (isOfficer() ? 0 : 0) },
   { key: 'approvals', label: () => 'Approvals', officer: true, badge: () => S.changes.filter((c) => c.status === 'pending').length + S.leaves.filter((l) => l.status === 'pending').length + S.explanations.filter((x) => x.status === 'pending').length + S.applications.filter((a) => a.status === 'pending').length },
   { key: 'warnings', label: () => 'Warnings', badge: () => (isOfficer() ? 0 : activeWarn(S.user.key).length) },
+  { key: 'shotcaller', label: () => 'Shotcaller', officer: true },
   { key: 'auditlog', label: () => 'Audit log', officer: true },
   { key: 'admin', label: () => 'Admin', officer: true },
   { key: 'profile', label: () => 'My profile', gap: true },
@@ -983,11 +984,16 @@ function memberRow(m, at, o) {
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
+// A party counts as a placeholder (not a real line-up yet) if an officer flagged it manually, OR it has 3 or
+// fewer members - either way, server-features.js's "post to Discord + start Shotcaller" leader check skips it.
+// members.length (raw assigned count), not confirmed/attending, matches how that check reads parties too.
+function partyIsPlaceholder(p) { return !!p.placeholder || p.members.length <= 3; }
 function partyCard(ctx, parties, p, i, ev) {
   const off = isOfficer();
   const at = `data-kind="${ctx.kind}" data-owner="${ctx.id}" data-i="${i}"`;
   const ms = p.members.map((id) => byId(S.members, id)).filter(Boolean);
   const size = S.cfg.partySize;
+  const ph = partyIsPlaceholder(p);
   // A preset carries whoever was in the line-up when it was saved, not whoever actually said Going for THIS
   // event - so once loaded into an event, anyone in the party who has not confirmed attending (and is not a
   // mercenary, who was placed here deliberately rather than loaded from a saved line-up) is shown separately,
@@ -999,8 +1005,10 @@ function partyCard(ctx, parties, p, i, ev) {
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
       ${off ? `<input class="party-name" ${at} data-act="party-rename" value="${esc(p.name)}" maxlength="40" aria-label="Party name">` : `<span class="party-title">${esc(p.name)}</span>`}
       <span class="muted small ${ms.length > size ? 'over-cap' : ''}">${ms.length}/${size}</span>
+      ${ph ? `<span class="muted small" title="${p.placeholder ? 'Marked as placeholder' : 'Treated as a placeholder automatically (3 or fewer members)'}">Placeholder</span>` : ''}
       ${off ? `<details class="menu"><summary aria-label="Options for ${esc(p.name)}">&hellip;</summary><div class="menu-list">
         <button data-act="p-left" ${at}>Move party left</button><button data-act="p-right" ${at}>Move party right</button>
+        <button data-act="party-placeholder-toggle" ${at}>${p.placeholder ? 'Unmark as placeholder' : 'Mark as placeholder'}</button>
         <button data-act="p-clear" ${at}>Remove all members</button><button class="danger" data-act="party-del" ${at}>Delete party</button></div></details>` : ''}
     </div>
     <div class="pdrop" ${off ? 'data-drop="party"' : ''} data-i="${i}">
@@ -1220,7 +1228,7 @@ function attendancePanel(ev, past) {
 function eventDialog(ev, dateStr) {
   const isNew = !ev;
   const startIso = tzToIso((dateStr || addDayStr(todayTz(), 1)) + 'T20:00');      // 20:00 in your time zone
-  ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, pinEnabled: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0 };
+  ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, pinEnabled: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0, shotcallerAutoStart: false };
   openDialog(`
   <form data-form="event" data-id="${ev.id || ''}">
     <h2>${isNew ? 'New event' : 'Edit event'}</h2>
@@ -1240,6 +1248,7 @@ function eventDialog(ev, dateStr) {
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${ev.reminders === false ? '' : 'checked'}> Remind players who have not answered (times are set in Admin)</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(ev.pinEnabled ?? ev.mandatory) ? 'checked' : ''}> Attendance PIN for this event (on by default for a mandatory event, off for an optional one - switch it either way here)</label>
+    ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${ev.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting this event's parties to Discord (can still be switched either way at post time)</label>` : ''}
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(ev.description)}</textarea></div>
     <div class="dlg-actions">
       ${isNew ? '' : '<button type="button" class="btn danger left" data-act="event-delete">Delete</button>'}
@@ -1540,6 +1549,7 @@ document.addEventListener('click', async (e) => {
   else if (a === 'm-build') { const mid = Number(d.m); mutateParties(el, (ps, i) => { ps[i].builds = ps[i].builds || {}; if (d.b === 'main') delete ps[i].builds[mid]; else ps[i].builds[mid] = d.b; }); }
   else if (a === 'm-move') { const mid = Number(d.m), to = Number(d.to); mutateParties(el, (ps) => { const carried = (ps.find((p) => p.members.includes(mid)) || {}).builds?.[mid]; ps.forEach((p) => { p.members = p.members.filter((x) => x !== mid); if (p.leader === mid) p.leader = null; if (p.builds) delete p.builds[mid]; }); ps[to].members.push(mid); if (carried) (ps[to].builds = ps[to].builds || {})[mid] = carried; }); }
   else if (a === 'p-clear') mutateParties(el, (ps, i) => { ps[i].members = []; ps[i].leader = null; ps[i].builds = {}; });
+  else if (a === 'party-placeholder-toggle') mutateParties(el, (ps, i) => { ps[i].placeholder = !ps[i].placeholder; });
   else if (a === 'p-left' || a === 'p-right') mutateParties(el, (ps, i) => { const j = i + (a === 'p-right' ? 1 : -1); if (j >= 0 && j < ps.length) [ps[i], ps[j]] = [ps[j], ps[i]]; });
   else if (a === 'cal-day') { if (!e.target.closest('a') && isOfficer()) eventDialog(null, d.date); }
   else if (a === 'points-focus') { UI.pointsFocus = d.id ? Number(d.id) : null; render(); }
@@ -1624,6 +1634,7 @@ document.addEventListener('submit', async (e) => {
     fd.mandatory = f.elements.mandatory.checked;
     fd.pinEnabled = f.elements.pinEnabled.checked;
     fd.reminders = f.elements.reminders.checked;
+    if (f.elements.shotcallerAutoStart) fd.shotcallerAutoStart = f.elements.shotcallerAutoStart.checked;
     act(async () => {
       const r = await api(id ? '/api/events/' + id : '/api/events', id ? 'PUT' : 'POST', fd);
       closeDialog(); location.hash = '#/events/' + r.id;

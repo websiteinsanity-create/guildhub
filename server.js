@@ -31,6 +31,12 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), '
 
 const discord = createDiscord();
 
+// Shotcaller: a separate self-hosted Discord bot (live voice-session control). Both are empty by default, which
+// keeps the whole integration switched off - see server-shotcaller.js. The bot's own Discord server is read off
+// DISCORD_GUILD_ID above, not a second variable, since Guild Hall already knows it.
+const SHOTCALLER_URL = (process.env.SHOTCALLER_URL || '').replace(/\/+$/, '');
+const SHOTCALLER_API_KEY = process.env.SHOTCALLER_API_KEY || '';
+
 // Without Discord settings the app falls back to shared passcodes. That is meant for trying it out on your own PC.
 const MEMBER_PASSCODE = process.env.MEMBER_PASSCODE || 'guild';
 const OFFICER_PASSCODE = process.env.OFFICER_PASSCODE || 'officer';
@@ -67,6 +73,9 @@ const SETTING_DEFAULTS = {
   },
   // "Get mercenaries": which channel and Discord role to ping when an officer asks for outside help for one event.
   mercenaries: { channelId: '', channelName: '', roleId: '', roleName: '' },
+  // Shotcaller: who can be picked as the dedicated or extra caller(s) when running a live voice session - a
+  // shortlist the leadership curates in Admin, not the whole roster. candidateUserIds are Discord user ids.
+  shotcaller: { candidateUserIds: [], defaultCallerId: '' },
   // Extra ways to become an officer, on top of DISCORD_OFFICER_ROLE_IDS / DISCORD_OFFICER_USER_IDS in .env -
   // editable here instead of needing a server restart. Checked at sign-in, same as the .env ones.
   officerRoleIds: [], officerUserIds: [],
@@ -259,7 +268,11 @@ function normParties(arr) {
         if (k !== 'main' && m && (m.builds || []).some((b) => String(b.id) === k)) builds[id] = k;
       }
     }
-    return { name, members, leader, builds };
+    // placeholder: an officer's manual flag that this party is not a real line-up yet (so the "post to Discord +
+    // start Shotcaller" leader check, in server-features.js, does not block on it). Separate from the automatic
+    // ≤3-member exemption applied there, which is computed from members.length rather than stored.
+    const placeholder = !Array.isArray(p) && !!(p && p.placeholder);
+    return { name, members, leader, builds, placeholder };
   });
 }
 // Brings data written by older versions up to date. Runs on start and after a backup is restored.
@@ -284,6 +297,7 @@ function migrate() {
   db.settings.applications = { ...SETTING_DEFAULTS.applications, ...(db.settings.applications || {}) };
   db.settings.partyPost = { ...SETTING_DEFAULTS.partyPost, ...(db.settings.partyPost || {}) };
   db.settings.mercenaries = { ...SETTING_DEFAULTS.mercenaries, ...(db.settings.mercenaries || {}) };
+  db.settings.shotcaller = { ...SETTING_DEFAULTS.shotcaller, ...(db.settings.shotcaller || {}) };
   db.settings = { ...SETTING_DEFAULTS, ...(db.settings || {}) };
   db.settings.approvals = { ...SETTING_DEFAULTS.approvals, ...(db.settings.approvals || {}) };
   db.settings.branding = { ...SETTING_DEFAULTS.branding, ...(db.settings.branding || {}) };
@@ -415,7 +429,7 @@ const publicBranding = () => {
   const b = db.settings.branding;
   return { name: b.name, tagline: b.tagline, accent: b.accent, bgDim: b.bgDim, icon: b.iconFile ? '/uploads/' + b.iconFile : '', bg: b.bgFile ? '/uploads/' + b.bgFile : '' };
 };
-route('GET', '/api/config', () => ({ ...config, version: pkg.version, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
+route('GET', '/api/config', () => ({ ...config, version: pkg.version, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, shotcallerOn: !!(SHOTCALLER_URL && SHOTCALLER_API_KEY && discord.cfg.guildId), applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
 
 const closeAt = (ev) => Date.parse(ev.start) - (ev.signupCloseMinutes ?? db.settings.signupCloseDefault) * 60000;
 function pinInfo(ev) {
@@ -532,6 +546,10 @@ function pickEvent(b, ex) {
     signupCloseMinutes: int(b.signupCloseMinutes, ex ? ex.signupCloseMinutes : db.settings.signupCloseDefault, 0, 10080),
     pinWindowMinutes: int(b.pinWindowMinutes, ex ? ex.pinWindowMinutes : db.settings.pinWindowDefault, 1, 720),
     reminders: b.reminders === undefined ? (ex ? ex.reminders !== false : true) : b.reminders === true || b.reminders === 'true',
+    // Pre-ticks the "also start Shotcaller" checkbox in the Post-to-Discord dialog for this event (or, via a
+    // series, every event it generates) - that checkbox can still be switched either way at post time, this is
+    // only the default. Meaningless (and simply ignored) while Shotcaller itself isn't configured.
+    shotcallerAutoStart: b.shotcallerAutoStart === undefined ? !!(ex && ex.shotcallerAutoStart) : b.shotcallerAutoStart === true || b.shotcallerAutoStart === 'true',
   };
 }
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -1121,11 +1139,20 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
   return { moved: n };
 }, { officer: true });
 
+// ---------- Shotcaller control panel (officer-only proxy to the separate Shotcaller bot's HTTP API) ----------
+// Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
+// let "Post to Discord" also start a session - see server-community.js's post-parties route.
+const shotcallerApi = require('./server-shotcaller')({
+  route, need, HttpError, save, isOfficer, audit: audit.log,
+  shotcaller: { url: SHOTCALLER_URL, apiKey: SHOTCALLER_API_KEY, get guildId() { return discord.cfg.guildId; } },
+  get db() { return db; },
+});
+
 // ---------- more features (approvals, profiles, builds, requests, tags, recurring events, branding) ----------
 require('./server-features')({
   route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
-  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log,
+  LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi,
   get db() { return db; },
 });
 

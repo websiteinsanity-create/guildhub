@@ -421,6 +421,7 @@ module.exports = function install(ctx) {
     Object.assign(ev, {
       title: se.title || se.type, type: se.type, description: se.description, points: se.points, mandatory: se.mandatory, pinEnabled: se.pinEnabled,
       maxSignups: se.maxSignups, signupCloseMinutes: se.signupCloseMinutes, pinWindowMinutes: se.pinWindowMinutes, reminders: se.reminders,
+      shotcallerAutoStart: se.shotcallerAutoStart,
     });
   };
   function materialize() {
