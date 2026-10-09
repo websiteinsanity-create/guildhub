@@ -7,7 +7,7 @@
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 module.exports = function install(ctx) {
-  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, findMember, appUrl, audit } = ctx;
+  const { route, need, clean, newId, save, config, discord, isOfficer, pickMember, findEvent, findMember, appUrl, audit, shotcallerApi } = ctx;
   const db = () => ctx.db;
   const now = () => new Date().toISOString();
   const yes = (v) => v === true || v === 'true';
@@ -168,11 +168,27 @@ module.exports = function install(ctx) {
     return { ok: !!r.ok, error: r.error || '' };
   }, { officer: true });
 
+  // A party counts as a placeholder (not a real line-up yet) the same way public/app.js's partyIsPlaceholder()
+  // reads it client-side: an officer's manual flag, OR 3 or fewer members. Only used to decide which parties
+  // the Shotcaller leader check (below) is allowed to skip.
+  const partyIsPlaceholder = (p) => !!p.placeholder || p.members.length <= 3;
+
   // ---------------------------------------------------------------- "Post to Discord": the picture of an event's parties
   route('POST', '/api/events/:id/post-parties', async ({ body, user, params }) => {
     const D = db(), ev = findEvent(params.id), pp = D.settings.partyPost;
     need(ev, 404, 'Event not found.');
     need(discord.botEnabled, 400, 'The Discord bot is not set up yet (DISCORD_BOT_TOKEN). See Admin > Discord.');
+    // "Also start Shotcaller" validates everything up front and blocks the WHOLE action (the Discord post too)
+    // if it fails - there is no point posting the parties if the session that was supposed to go with them
+    // can't start, and no half-done state to untangle afterward either.
+    const sc = body.shotcaller && (body.shotcaller.enabled === true || body.shotcaller.enabled === 'true') ? body.shotcaller : null;
+    if (sc) {
+      const missing = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+      need(!missing.length, 400, `Pick a leader for ${missing.map((p) => `"${p.name}"`).join(', ')} first, or mark ${missing.length === 1 ? 'it' : 'them'} as a placeholder (party menu > "Mark as placeholder"), before starting Shotcaller with this post.`);
+      need(shotcallerApi.configured(), 400, 'Shotcaller is not set up yet. See Admin > Shotcaller.');
+      need(/^\d{15,25}$/.test(String(sc.channelId || '')), 400, 'Pick a voice channel for Shotcaller.');
+      if (sc.dedicatedCallerId) shotcallerApi.checkCandidates([String(sc.dedicatedCallerId)]);
+    }
     const channelId = String(body.channelId || pp.channelId || '');
     need(/^\d{15,25}$/.test(channelId), 400, 'Pick the Discord channel first.');
     const buf = Buffer.from(String(body.image || '').replace(/^data:[^,]*,/, ''), 'base64');
@@ -193,7 +209,27 @@ module.exports = function install(ctx) {
     if (r.ok && r.id) pp.lastMessage = { channelId, messageId: r.id };
     save();
     need(r.ok, 502, r.error || 'Discord did not accept the message.');
-    return { ok: true };
+
+    // The Discord post succeeded - Shotcaller is handled as a best-effort follow-on, not folded into the same
+    // pass/fail: failing the whole request here would be misleading (the post already happened and can't be
+    // undone), so a Shotcaller problem comes back as shotcaller.ok:false instead of an error response.
+    let shotcaller = null;
+    if (sc) {
+      // channels[0] is always the picked voice channel (Party 1) and is never renamed - partyNames[0] names
+      // channels[1] (Party 2), and so on, matching the bot's own /start endpoint and the manual Start dialog.
+      const partyNames = ev.parties.slice(1).map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
+      try {
+        const started = await shotcallerApi.startSession({
+          channelId: sc.channelId, count: ev.parties.length, partyNames,
+          dedicatedCallerId: sc.dedicatedCallerId || null, autoReplace: true,
+        });
+        audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session for "${ev.title}" while posting its parties to Discord.`);
+        shotcaller = { ok: true, data: started };
+      } catch (e) {
+        shotcaller = { ok: false, error: e.message || 'Could not start Shotcaller.' };
+      }
+    }
+    return { ok: true, shotcaller };
   }, { officer: true });
 
   // After "Post to Discord" (above) succeeds, the officer's browser calls this once per mercenary currently

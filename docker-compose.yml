@@ -46,8 +46,17 @@ services:
       # own PC, never on the internet). Change them if you use demo mode for anything but a quick local look.
       - MEMBER_PASSCODE=${MEMBER_PASSCODE:-guild}
       - OFFICER_PASSCODE=${OFFICER_PASSCODE:-officer}
+      # Optional: live control panel for a separate, self-hosted Shotcaller bot. Both have to be set to turn it
+      # on - DISCORD_GUILD_ID above is reused. See .env.example for how to fill these in.
+      - SHOTCALLER_URL=${SHOTCALLER_URL:-}
+      - SHOTCALLER_API_KEY=${SHOTCALLER_API_KEY:-}
     volumes:
       - /opt/persistent_volume/guildhub/data:/data
+    # Lets this container resolve host.docker.internal, needed to reach the Shotcaller bot when it runs with
+    # network_mode: host (a normal bridge-networked service otherwise cannot see a host-networked one by name).
+    # Harmless to leave in even if Shotcaller is not set up.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     labels:
       - com.centurylinklabs.watchtower.enable=true
     healthcheck:
