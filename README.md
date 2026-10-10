@@ -46,7 +46,9 @@ no dependencies: just Node 18+ and one JSON file of data.
   (a member only sees their own) and a player's active warnings always show on their dashboard. Warnings end by themselves after N
   days, or when there was no new warning for N quiet days (the oldest few or all of them vanish), or when the leadership removes them
   one at a time, or **all at once** for a player with the "Clear all" button on the Warnings page. With N active warnings a player is
-  **disqualified from loot** for as long as they have them. The leadership itself is never judged. In Admin, the whole system can also
+  **disqualified from loot** for as long as they have them. The leadership itself is never judged, and neither is anyone for an event that
+  happened before they had a character in the guild at all - a brand new player never gets a no-show or no-reply warning for history that
+  predates them, even though the rolling lookback window reaches back further than they have existed. In Admin, the whole system can also
   be **paused for a set number of hours** - a temporary pause on top of the usual on/off switch, for things like a planned break with
   no events, resuming on its own once that time is up rather than needing anyone to remember to switch it back on.
 - **Login notices**: the leadership writes a notice in Admin (title and text) and sends it to **everybody or only to chosen players** (with a
@@ -136,7 +138,13 @@ no dependencies: just Node 18+ and one JSON file of data.
   the class and specialization, and the "..." menus (leader crown, move to, remove) do the same on
   touch screens. Party names are editable. Loading a preset carries over whoever was in the line-up when it
   was saved, not whoever has actually confirmed for this particular event - anyone still unconfirmed shows
-  dimmed, set apart under their own party rather than looking the same as someone who is really coming.
+  dimmed, set apart under their own party rather than looking the same as someone who is really coming. Every
+  party is kept sorted automatically on every save - tanks first, then healers, then DPS, each group alphabetical
+  by name - so dragging someone in, loading a preset, or anything else that changes a line-up always leaves it
+  in that order with nothing to sort by hand. A drop (or any other party edit) shows up in its sorted spot
+  immediately, without waiting on the save to the server, and several officers can build parties for the same
+  event or preset at the same time - a save that would otherwise silently overwrite someone else's just-made
+  change is instead retried automatically against the latest version, so nobody's edit gets lost.
 - **Parties page (presets)**: saved line-ups. Create one from scratch or use "Save as preset" on an
   event, then load a preset into any upcoming event. Events use the same board. A preset can also be tied to an
   **event type**, for example "use this for every Wargames": it is copied into all upcoming events of that type and
@@ -306,10 +314,13 @@ Good to know:
   after that moment the marking should show for. Coaching points list down the side of the player, each one jumping straight to its
   timestamp and restoring its drawing when clicked - and during normal playback, a coaching point's drawing appears and disappears
   on its own as the video plays through its time window, without anyone needing to click anything. A note does not need a drawing
-  attached at all; a plain timestamped reminder works just as well.
+  attached at all; a plain timestamped reminder works just as well. The coaching-point note and the overall review note both
+  grow to fit what's typed (up to a generous cap, after which they scroll like any other box), so a longer note stays fully
+  visible instead of scrolling out of sight inside a tiny fixed box - Enter always starts a new line in both, same as any
+  text box (Shift+Enter does the same thing; there's no different "submit on Enter" behavior to work around here).
 - **Proof of use**: an officer can mark any loot entry as confirmed (who confirmed it and when is remembered), for tracking whether a
   player actually showed proof the item was used for what it was given for. Click again to undo it if needed.
-- A person's officer status is checked every time they sign in; sessions last 7 days. Remove someone's role and they lose the
+- A person's officer status is checked every time they sign in; sessions last 30 days. Remove someone's role and they lose the
   officer tools at their next sign-in.
 - If a message cannot be delivered (DMs closed) the event page shows who did not get it.
 - The bot also sends a message to a player when the leadership approves or rejects one of their changes or requests.
@@ -345,13 +356,32 @@ channel you chose, not one Shotcaller has to decide whether to create, so it alw
 regardless of its own member count or placeholder flag.
 
 The picture posted to Discord (and each mercenary's individual DM picture) only draws members who have actually
-confirmed for that event - RSVP'd "yes", or a mercenary, same rule the live Parties board uses - as real rows.
-Anyone else still sitting in a preset's party slot shows up instead in a small "Not confirmed: ..." line under
-that party's card, so the line-up you post never implies someone is in when they haven't actually signed up.
+confirmed for that event - RSVP'd "yes", or a mercenary, same rule the live Parties board uses. Anyone else still
+sitting in a preset's party slot (greyed out on the live board) is left off the picture entirely and does not
+count toward that party's size either, so the line-up you post never implies someone is in when they haven't
+actually signed up, and a party never reads "7/6" just because an unconfirmed static member is still parked in
+the slot. The moment that player does confirm "Going", if their party is already full they are automatically
+sent back to the unplaced pool instead of silently becoming a 7th member - an officer still drags them into
+a party with room, the same as anyone else sitting unplaced.
 
-Clicking **Post to Discord** now also checks that every non-placeholder party has a leader, independent of
-whether "Also start Shotcaller" is ticked - if any don't, you get a confirmation prompt naming them before the
-announcement goes out, instead of it posting silently with an unled party.
+Clicking **Post it** in the Post-to-Discord dialog checks that every non-placeholder party (more than 3 members)
+has a leader, independent of whether "Also start Shotcaller" is ticked. If any don't, a dialog explains that a
+party's leader is who the Shotcaller channel is named for and who relays the Attendance PIN to the rest of their
+party, and offers two ways forward: **Assign leaders automatically** (whichever role shows up first in the
+party, Tank, then DPS, then Healer, becomes leader) or **Continue without them** (posts as-is, those parties
+stay leaderless) - or cancel the dialog to go assign leaders yourself first. With "Also start Shotcaller"
+ticked, "Continue without them" isn't offered at all - the bot needs a leader for every real party it creates a
+channel for, so that case can only continue by assigning the missing ones automatically. Placeholder parties
+(3 or fewer members) are never part of this check at all - there's no one to really ask about for a stand-in
+party - but every one of them still gets a leader assigned the same automatic way, silently and every time a
+post goes out, since they get posted and PIN'd too and so still need somebody to relay it.
+
+Ticking "Also start Shotcaller" in that same Post-to-Discord dialog closes the dialog the moment you click
+**Post it**, the same way the Shotcaller page's own Start dialog does, rather than sitting there looking stuck
+for the up-to-a-minute it can take the bot to create voice channels and connect - a toast says posting and
+starting are both underway, and another reports the real outcome (posted, and Shotcaller started or why it
+couldn't) once the bot actually answers. If you're on (or go to) the Shotcaller page meanwhile, it shows the
+same "Starting…" view a session started from there shows.
 
 Starting a session can legitimately take a while - the bot creates a new voice channel and logs in a relay bot
 for each party, one at a time - so starting (unlike the other quick status/mute/stop calls) gives it up to 45
@@ -546,7 +576,7 @@ two, one new view), Discord webhook posts when an event is created (a `fetch` ca
 
 ## Security notes
 
-Sign-in goes through Discord and only members of your server get in. Sessions are signed cookies (7 days,
+Sign-in goes through Discord and only members of your server get in. Sessions are signed cookies (30 days,
 `HttpOnly`, `SameSite=Lax`, `Secure` on https), requests that another website could trigger are rejected, and
 officer-only routes protect everything destructive. Attendance PINs never reach players' browsers; a player only
 sees whether the PIN window is open. To sign everybody out, delete `data/secret.txt` and restart.

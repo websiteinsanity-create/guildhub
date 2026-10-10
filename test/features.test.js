@@ -118,6 +118,82 @@ withServer('changes to role and weapons wait for approval, other changes apply a
   assert.equal((await edit('officer', { gearScore: 3000 })).body.gearScore, 3000, 'officers are never held back');
 });
 
+withServer('confirming "Going" into an already-full party sends the player back to the pool instead of overflowing it to 7', async (s) => {
+  const mk = async (login, name, role) => { const tok = await s.login(login, 'm1'); return (await s.call('/api/members', 'POST', { name, role }, tok)).body.id; };
+  const ids = [];
+  for (let i = 0; i < 7; i++) ids.push(await mk('P' + i, 'Name' + i, ['Tank', 'Healer', 'DPS'][i % 3]));
+  const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: new Date(Date.now() + 864e5).toISOString() }, s.officer)).body;
+  // The first 6 are already confirmed and filling the party; the 7th is still just a preset placeholder slot
+  // (in the party, but not yet confirmed), same shape as a static's unconfirmed line-up member.
+  for (const id of ids.slice(0, 6)) await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: id, status: 'yes' }, s.officer);
+  await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: ids }] }, s.officer);
+  const before = (await s.call('/api/state', 'GET', null, s.officer)).body.events.find((e) => e.id === ev.id);
+  assert.equal(before.parties[0].members.length, 7, 'all 7 are still assigned to the party before the 7th confirms');
+
+  const seventh = ids[6];
+  const r = await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: seventh, status: 'yes' }, s.officer);
+  assert.equal(r.status, 200);
+  assert.ok(!r.body.parties[0].members.includes(seventh), 'the 7th player is removed from the party the moment they push it over the 6-player cap');
+  assert.equal(r.body.parties[0].members.length, 6, 'the party stays at exactly 6, not 7');
+  assert.ok(ids.slice(0, 6).every((id) => r.body.parties[0].members.includes(id)), 'the original 6 are untouched');
+
+  // Confirming does not needlessly bounce anyone when the party was not actually full to begin with.
+  const ev2 = (await s.call('/api/events', 'POST', { type: 'Wargames', start: new Date(Date.now() + 864e5).toISOString() }, s.officer)).body;
+  await s.call(`/api/events/${ev2.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: ids.slice(0, 4) }] }, s.officer);
+  const r2 = await s.call(`/api/events/${ev2.id}/rsvp`, 'POST', { memberId: ids[0], status: 'yes' }, s.officer);
+  assert.ok(r2.body.parties[0].members.includes(ids[0]), 'confirming into a party that still has room keeps the player in it');
+});
+
+withServer('party saves use optimistic concurrency (baseVersion) so two officers editing the same event cannot silently overwrite one another', async (s) => {
+  const mk = async (login, name, role) => { const tok = await s.login(login, 'm1'); return (await s.call('/api/members', 'POST', { name, role }, tok)).body.id; };
+  const a = await mk('P1', 'Alpha', 'Tank'), b = await mk('P2', 'Bravo', 'DPS'), c = await mk('P3', 'Charlie', 'Healer');
+  const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: new Date(Date.now() + 864e5).toISOString() }, s.officer)).body;
+  assert.equal(ev.partiesVersion ?? 0, 0, 'a brand new event starts at version 0 (or the field is simply absent, same thing)');
+
+  // Without baseVersion: old-style blind overwrite, unchanged for any caller that does not send it.
+  const r1 = (await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: [a] }] }, s.officer)).body;
+  assert.equal(r1.partiesVersion, 1, 'a successful save bumps the version');
+
+  // Two officers both read version 1 and build their own change on top of it - only the first to save should
+  // succeed; the second must be refused (409), never silently applied on top of (and erasing) the first one.
+  const win = await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: [a, b] }], baseVersion: 1 }, s.officer);
+  assert.equal(win.status, 200);
+  assert.equal(win.body.partiesVersion, 2);
+  const lose = await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: [a, c] }], baseVersion: 1 }, s.officer);
+  assert.equal(lose.status, 409, "the second officer's stale save is rejected instead of clobbering the first one");
+  // Charlie never silently vanished into an overwrite - Bravo (the winning save) is still there, unharmed.
+  const state2 = await s.call(`/api/events/${ev.id}`, 'GET', null, s.officer).catch(() => null);
+  const final = (await s.call('/api/state', 'GET', null, s.officer)).body.events.find((e) => e.id === ev.id);
+  assert.deepEqual(final.parties[0].members.sort(), [a, b].sort());
+
+  // The rejected officer re-reads the fresh version and re-applies their own intended change on top of it -
+  // this now succeeds, proving the conflict is recoverable, not a dead end.
+  const retry = await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: [a, b, c] }], baseVersion: 2 }, s.officer);
+  assert.equal(retry.status, 200);
+  assert.deepEqual(retry.body.parties[0].members.sort(), [a, b, c].sort());
+});
+
+withServer('parties are kept auto-sorted on every save - tanks, then healers, then DPS, each group alphabetical - with nothing for an officer to do by hand', async (s) => {
+  const mk = async (login, name, role) => { const tok = await s.login(login, 'm1'); return (await s.call('/api/members', 'POST', { name, role }, tok)).body.id; };
+  const zara = await mk('P1', 'Zara', 'DPS'), carl = await mk('P2', 'Carl', 'Tank'), bea = await mk('P3', 'Bea', 'Healer');
+  const amy = await mk('P4', 'Amy', 'DPS'), abel = await mk('P5', 'Abel', 'Tank'), zoe = await mk('P6', 'Zoe', 'Healer');
+  const expected = [abel, carl, bea, zoe, amy, zara];   // Tanks (Abel, Carl) -> Healers (Bea, Zoe) -> DPS (Amy, Zara), alphabetical within each
+
+  // Saving an event's parties with members listed in a deliberately scrambled order comes back auto-sorted.
+  const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: new Date(Date.now() + 864e5).toISOString() }, s.officer)).body;
+  const saved = (await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: [zara, carl, bea, amy, abel, zoe] }] }, s.officer)).body;
+  assert.deepEqual(saved.parties[0].members, expected, 'the server sorts on save - no manual step needed');
+
+  // A preset saved the same scrambled way comes back sorted too.
+  const pr = (await s.call('/api/presets', 'POST', { name: 'Sorted?', parties: [{ name: 'A', members: [zoe, amy, abel, zara, bea, carl] }] }, s.officer)).body;
+  assert.deepEqual(pr.parties[0].members, expected);
+
+  // Adding one more member (simulating a drag-and-drop drop) re-sorts the whole party again automatically.
+  const finn = await mk('P7', 'Finn', 'Tank');
+  const resaved = (await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [{ name: 'Party 1', members: [...saved.parties[0].members, finn] }] }, s.officer)).body;
+  assert.deepEqual(resaved.parties[0].members, [abel, carl, finn, bea, zoe, amy, zara], 'Finn (Tank) sorts in alphabetically among the other tanks, not tacked on at the end');
+});
+
 withServer('a new character can wait for approval and stays hidden from others until then', async (s) => {
   await s.call('/api/admin/options', 'PUT', { approvals: { newCharacter: true } }, s.officer);
   const made = (await s.call('/api/members', 'POST', { name: 'Newbie', role: 'DPS' }, s.ann)).body;

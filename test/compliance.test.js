@@ -39,10 +39,17 @@ const inDays = (n) => new Date(Date.now() + n * 864e5).toISOString();
 // exactly, DST included, without having to reimplement its offset math here.
 const dateOf = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + n * 864e5));
 
-// three players with one character each
+// three players with one character each. Backdated well before any of this test file's "past" events (which
+// only ever reach back a few days) so the new "never judge a player on events from before they joined" rule
+// (server-compliance.js) does not accidentally exclude the very events each test is specifically about - these
+// three are meant to represent players who have already been in the guild for a long time, not brand new ones.
 async function cast(s) {
   const mk = async (who, name, role = 'DPS') => (await s.call('/api/members', 'POST', { name, role }, s[who])).body.id;
-  return { ann: await mk('ann', 'AnnChar'), bob: await mk('bob', 'BobChar', 'Tank'), cat: await mk('cat', 'CatChar', 'Healer') };
+  const ids = { ann: await mk('ann', 'AnnChar'), bob: await mk('bob', 'BobChar', 'Tank'), cat: await mk('cat', 'CatChar', 'Healer') };
+  const exp = (await s.call('/api/export', 'GET', null, s.officer)).body;
+  for (const m of exp.members) if (Object.values(ids).includes(m.id)) m.joinedAt = new Date(Date.now() - 365 * 864e5).toISOString();
+  await s.call('/api/import', 'POST', exp, s.officer);
+  return ids;
 }
 // a finished mandatory event where the listed characters came and the answers are what we say
 async function pastEvent(s, daysAgo, { came = [], yes = [], no = [] }, extra = {}) {
@@ -210,6 +217,29 @@ withServer('warnings run out by a timer, by a quiet period, or by the leadership
   await back((db) => { for (const x of db.warnings) { x.at = new Date(Date.now() - 9 * 864e5).toISOString(); if (x.endedBy === 'quiet') x.endedAt = new Date(Date.now() - 4 * 864e5).toISOString(); } });
   await run(s);
   assert.equal((await state(s, 'ann')).warnings.filter((x) => x.status === 'active').length, 0, 'quietRemove 0 removes all that are left');
+});
+
+withServer('a brand new player is never judged for events that happened before they joined - no warning, no pop-up, for events that predate their own character', async (s) => {
+  // An existing member, backdated to simulate having been in the guild a long time (same reasoning as cast()
+  // above), BEFORE the new player (and their character) exist at all.
+  const bobId = (await s.call('/api/members', 'POST', { name: 'BobChar', role: 'Tank' }, s.bob)).body.id;
+  const exp0 = (await s.call('/api/export', 'GET', null, s.officer)).body;
+  for (const m of exp0.members) if (m.id === bobId) m.joinedAt = new Date(Date.now() - 365 * 864e5).toISOString();
+  await s.call('/api/import', 'POST', exp0, s.officer);
+  await pastEvent(s, 3, { came: [], yes: [] });                     // nobody answered - would be a "no-reply" for anyone judged on it
+  await pastEvent(s, 2, { came: [], yes: [] });
+  await pastEvent(s, 1, { came: [], yes: [] });
+  // Now a brand new player joins and creates their first character, AFTER those events already happened.
+  await s.call('/api/members', 'POST', { name: 'NewbieChar', role: 'DPS' }, s.ann);
+  await rules(s, { noShowLimit: 0, noReplyLimit: 1, minAttendance: 0, windowDays: 30 });
+  await run(s);
+  const ann = await state(s, 'ann');
+  assert.equal(ann.warnings.length, 0, 'no warning for events that happened before this player ever joined');
+  assert.equal(ann.alert, null, 'no reason pop-up either, for the same pre-join events');
+  // Bob existed for all three events and never answered any of them - he SHOULD be caught by the same rule,
+  // proving the fix only excuses pre-join events, not no-replies in general.
+  const bobState = await state(s, 'bob');
+  assert.ok(bobState.warnings.length >= 1 || (bobState.alert && bobState.alert.triggers.some((t) => t.kind === 'noreply')), 'an existing player who ignored those same events is still caught');
 });
 
 withServer('a leave of absence excuses the missed events: no pop-up, no warning', async (s) => {

@@ -46,6 +46,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; width: 100%; }
 input[type=checkbox] { width: auto; accent-color: var(--accent); }
 textarea { resize: vertical; min-height: 70px; }
+textarea[data-autogrow] { resize: none; overflow-y: hidden; max-height: 400px; }
 label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
 .field { margin-bottom: 12px; }
 .row { display: flex; gap: 12px; }
@@ -717,22 +718,17 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 .standing-flag.warn, .standing-flag.low { color: #e2685c; }
 
 /* VOD review: the YouTube player plus its toolbar (fullscreen now; drawing and screenshot controls join it
-   later) - fullscreen targets the whole wrap, not just the iframe, so the toolbar is still usable there too. */
-.vod-player-wrap { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; }
-.vod-player-wrap #vod-yt-player, .vod-player-wrap iframe { width: 100%; height: 100%; display: block; }
-.vod-player-wrap:fullscreen, .vod-player-wrap:-webkit-full-screen { aspect-ratio: auto; border-radius: 0; width: 100vw; height: 100vh; }
-/* pointer-events: none on the bar itself, re-enabled only on its buttons/swatches - otherwise this strip (even
-   fully transparent, before anything has been hovered) sits on top of the YouTube iframe and swallows every
-   mouse/touch event that lands in it, so the iframe never sees them at all. That is what silently broke the
-   player's own volume control: hovering toward it never reached the iframe, so YouTube's own controls (which
-   fade in on hover, same idea as ours) never got the hover they needed and stayed hidden - not usable even
-   though it looked, from outside, like they had simply vanished. */
-.vod-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding: 10px; background: linear-gradient(rgba(0,0,0,.55), transparent); opacity: 0; transition: opacity .15s; pointer-events: none; }
-.vod-toolbar > * { pointer-events: auto; }
-.vod-player-wrap:hover .vod-toolbar, .vod-player-wrap:focus-within .vod-toolbar, .vod-player-wrap:fullscreen .vod-toolbar { opacity: 1; }
-/* Touch devices have no hover, so the toolbar (including the fullscreen button) would otherwise stay invisible
-   until something inside it happened to pick up focus - just show it all the time there instead. */
-@media (hover: none) and (pointer: coarse) { .vod-toolbar { opacity: 1; } }
+   later) - fullscreen targets the whole wrap, not just the iframe, so the toolbar is still usable there too.
+   The toolbar used to float on top of the video itself (an absolutely-positioned strip, shown on hover) - but
+   that strip sat exactly where YouTube's own top-right controls (its title/settings/share icons, which fade in
+   on hover the same way) live, blocking them the whole time ours was visible. It is now a normal, always-visible
+   row BELOW the video instead, in its own space, so nothing of ours ever sits on top of anything YouTube draws. */
+.vod-player-wrap { position: relative; display: flex; flex-direction: column; background: #000; border-radius: 8px; overflow: hidden; }
+.vod-video-area { position: relative; aspect-ratio: 16/9; }
+.vod-video-area #vod-yt-player, .vod-video-area iframe { width: 100%; height: 100%; display: block; }
+.vod-player-wrap:fullscreen, .vod-player-wrap:-webkit-full-screen { border-radius: 0; width: 100vw; height: 100vh; }
+.vod-player-wrap:fullscreen .vod-video-area, .vod-player-wrap:-webkit-full-screen .vod-video-area { flex: 1; aspect-ratio: auto; }
+.vod-toolbar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding: 10px; background: #1b1418; }
 
 .vod-draw-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; }
 /* Same problem as the toolbar above, one layer further down: turning Draw on makes this canvas catch every

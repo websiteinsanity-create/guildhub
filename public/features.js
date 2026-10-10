@@ -1209,21 +1209,17 @@ async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {})
   const parties = ev.parties;
   // A member only counts as locked in for THIS event once they've confirmed (mercenaries are always treated as
   // confirmed, same rule the live board's partyCard() uses) - everyone else in the preset's member list is still
-  // just a placeholder slot, not a real attendee, so the picture posted to Discord should not draw them as if
-  // they were. Precomputed per party so both the card body and its "X/Y" header count agree.
+  // just a placeholder slot, not a real attendee, so the picture posted to Discord shows ONLY attending players:
+  // no row, no footer, nothing naming them at all - a clean view of who is actually locked in. Precomputed per
+  // party so both the card body and its "X/Y" header count agree.
   const attendingOf = (p) => p.members.filter((id) => { const m = byId(S.members, id); return m && (m.mercenary || ev.rsvps[m.id] === 'yes'); });
-  const notConfirmedOf = (p) => p.members.filter((id) => !attendingOf(p).includes(id)).map((id) => { const m = byId(S.members, id); return m ? m.name : null; }).filter(Boolean);
   const cols = Math.min(maxCols, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 46, headH = 42, titleH = 108;
   const W = pad * 2 + cols * cardW + (cols - 1) * gap;
   const gridRows = Math.ceil(parties.length / cols);
   const measure = document.createElement('canvas').getContext('2d');
   const wrap = (g, text, max) => { const out = []; let line = ''; for (const w of text.split(' ')) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; } if (line) out.push(line); return out; };
-  measure.font = `400 13px ${sans}`;
-  // Per-party "Not confirmed" footer - wrapped to the card's own width, computed up front so the card height can
-  // account for it (otherwise the footer text would spill out past the card's bottom edge).
-  const notConfirmedLines = parties.map((p) => { const nc = notConfirmedOf(p); return nc.length ? wrap(measure, 'Not confirmed: ' + nc.join(', '), cardW - 28) : []; });
-  const cardH = (p, i) => headH + Math.max(attendingOf(p).length, 1) * rowH + 14 + (notConfirmedLines[i].length ? 10 + notConfirmedLines[i].length * 17 : 0);
-  const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map((p, j) => cardH(p, r * cols + j))));
+  const cardH = (p) => headH + Math.max(attendingOf(p).length, 1) * rowH + 10;
+  const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map(cardH)));
   // going, but not in a party
   const placed = new Set(parties.flatMap((p) => p.members));
   const unplaced = showUnplaced ? S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes' && !placed.has(m.id)).map((m) => m.name) : [];
@@ -1251,8 +1247,8 @@ async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {})
   let y0 = pad + titleH;
   const rowTop = []; rowHeights.forEach((h, i) => { rowTop[i] = y0; y0 += h + gap; });
   parties.forEach((p, i) => {
-    const attending = attendingOf(p), ncLines = notConfirmedLines[i];
-    const x = pad + (i % cols) * (cardW + gap), y = rowTop[Math.floor(i / cols)], h = cardH(p, i);
+    const attending = attendingOf(p);
+    const x = pad + (i % cols) * (cardW + gap), y = rowTop[Math.floor(i / cols)], h = cardH(p);
     g.fillStyle = '#1b1418'; rr(x, y, cardW, h, 10); g.fill(); g.strokeStyle = '#3a2a31'; g.lineWidth = 1; rr(x + .5, y + .5, cardW - 1, h - 1, 10); g.stroke();
     g.fillStyle = '#ebe5e3'; g.font = `600 18px ${sans}`; g.fillText(fit(p.name, cardW - 90), x + 14, y + 27);
     g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; g.textAlign = 'right'; g.fillText(`${attending.length}/${S.cfg.partySize || 6}`, x + cardW - 14, y + 27); g.textAlign = 'left';
@@ -1275,15 +1271,6 @@ async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {})
       const cls = classFor(eff.primaryWeapon, eff.secondaryWeapon), meta = [cls, eff.specialization].filter(Boolean).join(' | ') || [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / ');
       g.fillStyle = '#c9bfc2'; g.font = `400 13px ${sans}`; g.fillText(fit(meta, cardW - (nx - x) - 14), nx, ry + 37);
     });
-    // "Not confirmed" footer - preset members who have not RSVP'd yes (and are not a mercenary) for THIS event.
-    // Keeps that information visible rather than silently dropping them from the picture, mirroring the
-    // top-level "Going, but not in a party" footer below.
-    if (ncLines.length) {
-      const fy = y + headH + Math.max(attending.length, 1) * rowH + 6;
-      g.fillStyle = '#3a2a31'; g.fillRect(x + 1, fy, cardW - 2, 1);
-      g.fillStyle = '#8b7f83'; g.font = `italic 400 13px ${sans}`;
-      ncLines.forEach((l, k) => g.fillText(l, x + 14, fy + 16 + k * 17));
-    }
   });
   let yy = y0 - gap + 16;
   if (unLines.length) { g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; unLines.forEach((l, i) => g.fillText(l, pad, yy + 14 + i * 21)); yy += unLines.length * 21 + 14; }
@@ -1339,9 +1326,39 @@ ACTIONS['parties-view'] = async (el, d) => {
     <img class="post-preview" src="${img}" alt="Parties for ${esc(ev.title)}">
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`);
 };
+// Every party that goes out should end up with a leader - picking who relays the Shotcaller channel and the
+// Attendance PIN to the rest of their party. A placeholder (partyIsPlaceholder - 3 or fewer members, same rule
+// as everywhere else) never goes through the leader-check dialog below (there's no one to really ask about for
+// a stand-in party), so it gets one assigned automatically and silently instead, in this same priority order:
+// whichever role shows up first in the party, Tank, then DPS, then Healer.
+function autoAssignLeader(p) {
+  for (const role of ['Tank', 'DPS', 'Healer']) {
+    const id = p.members.find((mid) => { const m = byId(S.members, mid); return m && m.role === role; });
+    if (id) return id;
+  }
+  return p.members[0] || null;
+}
+// Assigns a leader (autoAssignLeader above) to every party that still needs one: placeholders always, and the
+// rest too when includeNonPlaceholder is true (the officer chose "Assign leaders automatically" in the
+// leader-check dialog, FORMS.postparties below). Saves through commitParties, the same optimistic-concurrency
+// save every other party edit uses, so this is safe even if someone else is mid-edit on the same event. Returns
+// the event with the save applied, or null if there was nothing to assign (commitParties already reported any
+// failure with its own toast).
+async function autoAssignMissingLeaders(ev, includeNonPlaceholder) {
+  const needsAny = ev.parties.some((p) => !p.leader && (partyIsPlaceholder(p) || includeNonPlaceholder));
+  if (!needsAny) return ev;
+  const ok = await commitParties('event', ev.id, (parties) => {
+    for (const p of parties) if (!p.leader && (partyIsPlaceholder(p) || includeNonPlaceholder)) p.leader = autoAssignLeader(p);
+    return parties;
+  });
+  return ok ? byId(S.events, ev.id) : null;
+}
 ACTIONS['parties-post'] = async (el, d) => {
-  const ev = byId(S.events, d.id);
+  let ev = byId(S.events, d.id);
+  if (!ev) return;
   if (!S.cfg.botOn) return toast('The Discord bot is not set up yet. See Admin > Discord.', true);
+  ev = await autoAssignMissingLeaders(ev, false);
+  if (!ev) return;
   toast('Drawing the picture...');
   try { PARTY_IMG = await blobToDataUrl(await renderPartiesImage(ev)); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
   const pp = S.settings.partyPost || {};
@@ -1361,11 +1378,15 @@ ACTIONS['parties-post'] = async (el, d) => {
     } catch (e) { scProblem = e.message; }
     if (!scChannels.length && !scProblem) scProblem = 'Could not load the voice channel list.';
   }
+  // Missing leaders no longer disable the checkbox here - submitting the form (FORMS.postparties below) checks
+  // for them itself and, if Shotcaller is ticked, the leader-check dialog it opens only offers "assign
+  // automatically" (never "continue without them"), so a real party without a leader can no longer reach the
+  // server still missing one when Shotcaller is about to need it.
   const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
   const st = S.settings.shotcaller || {};
   const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   const scLastId = scLast && scChannels.some((c) => c.id === scLast.channelId) ? scLast.channelId : (scChannels[0] || {}).id;
-  const scAvailable = S.cfg.shotcallerOn && !scProblem && !missingLeaders.length;
+  const scAvailable = S.cfg.shotcallerOn && !scProblem;
   const scChecked = scAvailable && !!ev.shotcallerAutoStart;
   const when = new Date(ev.start);
   const text = (pp.text || '📋 **{event}**: parties for {date} at {time}\n{link}')
@@ -1381,7 +1402,7 @@ ACTIONS['parties-post'] = async (el, d) => {
     ${S.cfg.shotcallerOn ? `<hr style="border-color:var(--line);margin:14px 0">
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:10px"><input type="checkbox" name="scEnabled" id="pp-sc-on" data-act="pp-sc-toggle" ${scChecked ? 'checked' : ''} ${scAvailable ? '' : 'disabled'}> Also start Shotcaller for this event</label>
     ${scProblem ? `<div class="muted small" style="margin:-4px 0 10px">${esc(scProblem)}</div>` : ''}
-    ${missingLeaders.length ? `<div class="warn-line" style="margin:-4px 0 10px">${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader, so Shotcaller can't start with this post - give ${missingLeaders.length === 1 ? 'it' : 'them'} a leader, or mark ${missingLeaders.length === 1 ? 'it' : 'them'} as a placeholder (party menu > "Mark as placeholder"), first.</div>` : ''}
+    ${missingLeaders.length ? `<div class="muted small" style="margin:-4px 0 10px">${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet - with Shotcaller ticked, posting will assign one automatically (Tank &gt; DPS &gt; Healer) rather than ask, since it needs one for every real party.</div>` : ''}
     <div id="pp-sc-fields" class="${scChecked ? '' : 'hidden'}">
       <div class="field"><label>Voice channel (becomes Party 1 - yours)</label>
         <select name="scChannelId">${scChannels.map((c) => `<option value="${esc(c.id)}" ${c.id === scLastId ? 'selected' : ''}>🔊 ${esc(c.name)}${scLast && c.id === scLast.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
@@ -1395,24 +1416,74 @@ ACTIONS['parties-post'] = async (el, d) => {
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary" ${problem ? 'disabled' : ''}>Post it</button></div></form>`, true);
 };
 CHANGES['pp-sc-toggle'] = (el) => { $('#pp-sc-fields').classList.toggle('hidden', !el.checked); };
+// Holds what's needed to actually post once the leader-check dialog below (or no dialog at all, when nothing's
+// missing) has decided whether to auto-assign leaders first - set just before that dialog opens, read and
+// cleared by its two choices, ACTIONS['leader-check-continue'] / ACTIONS['leader-check-auto'].
+let PENDING_POST_PARTIES = null;
+function openLeaderCheckDialog(ev, missingLeaders, scOn) {
+  // "Continue without them" isn't offered at all when Shotcaller is also being started with this post - the bot
+  // needs a leader for every real party to name its voice channel, so the server would refuse the whole post
+  // anyway (server-community.js). Rather than let an officer pick that option and then get a confusing failure,
+  // it's simply not on offer here: this post can only continue by assigning the missing ones automatically.
+  openDialog(`<h2>Missing party leaders</h2>
+    <p>${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet. A party's leader is who the Shotcaller channel is named for and who relays the event's
+      Attendance PIN to the rest of their party, so an unled party may not get the word in time.
+      ${scOn ? "Shotcaller is being started with this post, and it needs a leader for every real party - so this can only continue by assigning the missing ones automatically." : 'Pick one of the two options below, or cancel and assign leaders yourself first.'}</p>
+    <div class="dlg-actions" style="flex-wrap:wrap;justify-content:flex-end">
+      <button type="button" class="btn" data-act="dlg-close">Cancel - let me assign them</button>
+      ${scOn ? '' : '<button type="button" class="btn" data-act="leader-check-continue">Continue without them</button>'}
+      <button type="button" class="btn primary" data-act="leader-check-auto">Assign leaders automatically</button>
+    </div>`, true);
+}
+ACTIONS['leader-check-continue'] = () => { const fn = PENDING_POST_PARTIES; PENDING_POST_PARTIES = null; closeDialog(); if (fn) fn(false); };
+ACTIONS['leader-check-auto'] = () => { const fn = PENDING_POST_PARTIES; PENDING_POST_PARTIES = null; closeDialog(); if (fn) fn(true); };
 FORMS.postparties = (f, fd, id) => {
   const ev = byId(S.events, Number(id));
-  // Block the post - independent of whether Shotcaller is being started - unless the officer explicitly accepts
-  // posting with parties that have no leader yet. Same "which parties count" rule as everywhere else
-  // (placeholders are exempt): a native confirm() here matches how the codebase already gates other
-  // risky/irreversible actions, rather than introducing a new dialog just for this.
-  const missingLeaders = ev ? ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader) : [];
-  if (missingLeaders.length && !confirm(`${missingLeaders.map((p) => `"${p.name}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet. Post the announcement anyway?`)) return;
+  if (!ev) return;
   const sel = f.elements.channelId, name = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.replace(/^#/, '') : '';
   const scOn = f.elements.scEnabled && f.elements.scEnabled.checked;
   const shotcaller = scOn ? { enabled: true, channelId: fd.scChannelId, dedicatedCallerId: fd.scDedicatedCallerId || null } : undefined;
-  act(async () => {
-    const r = await api(`/api/events/${id}/post-parties`, 'POST', { image: PARTY_IMG, text: fd.text, channelId: fd.channelId, channelName: name, shotcaller });
-    closeDialog(); PARTY_IMG = '';
-    dmMercsTheirParty(byId(S.events, Number(id)));   // best-effort, does not block or affect the toast above
-    if (r.shotcaller) toast(r.shotcaller.ok ? 'Shotcaller started' : `Shotcaller could not start: ${r.shotcaller.error}`, !r.shotcaller.ok);
-  }, `Posted in #${name}`);
+  const opts = { text: fd.text, channelId: fd.channelId, channelName: name, scOn, shotcaller };
+  // Placeholder parties (3 or fewer members) are never part of this check - there's no one to really ask about
+  // for a stand-in party, they always get a leader assigned silently (finishPostParties -> autoAssignMissingLeaders
+  // handles that unconditionally). This only asks about real parties an officer actually built.
+  const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+  if (missingLeaders.length) {
+    PENDING_POST_PARTIES = (autoAssign) => finishPostParties(Number(id), opts, autoAssign);
+    openLeaderCheckDialog(ev, missingLeaders, scOn);
+    return;
+  }
+  finishPostParties(Number(id), opts, false);
 };
+async function finishPostParties(id, opts, autoAssign) {
+  let ev = byId(S.events, id);
+  if (!ev) return;
+  // Close right away and drop the old preview - nothing from here on (auto-assigning leaders, redrawing the
+  // picture, the Discord post itself, or - the slow part - Shotcaller's own up-to-a-minute start) should leave
+  // the dialog sitting there looking stuck. The standalone Start dialog (public/shotcaller.js) uses the same
+  // close-first, report-the-outcome-in-a-toast-later approach, including flipping the shared scStarting flag so
+  // the Shotcaller page shows its "Starting…" animation if that's where the officer is or goes next.
+  closeDialog();
+  PARTY_IMG = '';
+  ev = await autoAssignMissingLeaders(ev, autoAssign);
+  if (!ev) return;
+  // Redraw the picture so the posted screenshot shows the crown for whoever was just assigned, instead of the
+  // preview drawn before the officer made this choice.
+  let image;
+  try { image = await blobToDataUrl(await renderPartiesImage(ev)); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
+  if (opts.scOn) { toast('Posting - starting Shotcaller can take up to a minute...'); scStarting = true; render(); }
+  try {
+    const r = await api(`/api/events/${id}/post-parties`, 'POST', { image, text: opts.text, channelId: opts.channelId, channelName: opts.channelName, shotcaller: opts.shotcaller });
+    dmMercsTheirParty(byId(S.events, id));   // best-effort, does not block or affect the toast above
+    toast(`Posted in #${opts.channelName}`);
+    if (r.shotcaller) toast(r.shotcaller.ok ? 'Shotcaller started' : `Shotcaller could not start: ${r.shotcaller.error}`, !r.shotcaller.ok);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    if (opts.scOn) { scStarting = false; await pollShotcaller().catch(() => {}); }
+    await refresh(true).catch(() => {});
+  }
+}
 // Every mercenary currently placed in a party gets a DM with just that one party - same picture style as the
 // channel post, cropped to the one party they are actually in. One failed DM (closed DMs, etc.) does not stop
 // the others; each is reported with its own quiet toast rather than one popup for the whole batch.
