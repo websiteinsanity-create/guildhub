@@ -8,6 +8,18 @@ const isMobileViewport = () => window.matchMedia('(max-width: 860px)').matches;
 const UI = { vodJump: null, vodRestore: null, lootCompare: [], lootCompareOpen: false, lootCompareQ: '', rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: isMobileViewport() ? 'day' : 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
 // Pages, click actions, change handlers and form handlers can be added from features.js.
 const AFTER_RENDER = [];  // functions run after a page was drawn (page name as argument)
+// Textareas marked data-autogrow (the coaching-point note and the VOD review note, both places you write a
+// longer free-text note while deciding what you think) grow to fit what's typed instead of staying a fixed,
+// tiny box that just scrolls internally - so pressing Enter (or Shift+Enter - both just insert a newline in a
+// textarea, same as any plain text box) visibly adds a new row instead of the text scrolling out of view. Capped
+// at a generous max-height so one huge paste still scrolls rather than pushing the rest of the page around.
+function autosizeTextarea(el) {
+  const CAP = 400;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, CAP) + 'px';
+  el.style.overflowY = el.scrollHeight > CAP ? 'auto' : 'hidden';
+}
+function autosizeAll(root) { (root || document).querySelectorAll('textarea[data-autogrow]').forEach(autosizeTextarea); }
 const VIEWS = {};      // page name -> function that returns the page's HTML
 const ACTIONS = {};    // data-act value -> function (element, dataset, event) for clicks
 const CHANGES = {};    // data-act value -> function (element) for change events
@@ -57,12 +69,18 @@ const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-di
 async function api(path, method = 'GET', body) {
   const res = await fetch(path, {
     method,
+    // Discord sign-in has no bearer token at all (readToken() falls back to the gh_session cookie set by
+    // /auth/discord/callback) - 'same-origin' is already every modern browser's default for a same-origin
+    // fetch like this one, but spelling it out here means that session still works even somewhere that default
+    // isn't what's assumed (an older or unusual in-app browser, say), instead of silently forcing a fresh
+    // Discord sign-in on every page load.
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== '/api/login') { logout(); throw new Error(data.error || 'Signed out.'); }
-  if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+  if (!res.ok) { const e = new Error(data.error || 'Something went wrong.'); e.status = res.status; throw e; }
   return data;
 }
 function toast(msg, bad) {
@@ -341,6 +359,7 @@ function render() {
     $('#main').innerHTML = VIEWS[page](id);
     window.__vodReviewId = (page === 'vods' && id) ? Number(id) : null;
     for (const h of AFTER_RENDER) h(page);
+    autosizeAll($('#main'));
   }
   checkNotices();
 }
@@ -1008,7 +1027,7 @@ function partyCard(ctx, parties, p, i, ev) {
     <div class="phead">
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
       ${off ? `<input class="party-name" ${at} data-act="party-rename" value="${esc(p.name)}" maxlength="40" aria-label="Party name">` : `<span class="party-title">${esc(p.name)}</span>`}
-      <span class="muted small ${ms.length > size ? 'over-cap' : ''}">${ms.length}/${size}</span>
+      <span class="muted small ${attending.length > size ? 'over-cap' : ''}">${attending.length}/${size}</span>
       ${ph ? `<span class="muted small" title="${p.placeholderOverride ? 'Marked as placeholder' : 'Treated as a placeholder automatically (3 or fewer members)'}">Placeholder</span>` : ''}
       ${off ? `<details class="menu"><summary aria-label="Options for ${esc(p.name)}">&hellip;</summary><div class="menu-list">
         <button data-act="p-left" ${at}>Move party left</button><button data-act="p-right" ${at}>Move party right</button>
@@ -1165,28 +1184,36 @@ document.addEventListener('drop', (e) => {
   e.preventDefault();
   const d = DRAG; DRAG = null;
   const ctx = { kind: board.dataset.kind, id: Number(board.dataset.owner) };
-  const parties = JSON.parse(JSON.stringify(partiesOf(ctx.kind, ctx.id)));
-  if (d.type === 'member') {
-    const zone = dropZone(e.target); if (!zone) { clearMarks(); return; }
-    const wasLeaderOf = parties.findIndex((p) => p.leader === d.m);
-    const carried = (parties.find((p) => p.members.includes(d.m)) || {}).builds?.[d.m];          // which build they were using
-    parties.forEach((p) => { p.members = p.members.filter((id) => id !== d.m); if (p.leader === d.m) p.leader = null; if (p.builds) delete p.builds[d.m]; });
-    if (zone.classList.contains('pdrop')) {
-      const ti = Number(zone.dataset.i);
-      parties[ti].members.splice(insertIndex(zone, e.clientY, d.m).index, 0, d.m);
-      if (wasLeaderOf === ti) parties[ti].leader = d.m;      // moving inside the same party keeps the crown
-      if (carried) (parties[ti].builds = parties[ti].builds || {})[d.m] = carried;
-    }
-  } else {
+  // Where things are dropping is read from the DOM once, right now, rather than baked into a single `parties`
+  // array - commitParties below may need to replay this same drop on top of a freshly-fetched parties array if
+  // another officer's save lands first, and the drop target itself (which zone, which party, before/after) does
+  // not change between that first attempt and a retry a moment later.
+  let zone = null, ti = null, after = false;
+  if (d.type === 'member') { zone = dropZone(e.target); if (!zone) { clearMarks(); return; } if (zone.classList.contains('pdrop')) ti = Number(zone.dataset.i); }
+  else {
     const card = e.target.closest('.party'); if (!card) { clearMarks(); return; }
-    let ti = Number(card.dataset.party);
-    const r = card.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
-    const [moved] = parties.splice(d.i, 1);
-    if (d.i < ti) ti--;
-    parties.splice(ti + (after ? 1 : 0), 0, moved);
+    ti = Number(card.dataset.party);
+    const r = card.getBoundingClientRect(); after = e.clientX > r.left + r.width / 2;
   }
   clearMarks();
-  act(() => saveParties(ctx.kind, ctx.id, parties));
+  commitParties(ctx.kind, ctx.id, (parties) => {
+    if (d.type === 'member') {
+      const wasLeaderOf = parties.findIndex((p) => p.leader === d.m);
+      const carried = (parties.find((p) => p.members.includes(d.m)) || {}).builds?.[d.m];          // which build they were using
+      parties.forEach((p) => { p.members = p.members.filter((id) => id !== d.m); if (p.leader === d.m) p.leader = null; if (p.builds) delete p.builds[d.m]; });
+      if (ti !== null) {
+        parties[ti].members.splice(insertIndex(zone, e.clientY, d.m).index, 0, d.m);
+        if (wasLeaderOf === ti) parties[ti].leader = d.m;      // moving inside the same party keeps the crown
+        if (carried) (parties[ti].builds = parties[ti].builds || {})[d.m] = carried;
+      }
+    } else {
+      let destTi = ti;
+      const [moved] = parties.splice(d.i, 1);
+      if (d.i < destTi) destTi--;
+      parties.splice(destTi + (after ? 1 : 0), 0, moved);
+    }
+    return parties;
+  });
 });
 
 // "..." menus use fixed positioning so they are never clipped by the scrolling role lists.
@@ -1206,15 +1233,76 @@ document.addEventListener('toggle', (e) => {
 window.addEventListener('scroll', () => document.querySelectorAll('details.menu[open]').forEach((o) => o.removeAttribute('open')), true);
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const partiesOf = (kind, id) => (kind === 'event' ? byId(S.events, id) : byId(S.presets, id)).parties;
-const saveParties = (kind, id, parties) => (kind === 'event'
-  ? api(`/api/events/${id}/parties`, 'POST', { parties })
-  : api(`/api/presets/${id}`, 'PUT', { parties }));
+const partiesOwner = (kind, id) => (kind === 'event' ? byId(S.events, id) : byId(S.presets, id));
+const partiesOf = (kind, id) => partiesOwner(kind, id).parties;
+const saveParties = (kind, id, parties, baseVersion) => (kind === 'event'
+  ? api(`/api/events/${id}/parties`, 'POST', { parties, baseVersion })
+  : api(`/api/presets/${id}`, 'PUT', { parties, baseVersion }));
+// Dragging someone into a party (or any other party edit) used to feel sluggish because nothing on screen moved
+// until the save round-trip to the server finished and a full state refresh came back - on a slow connection,
+// or with several officers hammering the same event at once, that could take a noticeable beat. This instead
+// mutates the local copy and re-renders in the SAME tick, before the network call even starts, so the dropped
+// player appears in their sorted spot immediately; the save itself happens in the background afterwards.
+//
+// `buildParties(currentParties)` must return the new parties array given whatever the current one is - not a
+// pre-computed array - because with several officers editing the same event/preset at once, a save can be
+// rejected (409) if someone else's save landed first. When that happens this re-reads the authoritative parties
+// from the server and calls buildParties again on TOP of that fresh copy, so the officer's own change (eg. "move
+// Finn into Party 2") still lands correctly instead of silently overwriting whatever the other officer just did,
+// and retries - a few times, which given how fast a single save normally is, resolves well within a second even
+// under real concurrent use.
+// Mirrors the server's own sort in normParties() (server.js) - tanks, then healers, then DPS (S.cfg.roles
+// order), alphabetical within each group. Applying the same rule here means the optimistic preview below
+// already looks exactly like what the server will confirm, instead of flashing an unsorted order for the
+// instant before the save round-trip lands.
+function sortPartyMembersLocally(members) {
+  return members.slice().sort((a, b) => {
+    const ma = byId(S.members, a), mb = byId(S.members, b);
+    const ra = ma ? S.cfg.roles.indexOf(ma.role) : S.cfg.roles.length, rb = mb ? S.cfg.roles.indexOf(mb.role) : S.cfg.roles.length;
+    return (ra - rb) || (ma ? ma.name : '').localeCompare(mb ? mb.name : '');
+  });
+}
+async function commitParties(kind, id, buildParties, okMsg) {
+  const owner = partiesOwner(kind, id);
+  if (!owner) return false;
+  let target = buildParties(clone(owner.parties));
+  target.forEach((p) => { p.members = sortPartyMembersLocally(p.members); });
+  owner.parties = target;
+  render();
+  const MAX_ATTEMPTS = 12;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await saveParties(kind, id, target, owner.partiesVersion || 0);
+      Object.assign(owner, result);
+      if (okMsg) toast(okMsg);
+      render();
+      refresh(true).catch(() => {});
+      return true;
+    } catch (e) {
+      if (e.status === 409 && attempt < MAX_ATTEMPTS - 1) {
+        // A small random pause before re-reading and retrying - several officers all colliding on the same
+        // event tend to collide again immediately if they all retry in lockstep (every rejected save racing to
+        // be the next one rejected too); a little jitter spreads retries out so they stop lining up.
+        await new Promise((res) => setTimeout(res, 20 + Math.random() * 80));
+        await refresh(true);
+        const fresh = partiesOwner(kind, id);
+        if (!fresh) return false;
+        target = buildParties(clone(fresh.parties));
+        target.forEach((p) => { p.members = sortPartyMembersLocally(p.members); });
+        fresh.parties = target;    // keep showing the predicted result while the retry is in flight
+        render();
+        continue;
+      }
+      toast(e.message, true);
+      await refresh(true);
+      return false;
+    }
+  }
+  return false;
+}
 function mutateParties(el, fn, okMsg) {
   const kind = el.dataset.kind, id = Number(el.dataset.owner), i = Number(el.dataset.i);
-  const parties = clone(partiesOf(kind, id));
-  fn(parties, i);
-  act(() => saveParties(kind, id, parties), okMsg);
+  commitParties(kind, id, (parties) => { fn(parties, i); return parties; }, okMsg);
 }
 
 function attendancePanel(ev, past) {
@@ -1443,7 +1531,7 @@ function adminCustomizingText() {
 }
 
 /* ================= dialog ================= */
-function openDialog(html, wide) { const d = $('#dlg'); d.innerHTML = html; d.classList.toggle('wide', !!wide); if (!d.open) d.showModal(); const f = d.querySelector('input,select'); f && f.focus(); }
+function openDialog(html, wide) { const d = $('#dlg'); d.innerHTML = html; d.classList.toggle('wide', !!wide); if (!d.open) d.showModal(); const f = d.querySelector('input,select'); f && f.focus(); autosizeAll(d); }
 function closeDialog() { const d = $('#dlg'); if (d.open) d.close(); }
 $('#dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeDialog(); });
 
@@ -1612,6 +1700,7 @@ document.addEventListener('change', (e) => {
   }
 });
 document.addEventListener('input', (e) => {
+  if (e.target.matches('textarea[data-autogrow]')) autosizeTextarea(e.target);
   const k = e.target.dataset.ui;
   if (k === 'rosterQ' || k === 'lootQ' || k === 'lootCompareQ') {
     UI[k] = e.target.value; const pos = e.target.selectionStart; render();
@@ -1813,8 +1902,10 @@ function viewVodReview(id) {
   <div class="vod-review-grid">
     <div class="panel">
       <div id="vod-player-wrap" class="vod-player-wrap">
-        <div id="vod-yt-player"></div>
-        <canvas id="vod-draw-canvas" class="vod-draw-canvas"></canvas>
+        <div class="vod-video-area">
+          <div id="vod-yt-player"></div>
+          <canvas id="vod-draw-canvas" class="vod-draw-canvas"></canvas>
+        </div>
         <div class="vod-toolbar">
           <span class="vod-colors" id="vod-colors">${['#e2685c', '#e8c468', '#7cc4b8', '#ebe5e3'].map((c, i) => `<button type="button" class="vod-color ${i === 0 ? 'active' : ''}" data-act="vod-color" data-color="${c}" style="background:${c}" aria-label="Draw in this colour"></button>`).join('')}</span>
           <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn">✏️ Draw</button>
@@ -1829,7 +1920,7 @@ function viewVodReview(id) {
           <div class="field"><label for="vm-before">Show marking before (seconds)</label><input id="vm-before" name="beforeSeconds" type="number" min="0" max="10" step="0.5" value="2"></div>
           <div class="field"><label for="vm-after">Show marking after (seconds)</label><input id="vm-after" name="afterSeconds" type="number" min="0" max="10" step="0.5" value="2"></div>
         </div>
-        <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" required></textarea></div>
+        <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" data-autogrow required></textarea></div>
         <div class="link-row"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
       </form>` : ''}
       ${vodReviewsPanelHtml(v) ? `<div class="panel vod-review-panel" style="margin-top:12px">${vodReviewsPanelHtml(v)}</div>` : ''}
@@ -1848,7 +1939,7 @@ function viewVodReview(id) {
 // saved/deleted coaching point and for the normal 30-second background refresh alike.
 function vodPatchReview(id) {
   const v = (S.vods || []).find((x) => x.id === Number(id));
-  if (!v) { $('#main').innerHTML = VIEWS['vods'](id); window.__vodReviewId = null; for (const h of AFTER_RENDER) h('vods'); return; }
+  if (!v) { $('#main').innerHTML = VIEWS['vods'](id); window.__vodReviewId = null; for (const h of AFTER_RENDER) h('vods'); autosizeAll($('#main')); return; }
   const title = $('#vod-review-title'), sub = $('#vod-review-sub'), panel = document.querySelector('.vod-marker-panel'), reviewPanel = document.querySelector('.vod-review-panel');
   if (title) title.innerHTML = `${esc(v.title)}${vodReviewedBadge(v)}`;
   if (sub) sub.innerHTML = vodReviewSubtitle(v);
@@ -1880,7 +1971,10 @@ function redrawVodStrokes() {
   if (vodDraw.currentStroke) drawStroke(vodDraw.currentStroke);
 }
 function setupVodDrawing() {
-  const canvas = $('#vod-draw-canvas'), wrap = $('#vod-player-wrap');
+  // Sized to the video area itself (not the whole player-wrap, which also includes the toolbar strip below it
+  // now) - the canvas is absolutely positioned inside .vod-video-area and needs to match its box exactly, or
+  // strokes drawn relative to the canvas's own size would land in the wrong place on the actual video.
+  const canvas = $('#vod-draw-canvas'), wrap = $('.vod-video-area');
   if (!canvas || !wrap) return;
   vodDraw = { ctx: canvas.getContext('2d'), drawing: false, color: '#e2685c', strokes: [], currentStroke: null, activeMarkerId: null };
   const resize = () => {
@@ -2182,7 +2276,7 @@ function vodReviewDialog(vodId) {
   const already = Array.isArray(v.reviews) && v.reviews.length;
   openDialog(`<form data-form="vod-review" data-id="${v.id}"><h2>${already ? 'Add review' : 'Write a review'}</h2>
       <div class="muted small" style="margin:-4px 0 10px">${already ? 'Adds another review note and DMs the player again.' : 'Lets the player know their VOD has been reviewed.'}${(v.markers || []).length ? ` There ${(v.markers || []).length === 1 ? 'is' : 'are'} ${(v.markers || []).length} coaching point${(v.markers || []).length === 1 ? '' : 's'} on this VOD.` : ''}</div>
-      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" placeholder="What should they take away from this?" required autofocus></textarea></div>
+      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" placeholder="What should they take away from this?" data-autogrow required autofocus></textarea></div>
       <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">${already ? 'Add review' : 'Write a review'}</button></div>
     </form>`);
 }
@@ -2196,7 +2290,7 @@ ACTIONS['vod-review-edit'] = (el, d) => {
   const r = v && (v.reviews || []).find((x) => x.id === Number(d.reviewId));
   if (!r) return;
   openDialog(`<form data-form="vod-review-edit" data-id="${d.vodId}" data-review-id="${d.reviewId}"><h2>Edit review note</h2>
-      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" required autofocus>${esc(r.note)}</textarea></div>
+      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" data-autogrow required autofocus>${esc(r.note)}</textarea></div>
       <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
     </form>`);
 };

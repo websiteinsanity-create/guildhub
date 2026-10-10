@@ -57,10 +57,18 @@ module.exports = function install(ctx) {
   function playerStats(owner, chars, t = Date.now()) {
     const c = cfg(), from = t - c.windowDays * 864e5;
     const ids = chars.map((x) => x.id);
+    // Never judge a player on an event that happened before they had any character in the guild at all - they
+    // could not possibly have answered or shown up to something that predates their own joinedAt, so it isn't a
+    // real no-reply/no-show, just an artifact of a rolling lookback window reaching back further than this
+    // player has existed. Uses the EARLIEST joinedAt across all of a player's characters (adding an alt later
+    // should not push their "joined" date forward), and falls back to "always joined" (no filtering - the old
+    // behavior) for any character missing joinedAt entirely, which only pre-dates this field, not a real player.
+    const joinTimes = chars.map((x) => Date.parse(x.joinedAt)).filter(Number.isFinite);
+    const joinedAt = joinTimes.length ? Math.min(...joinTimes) : -Infinity;
     // An event only counts once its attendance is final - event start plus the configured delay - not merely
     // once it is in the past. Judging it the moment it starts (or as soon as one person happens to check in)
     // would catch players still inside their own valid PIN window and wrongly call them a no-show.
-    const events = db().events.filter((e) => Date.parse(e.start) < t - c.finalAfterMinutes * 60000 && Date.parse(e.start) >= from && (!c.mandatoryOnly || e.mandatory));
+    const events = db().events.filter((e) => Date.parse(e.start) < t - c.finalAfterMinutes * 60000 && Date.parse(e.start) >= from && Date.parse(e.start) >= joinedAt && (!c.mandatoryOnly || e.mandatory));
     const list = [];
     let counted = 0, came = 0, noshow = 0, noreply = 0;
     for (const e of events) {

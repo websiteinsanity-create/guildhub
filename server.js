@@ -253,11 +253,19 @@ function normParties(arr) {
   const seen = new Set();
   return arr.slice(0, 20).map((p, i) => {
     const list = Array.isArray(p) ? p : p && Array.isArray(p.members) ? p.members : [];
-    const members = [];
+    let members = [];
     for (const raw of list) {
       const id = Number(raw);
       if (findMember(id) && !seen.has(id)) { seen.add(id); members.push(id); }
     }
+    // Every party is kept auto-sorted on every save - tanks first, then healers, then DPS (config.roles order),
+    // each group alphabetical by character name - so there's nothing an officer has to do by hand after
+    // dragging someone in, loading a preset, or anything else that changes a party's line-up.
+    members = members.slice().sort((a, b) => {
+      const ma = findMember(a), mb = findMember(b);
+      const ra = ma ? config.roles.indexOf(ma.role) : config.roles.length, rb = mb ? config.roles.indexOf(mb.role) : config.roles.length;
+      return (ra - rb) || (ma ? ma.name : '').localeCompare(mb ? mb.name : '');
+    });
     const name = (!Array.isArray(p) && p && clean(p.name, 40)) || `Party ${i + 1}`;
     const leader = !Array.isArray(p) && p && members.includes(Number(p.leader)) ? Number(p.leader) : null;
     // builds: { memberId: buildId } only for players who use one of their extra builds in this party (everybody else plays their main)
@@ -479,9 +487,13 @@ function deleteMemberCascade(m) {
   for (const ev of db.events) {
     delete ev.rsvps[m.id];
     ev.attended = ev.attended.filter((id) => id !== m.id);
+    if (ev.parties.some((p) => p.members.includes(m.id))) ev.partiesVersion = (ev.partiesVersion || 0) + 1;
     ev.parties = ev.parties.map((p) => dropFromParty(p, m.id));
   }
-  for (const p of db.presets) p.parties = p.parties.map((q) => dropFromParty(q, m.id));
+  for (const p of db.presets) {
+    if (p.parties.some((q) => q.members.includes(m.id))) p.partiesVersion = (p.partiesVersion || 0) + 1;
+    p.parties = p.parties.map((q) => dropFromParty(q, m.id));
+  }
   for (const h of hooks.memberDeleted) h(m);
 }
 // A kick is not a delete: history (loot, points, attendance) stays exactly as it is, and the character is just
@@ -625,6 +637,19 @@ route('POST', '/api/events/:id/rsvp', ({ body, user, params }) => {
     }
     ev.rsvps[m.id] = body.status;
   }
+  // Confirming "Going" can push an already-assigned party over its size cap - most often a preset's placeholder
+  // slot who only now actually confirms, after the real line-up around them had already filled the party up to
+  // the cap on its own. Rather than silently overflowing that party to one more than it's meant to hold, send
+  // this member back out to the pool automatically - same as anyone else sitting unplaced, an officer still has
+  // to manually make room and place them somewhere. Only the member who JUST confirmed is affected; this never
+  // retroactively reshuffles a party that was already over capacity for some other reason.
+  if (body.status === 'yes') {
+    const idx = ev.parties.findIndex((p) => p.members.includes(m.id));
+    if (idx !== -1) {
+      const attendingCount = ev.parties[idx].members.filter((id) => { const x = findMember(id); return x && (x.mercenary || ev.rsvps[id] === 'yes'); }).length;
+      if (attendingCount > config.partySize) { ev.parties[idx] = dropFromParty(ev.parties[idx], m.id); ev.partiesVersion = (ev.partiesVersion || 0) + 1; }
+    }
+  }
   save();
   return eventFor(ev, user);
 });
@@ -644,7 +669,17 @@ route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
 route('POST', '/api/events/:id/parties', ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
+  // Optimistic concurrency: several officers can be dragging players into the same event's parties within the
+  // same few seconds, and this route always replaces the WHOLE parties array, so two saves based on the same
+  // stale snapshot would otherwise silently clobber one another (whoever saves second wins, the first officer's
+  // change vanishes with no error). A client that sends baseVersion is asserting "this is the version I built my
+  // change on top of" - if someone else's save has already moved it past that, this one is refused (409) instead
+  // of overwriting it, and the client re-reads the fresh parties, re-applies its own intended change on top of
+  // THAT, and retries - see public/app.js's commitParties(). Omitting baseVersion keeps the old blind-overwrite
+  // behavior, for any caller that does not know about this yet.
+  if (body.baseVersion !== undefined) need(Number(body.baseVersion) === (ev.partiesVersion || 0), 409, "Someone else just changed this event's parties - using the latest version.");
   ev.parties = normParties(body.parties);
+  ev.partiesVersion = (ev.partiesVersion || 0) + 1;
   audit.log(user, 'party.update', { type: 'event', id: ev.id, name: ev.title }, `${user.name} set the parties for "${ev.title}": ${ev.parties.length} ${ev.parties.length === 1 ? 'party' : 'parties'}.`);
   save();
   return eventFor(ev, user);
@@ -824,7 +859,12 @@ route('PUT', '/api/presets/:id', ({ body, params, user }) => {
   need(p, 404, 'Preset not found.');
   if (body.name !== undefined) { p.name = clean(body.name, 60); need(p.name, 400, 'Give the preset a name.'); }
   if (body.description !== undefined) p.description = clean(body.description, 200);
-  if (body.parties !== undefined) p.parties = normParties(body.parties);
+  if (body.parties !== undefined) {
+    // Same optimistic-concurrency check as the event parties route above - see its comment.
+    if (body.baseVersion !== undefined) need(Number(body.baseVersion) === (p.partiesVersion || 0), 409, "Someone else just changed this preset's parties - using the latest version.");
+    p.parties = normParties(body.parties);
+    p.partiesVersion = (p.partiesVersion || 0) + 1;
+  }
   if (body.hidden !== undefined) p.hidden = body.hidden === true || body.hidden === 'true';
   audit.log(user, 'party.preset.update', { type: 'preset', id: p.id, name: p.name }, `${user.name} edited the party preset "${p.name}".`);
   save();
@@ -843,6 +883,7 @@ route('POST', '/api/presets/:id/use-for-type', ({ body, params }) => {
     if (ev.type !== type.name || Date.parse(ev.start) <= Date.now()) continue;      // only events that have not started
     if (ev.parties.length && body.overwrite !== true) { skipped++; continue; }
     ev.parties = normParties(clone(p.parties));
+    ev.partiesVersion = (ev.partiesVersion || 0) + 1;
     applied++;
   }
   save();
@@ -1258,8 +1299,12 @@ http.createServer(async (req, res) => {
       if (u.role === 'applicant' && !merc && !guestCoachLink && !isGuestCoach && !db.settings.applications.enabled) return fail(u.whyNot);
       db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, discordRoles: Array.isArray(u.roles) ? u.roles : (known?.discordRoles || []), lastLogin: new Date().toISOString() };
       save();
-      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 7);
-      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 7 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0)] });
+      // 30 days, matching passcode-mode sessions (makeToken's own default just below) - there is no reason a
+      // Discord sign-in should need redoing 4x more often than a passcode one. A short-lived Discord session
+      // was the actual cause of players having to re-authorize with Discord every time they opened the site on
+      // the same device after as little as a week away.
+      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 30);
+      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 30 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
   }
