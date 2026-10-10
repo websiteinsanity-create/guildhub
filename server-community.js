@@ -227,6 +227,10 @@ module.exports = function install(ctx) {
         shotcaller = { ok: true, data: started };
       } catch (e) {
         shotcaller = { ok: false, error: e.message || 'Could not start Shotcaller.' };
+        // e.message here is already the real reason (the bot's own rejection text, or what went wrong
+        // reaching it), same as the manual Start dialog's route - it goes in the audit log for the same
+        // reason: whoever isn't hosting Guild Hall has no other way to see it (see server-shotcaller.js).
+        audit(user, 'shotcaller.start-failed', { type: 'guild' }, `${user.name} tried to start a Shotcaller session for "${ev.title}" while posting its parties to Discord - it failed: ${shotcaller.error}`);
       }
     }
     return { ok: true, shotcaller };

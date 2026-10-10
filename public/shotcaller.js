@@ -12,10 +12,11 @@
 let SC = { loading: true, data: null, error: '' };
 let scTimer = null, scActive = false;
 // Set true the instant the Start form submits (before the request even goes out) and cleared once the bot
-// answers - starting can legitimately take up to 45s (see server-shotcaller.js), so the page shows this
-// instead of the plain "Inactive" state for that whole stretch, rather than leaving the dialog open and
-// looking stuck. Persists across a 5s poll tick (viewShotcaller checks it before SC.data.active) since the
-// session genuinely isn't active yet partway through starting.
+// answers - starting can legitimately take a while (relay bots log in and join one party at a time; see the
+// scaling timeout in server-shotcaller.js), so the page shows this instead of the plain "Inactive" state for
+// that whole stretch, rather than leaving the dialog open and looking stuck. Persists across a 5s poll tick
+// (viewShotcaller checks it before SC.data.active) since the session genuinely isn't active yet partway
+// through starting.
 let scStarting = false;
 
 async function pollShotcaller() {
@@ -279,9 +280,10 @@ FORMS['shotcaller-start'] = (f, fd) => {
     count = fd.mode === 'custom' ? Math.round(Number(fd.customCount)) : Number(fd.mode);
   }
   if (!Number.isInteger(count) || count < 1 || count > 12) return toast('Pick a party count from 1 to 12.', true);
-  // Starting can legitimately take up to 45s (server-shotcaller.js) - rather than leaving the dialog open and
-  // looking stuck for that whole stretch, close it immediately and switch the page itself into a "starting"
-  // state (scStartingPage) until the bot answers, same as any other long-running background request here.
+  // Starting can legitimately take a while, more so with more parties (server-shotcaller.js scales its own
+  // patience with the count) - rather than leaving the dialog open and looking stuck for that whole stretch,
+  // close it immediately and switch the page itself into a "starting" state (scStartingPage) until the bot
+  // answers, same as any other long-running background request here.
   closeDialog();
   scStarting = true;
   render();
