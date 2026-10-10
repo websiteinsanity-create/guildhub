@@ -69,7 +69,10 @@ no dependencies: just Node 18+ and one JSON file of data.
 - **Audit log**: every important change - characters created, edited or removed, events, parties, points, settings
   (guild and Discord), and applications accepted or rejected - is recorded with who did it, when, and (where it
   applies) what the value was before and after. Only the leadership can see it, under **Audit log** in the menu, and
-  it can be filtered by player, action, target and date, with pages for large histories.
+  it can be filtered by player, action, target and date, with pages for large histories. A failed Shotcaller start
+  (either from its own page or while posting an event's parties) is recorded here too, as `shotcaller.start-failed`,
+  with the actual reason the bot gave - useful for whoever isn't the one hosting Guild Hall and can't check its
+  server logs, since the app itself only ever shows a short, generic message in the moment.
 - **Qualified for loot** (on the dashboard): attendance on **mandatory** events in the last 14 days, one row
   per member, coloured red / orange / green (default 0-59 / 60-80 / 81-100%). Clicking a row opens a
   dropdown with the player's Questlog link, the items they received in the last 7 days (read live from
@@ -318,6 +321,8 @@ Good to know:
   grow to fit what's typed (up to a generous cap, after which they scroll like any other box), so a longer note stays fully
   visible instead of scrolling out of sight inside a tiny fixed box - Enter always starts a new line in both, same as any
   text box (Shift+Enter does the same thing; there's no different "submit on Enter" behavior to work around here).
+  Line breaks typed into a coaching-point note or a review note are kept once it's saved, too - multiple rows show back
+  as multiple rows wherever the note is displayed, instead of being squashed onto one line.
 - **Proof of use**: an officer can mark any loot entry as confirmed (who confirmed it and when is remembered), for tracking whether a
   player actually showed proof the item was used for what it was given for. Click again to undo it if needed.
 - A person's officer status is checked every time they sign in; sessions last 30 days. Remove someone's role and they lose the

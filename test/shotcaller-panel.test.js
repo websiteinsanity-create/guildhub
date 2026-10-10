@@ -113,10 +113,18 @@ withServer('POST /api/shotcaller/start forwards count/channelId/partyNames/dedic
   const rejected = await s.call('/api/shotcaller/start', 'POST', { count: 2, channelId: '900000000000000099' }, s.officer);
   assert.equal(rejected.status, 400);
   assert.match(rejected.body.error, /not a voice channel/);
+
+  // The officer only ever sees that short message in the app - but someone who isn't the one hosting Guild
+  // Hall (and so can't get at its server logs) still needs to be able to see WHY a start failed, so the same
+  // real reason also lands in the audit log, where any officer can read it from Admin > Audit.
+  const audit = await s.call('/api/admin/audit', 'GET', null, s.officer);
+  const failEntry = audit.body.entries.find((e) => e.action === 'shotcaller.start-failed');
+  assert.ok(failEntry, 'a failed start is recorded in the audit log');
+  assert.match(failEntry.description, /not a voice channel/);
 });
 
 test('POST /api/shotcaller/start waits past the old 5s timeout for a slow-but-working bot (channel creation + relay logins take a while)', { timeout: 15000 }, async () => {
-  // 6.5s comfortably clears the fast calls' 5s timeout but is still well inside startSession's own 45s
+  // 6.5s comfortably clears the fast calls' 5s timeout but is still well inside startSession's own (scaled)
   // allowance for /start specifically - reproduces the user's real "something went wrong" report, where a bot
   // that is genuinely still working (just slow) used to read back as a 502 instead of succeeding.
   const bot = await startFakeBot(6500);
@@ -124,6 +132,23 @@ test('POST /api/shotcaller/start waits past the old 5s timeout for a slow-but-wo
   try {
     const r = await s.call('/api/shotcaller/start', 'POST', { count: 2, channelId: '200000000000000001' }, s.officer);
     assert.equal(r.status, 200, 'the slow-but-successful bot response is not treated as a timeout/failure: ' + JSON.stringify(r.body));
+    assert.equal(r.body.active, true);
+  } finally {
+    await s.stop(); bot.server.close();
+  }
+});
+
+test('POST /api/shotcaller/start scales its patience with the party count, so a bigger session is not cut off by the small session\'s old flat budget', { timeout: 65000 }, async () => {
+  // Relay bots log in and join ONE PARTY AT A TIME on the bot's side (see session.js), so a session with more
+  // parties genuinely needs more time, not just "the bot is being slow" in general. The old code gave every
+  // session the same flat 45s regardless of count; with 2 parties that budget is now 60s (30s + 15s/party -
+  // see server-shotcaller.js), so a bot that takes 50s to finish starting - which would have been wrongly
+  // reported as "something went wrong" under the old flat budget - now succeeds.
+  const bot = await startFakeBot(50000);
+  const s = await startServer(bot);
+  try {
+    const r = await s.call('/api/shotcaller/start', 'POST', { count: 2, channelId: '200000000000000001' }, s.officer);
+    assert.equal(r.status, 200, 'a 50s start for a 2-party session (60s budget) must not be treated as a timeout: ' + JSON.stringify(r.body));
     assert.equal(r.body.active, true);
   } finally {
     await s.stop(); bot.server.close();

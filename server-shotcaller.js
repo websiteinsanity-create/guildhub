@@ -35,16 +35,34 @@ module.exports = function install(ctx) {
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch {
+    } catch (e) {
+      // The officer-facing message here is deliberately generic (a raw fetch/TypeError is not something they
+      // can act on), but that used to mean the REAL reason - wrong URL, Docker networking, the bot's process
+      // actually down, a timeout - was thrown away entirely, nowhere even in Guild Hall's own log. Whatever it
+      // was, it's cheap to keep and only ever shows up here, in this server's own console/docker logs - never
+      // sent to the browser - so print it before replacing it with the clean message the officer actually gets.
+      console.error(`[shotcaller] ${method} ${path} failed:`, e && e.cause ? e.cause : e);
       throw new HttpError(502, 'Shotcaller is unreachable right now, or took too long to respond.');
     }
     const data = await res.json().catch(() => ({}));
+    if (!res.ok) console.error(`[shotcaller] ${method} ${path} -> ${res.status}:`, JSON.stringify(data));
     if (!res.ok) throw new HttpError(res.status, data.error || 'Shotcaller rejected the request.');
     return data;
   }
   const callSession = (subpath, method = 'GET', body, timeoutMs) => callBot(`/session${subpath}`, method, body, timeoutMs);
-  // Starting a session creates channels and logs in relay bots one at a time - see the comment on callBot above.
-  const START_TIMEOUT_MS = 45000;
+  // Starting a session creates channels and logs in relay bots ONE AT A TIME, not in parallel (see the bot's
+  // own session.js) - so the time this can take scales with the party count, not just with how "slow" the bot
+  // happens to be in general. On the bot's own side, each relay gets up to 3 join attempts at 20s each before
+  // it gives up on that one relay alone - i.e. up to 60s just for a single struggling relay, before even
+  // counting every other relay still waiting its turn behind it. A flat 45s budget covers a small, trouble-free
+  // session comfortably but can run out on a bigger one (or a session where even one relay has to retry) while
+  // the bot is still genuinely working - which reads back here as "something went wrong" even though the bot
+  // goes on to finish the start seconds later, unaware anyone gave up on it. 15s per party plus a flat 20s for
+  // everything else (channel creation, member-list fetch, etc.) comfortably covers one retry per relay even at
+  // the full 12-party cap. At count=1 this comes out to the same 45s the old flat budget already was, so a
+  // small, healthy start is not made to wait any longer than before - it only grows from there as parties are
+  // added.
+  const START_TIMEOUT_MS = (count) => 30000 + 15000 * count;
 
   // Shared by the manual Start dialog's route below and by server-community.js's combined "Post to Discord +
   // start Shotcaller" flow (passed through as shotcallerApi - see server.js). Validates the same way either
@@ -67,7 +85,7 @@ module.exports = function install(ctx) {
       try { current = await callSession(''); } catch { /* couldn't read status - try to start anyway, same as a fresh guild */ }
       if (current && current.active) { try { await callSession('/stop', 'POST'); } catch { /* best effort - /start below still reports a real problem */ } }
     }
-    return callSession('/start', 'POST', { count, channelId: chId, dedicatedCallerId: callerId, partyNames: names }, START_TIMEOUT_MS);
+    return callSession('/start', 'POST', { count, channelId: chId, dedicatedCallerId: callerId, partyNames: names }, START_TIMEOUT_MS(count));
   }
 
   // ---------------------------------------------------------------- live panel
@@ -77,7 +95,19 @@ module.exports = function install(ctx) {
 
   route('POST', '/api/shotcaller/start', async ({ body, user }) => {
     const count = Math.round(Number(body.count));
-    const r = await startSession({ channelId: body.channelId, count, partyNames: body.partyNames, dedicatedCallerId: body.dedicatedCallerId });
+    // A failure here throws an HttpError whose message is already the REAL reason (the bot's own rejection
+    // text, or what went wrong reaching it at all) - the officer only ever sees a short generic toast in the
+    // app itself, by design, since a raw network/bot error isn't something they could act on in the moment.
+    // That real reason has nowhere else to land for someone who isn't the one hosting Guild Hall and can't get
+    // at its server logs, so it goes in the audit log too (Admin > Audit) - visible right here in the app,
+    // same place every other officer action already shows up.
+    let r;
+    try {
+      r = await startSession({ channelId: body.channelId, count, partyNames: body.partyNames, dedicatedCallerId: body.dedicatedCallerId });
+    } catch (e) {
+      audit(user, 'shotcaller.start-failed', { type: 'guild' }, `${user.name} tried to start a Shotcaller session (${count} ${count === 1 ? 'party' : 'parties'}) - it failed: ${e.message || 'unknown error'}`);
+      throw e;
+    }
     audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session (${count} ${count === 1 ? 'party' : 'parties'}).`);
     return r;
   }, { officer: true });

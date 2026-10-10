@@ -877,7 +877,7 @@ VIEWS.warnings = () => {
     <td class="nowrap muted small">${w.status === 'active' ? (w.expiresAt ? fmtLootDate(w.expiresAt.slice(0, 10)) : 'never') : (w.endedAt ? fmtLootDate(w.endedAt.slice(0, 10)) : '-')}</td><td>${status(w)}</td>
     ${off ? `<td>${w.status === 'active' ? `<button class="btn sm" data-act="warn-remove" data-id="${w.id}">Remove</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : '<div class="empty">No warnings.</div>'}
-  ${S.explanations.length ? `<h3 class="sec" style="margin-top:24px">${off ? 'Reasons players sent' : 'Your explanations'}</h3><div class="tbl-wrap"><table><tbody>${S.explanations.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 15).map((x) => `<tr><td class="nowrap muted small">${fmtShort(x.at)}</td>${off ? `<td><b>${esc(x.name)}</b></td>` : ''}<td>${esc(x.reason)}</td>
+  ${S.explanations.length ? `<h3 class="sec" style="margin-top:24px">${off ? 'Reasons players sent' : 'Your explanations'}</h3><div class="tbl-wrap"><table><tbody>${S.explanations.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 15).map((x) => `<tr><td class="nowrap muted small">${fmtShort(x.at)}</td>${off ? `<td><b>${esc(x.name)}</b></td>` : ''}<td style="white-space:pre-wrap">${esc(x.reason)}</td>
       <td><span class="st-pill ${x.status === 'approved' ? 'st-approved' : x.status === 'rejected' ? 'st-rejected' : 'st-open'}">${x.status === 'approved' ? 'Accepted' : x.status === 'rejected' ? 'Not accepted' : 'Waiting'}</span>${x.note ? `<div class="muted small">${esc(x.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
 };
 FORMS['warn-new'] = (f, fd) => act(async () => { await api('/api/warnings', 'POST', fd); f.reset(); }, 'Warning given. The player gets a Discord message.');
@@ -980,7 +980,7 @@ VIEWS.merc = (id) => {
   const r = ev.mercRequest;
   const eventPanel = `<div class="panel" style="margin-bottom:16px"><h3>${esc(ev.title)}</h3>
     <div class="muted small">${fmtDate(ev.start)} · ${esc(ev.type)}</div>
-    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any class` : (r.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px">${esc(r.note)}</div>` : ''}` : ''}
+    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any class` : (r.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px;white-space:pre-wrap">${esc(r.note)}</div>` : ''}` : ''}
   </div>`;
   // Already joined this event: a waiting hall instead of the signup form - just their status, and once an
   // officer places them, just their own party, not the full roster or anyone else's party.

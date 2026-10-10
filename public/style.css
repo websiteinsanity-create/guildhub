@@ -769,11 +769,11 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 .vod-marker-jump { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; text-align: left; padding: 8px; cursor: pointer; border-radius: 6px; }
 .vod-marker-jump:hover { background: var(--panel-2); }
 .vod-marker-time { display: block; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
-.vod-marker-note { display: block; white-space: normal; overflow-wrap: anywhere; }
+.vod-marker-note { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 .vod-marker .btn { align-self: center; }
 @media (max-width: 900px) { .vod-review-grid { grid-template-columns: 1fr; } .vod-marker-panel { max-height: none; } }
 .vod-reviewed-badge { display: inline-block; margin-left: 6px; width: 18px; height: 18px; border-radius: 50%; background: #6fcf8b; color: #1b1418; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center; }
 .vod-review-list { display: flex; flex-direction: column; gap: 8px; }
 .vod-review-entry { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .vod-review-entry-head { margin-bottom: 3px; }
-.vod-review-entry-note { white-space: normal; overflow-wrap: anywhere; }
+.vod-review-entry-note { white-space: pre-wrap; overflow-wrap: anywhere; }
