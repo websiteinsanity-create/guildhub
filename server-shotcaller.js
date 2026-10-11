@@ -8,7 +8,7 @@
 // Guild Hall already knows its own Discord server and there is no reason to ask for that twice.
 
 module.exports = function install(ctx) {
-  const { route, need, HttpError, save, audit, shotcaller, findMember, syncAttendancePoints } = ctx;
+  const { route, need, HttpError, save, audit, shotcaller, findMember, findEvent, eventFor, syncAttendancePoints, partyIsPlaceholder } = ctx;
   const db = () => ctx.db;
   const yes = (v) => v === true || v === 'true';
   const configured = () => !!(shotcaller.url && shotcaller.apiKey && shotcaller.guildId);
@@ -113,12 +113,32 @@ module.exports = function install(ctx) {
     save();
   }
 
-  // Someone fully cut off from the conversation in both directions - can't be heard AND can't hear anyone
-  // else - reads as "not really there" (AFK, alt-tabbed away, stepped away) rather than someone just
-  // listening along without a mic. Only matters when Admin > Events has switched this check on; otherwise
-  // simply being connected has always been enough.
-  function presentIds(states, ignoreMuted) {
-    return new Set((states || []).filter((s) => !(ignoreMuted && s.mute && s.deaf)).map((s) => s.id));
+  // The manual counterpart to the automatic start above - for when an officer switched "automatic tracking"
+  // off for this event (Voice channel tracking and Reminders on the event page) and wants to begin crediting
+  // sightings right now instead, on their own call, rather than the moment Shotcaller happens to start. Reuses
+  // beginVoiceTracking itself: a live GET /session status has the exact same parties[]/channelId shape the bot's
+  // own /session/start response does, so there is nothing special to build here - just read what the bot says
+  // is running right now and hand it to the same function. Requires a Shotcaller session to actually be active
+  // already (started separately, e.g. by posting this event's parties with "Also start Shotcaller" ticked but
+  // automatic tracking off, or from the Shotcaller page) - this never starts a session of its own.
+  route('POST', '/api/events/:id/voice-track/start', async ({ user, params }) => {
+    const ev = findEvent(params.id);
+    need(ev, 404, 'Event not found.');
+    need(ctx.effectiveAttendanceMode(ev) === 'voice', 400, 'This event is not using voice tracking.');
+    const status = await callSession('');
+    need(status && status.active, 409, 'Shotcaller is not running right now - start it first, then come back and start tracking.');
+    const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+    beginVoiceTracking(ev, status, realRest);
+    audit(user, 'event.voicetrack.start', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually started voice-attendance tracking for "${ev.title}".`);
+    return eventFor(ev, user);
+  }, { officer: true });
+
+  // Two independent checks - mic-muted and deafened don't have to come together to be excluded any more.
+  // ignoreMuted drops anyone who can't be heard; ignoreDeafened drops anyone who can't hear. Either, both or
+  // neither can be switched on in Admin > Events; off (the default for both) simply being connected is enough,
+  // as it always was before these checks existed.
+  function presentIds(states, ignoreMuted, ignoreDeafened) {
+    return new Set((states || []).filter((s) => !(ignoreMuted && s.mute) && !(ignoreDeafened && s.deaf)).map((s) => s.id));
   }
 
   // Runs on its own clock (VOICE_POLL_INTERVAL_MS, default 10s - "check 3 times within any 30-second window"),
@@ -141,22 +161,29 @@ module.exports = function install(ctx) {
       return;
     }
     const ignoreMuted = !!settings.voiceAttendanceIgnoreMuted;
+    const ignoreDeafened = !!settings.voiceAttendanceIgnoreDeafened;
     const byChannel = new Map();
     for (const p of status.parties || []) {
-      byChannel.set(p.channelId, presentIds(p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id })), ignoreMuted));
+      byChannel.set(p.channelId, presentIds(p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id })), ignoreMuted, ignoreDeafened));
     }
-    // Extra channels (Admin > Events) are never part of the session itself, so they're read through the bot's
-    // own channel-agnostic endpoint instead - read fresh every poll, since an admin could change the list at
-    // any time and a stale list would keep checking (or stop checking) the wrong channels.
-    const extraIds = (settings.voiceTrackExtraChannelIds || []).filter(Boolean);
-    const extraSet = new Set();
-    if (extraIds.length) {
+    // Extra channels - the guild-wide list (Admin > Events) plus whatever each individually tracked event adds
+    // of its own (its own "Voice channel tracking" picker) - are never part of the session itself, so they're
+    // read through the bot's own channel-agnostic endpoint instead, batched into a single call that covers
+    // every channel any tracked event might need this poll. Read fresh every time, since either list could
+    // change at any moment and a stale one would keep checking (or stop checking) the wrong channels.
+    const globalExtraIds = (settings.voiceTrackExtraChannelIds || []).filter(Boolean);
+    const allExtraIds = new Set(globalExtraIds);
+    for (const ev of tracked) for (const id of ev.voiceTrackExtraChannelIds || []) if (id) allExtraIds.add(id);
+    const extraPresence = new Map();     // channelId -> Set of owner ids present in it
+    if (allExtraIds.size) {
       try {
-        const r = await callBot(`/voice-presence?channels=${extraIds.map(encodeURIComponent).join(',')}`);
-        for (const c of r.channels || []) if (c.found) for (const id of presentIds(c.connectedStates, ignoreMuted)) extraSet.add(id);
+        const r = await callBot(`/voice-presence?channels=${[...allExtraIds].map(encodeURIComponent).join(',')}`);
+        for (const c of r.channels || []) if (c.found) extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened));
       } catch { /* extra channels are a bonus, not a reason to skip the party channels below */ }
     }
-    const anyChannel = new Set(extraSet);
+    const unionOf = (ids) => { const s = new Set(); for (const id of ids) for (const owner of extraPresence.get(id) || []) s.add(owner); return s; };
+    const globalExtraSet = unionOf(globalExtraIds);
+    const anyChannel = new Set(globalExtraSet);
     for (const s of byChannel.values()) for (const id of s) anyChannel.add(id);
     const scope = settings.voiceAttendanceScope === 'any-channel' ? 'any-channel' : 'own-party';
     const offsetMs = (Number(settings.voiceTrackStartOffsetMinutes) || 0) * 60000;
@@ -164,10 +191,13 @@ module.exports = function install(ctx) {
     let anyChanged = false;
     for (const ev of tracked) {
       if (now < Date.parse(ev.start) + offsetMs) continue; // tracking hasn't opened yet for this event
+      const evExtraIds = ev.voiceTrackExtraChannelIds || [];
+      const evExtraSet = evExtraIds.length ? new Set([...globalExtraSet, ...unionOf(evExtraIds)]) : globalExtraSet;
+      const evAnyChannel = evExtraIds.length ? new Set([...anyChannel, ...unionOf(evExtraIds)]) : anyChannel;
       let evChanged = false;
       for (const party of ev.voiceTracking.partyChannels) {
         const own = byChannel.get(party.channelId) || new Set();
-        const connected = scope === 'any-channel' ? anyChannel : (extraSet.size ? new Set([...own, ...extraSet]) : own);
+        const connected = scope === 'any-channel' ? evAnyChannel : (evExtraSet.size ? new Set([...own, ...evExtraSet]) : own);
         for (const memberId of party.members) {
           const m = findMember(memberId);
           if (!m || !connected.has(m.owner)) continue;

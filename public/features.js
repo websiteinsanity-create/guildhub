@@ -375,8 +375,16 @@ function attRows(evs) {
   for (const m of S.members.filter((x) => x.active && (off || x.owner === S.user.key))) { if (!byOwner.has(m.owner)) byOwner.set(m.owner, []); byOwner.get(m.owner).push(m); }
   return [...byOwner].map(([owner, chars]) => {
     const ids = chars.map((c) => c.id), list = [];
+    // Same reasoning as playerStats() server-side and eventChart()/eventRoster() elsewhere on the client: a
+    // player cannot have been a no-show or no-reply for an event that happened before they had any character in
+    // the guild at all. Uses the EARLIEST joinedAt across all of a player's characters (an alt added later
+    // should not push "joined" forward), falling back to "always joined" for a character missing joinedAt
+    // entirely (only pre-dates the field, not a real player).
+    const joinTimes = chars.map((c) => Date.parse(c.joinedAt)).filter(Number.isFinite);
+    const joinedAt = joinTimes.length ? Math.min(...joinTimes) : -Infinity;
     let n = 0, noshow = 0, noreply = 0, declined = 0, total = 0;
     for (const e of evs) {
+      if (new Date(e.start).getTime() < joinedAt) continue;        // predates this player entirely - not even "leave", just not theirs
       if (onLeaveAt(owner, new Date(e.start).getTime())) { list.push({ e, status: 'leave', answer: '-' }); continue; }       // away with the leadership's OK: not judged
       total++;
       const answers = ids.map((id) => e.rsvps[id]), going = answers.includes('yes'), no = answers.includes('no');

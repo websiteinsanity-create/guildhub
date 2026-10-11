@@ -141,13 +141,19 @@ tr.click:hover td { background: var(--panel-2); }
 .status-chip[data-rst="yes"], .status-pick[data-rst="yes"] { --sc: #6fcf8b; }
 .status-chip[data-rst="no"], .status-pick[data-rst="no"] { --sc: #eba23c; }
 .status-chip[data-rst="none"], .status-pick[data-rst="none"] { --sc: #8a8a95; }
+/* The 6-state version (once attendance is tracked - see ROSTER6 in app.js): participated/no-show are the two
+   that matter most, so they get the clearest colours (green/red); the rest are muted variations on them. */
+.status-chip[data-rst="participated"], .status-pick[data-rst="participated"] { --sc: #6fcf8b; }
+.status-chip[data-rst="noshow"], .status-pick[data-rst="noshow"] { --sc: #e0617a; }
+.status-chip[data-rst="noreply"], .status-pick[data-rst="noreply"] { --sc: #8a8a95; }
+.status-chip[data-rst="noreply-att"], .status-pick[data-rst="noreply-att"] { --sc: #5fb8ba; }
+.status-chip[data-rst="notattending"], .status-pick[data-rst="notattending"] { --sc: #eba23c; }
+.status-chip[data-rst="signedoff-att"], .status-pick[data-rst="signedoff-att"] { --sc: #b08ae0; }
 .parties { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .party { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .party h4 { margin: 0 0 8px; font-family: var(--display); font-weight: 400; font-size: 16px; display: flex; justify-content: space-between; }
 .party .m { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 0; font-size: 15px; }
 .party select { width: 74px; padding: 1px 4px; font-size: 13px; }
-.attend-list { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin-bottom: 12px; }
-.attend-list label { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 15px; margin: 0; padding: 4px 0; cursor: pointer; }
 
 /* points */
 .pos { color: var(--gold); }

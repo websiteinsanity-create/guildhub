@@ -97,11 +97,12 @@ const SETTING_DEFAULTS = {
   // it; this is the voice-mode equivalent of pinOffsetMinutes above. Can be negative (tracking opens before
   // the listed start), same range as pinOffsetMinutes.
   voiceTrackStartOffsetMinutes: 0,
-  // When on, a player who is both muted AND deafened in their voice channel does not count as present - fully
-  // cut off from the conversation in both directions reads as "not really there" (AFK, alt-tabbed away,
-  // stepped away from the keyboard), rather than someone just listening along without a mic. Off by default:
-  // simply being connected is enough, as it always was before this setting existed.
+  // Two independent switches, each off by default (simply being connected is enough, as it always was before
+  // these settings existed). voiceAttendanceIgnoreMuted excludes anyone mic-muted; voiceAttendanceIgnoreDeafened
+  // excludes anyone deafened. Turning both on is how to get the old "fully cut off from the conversation in
+  // both directions" behavior back - each used to only ever apply together, as a single combined setting.
   voiceAttendanceIgnoreMuted: false,
+  voiceAttendanceIgnoreDeafened: false,
   reminderMinutes: [300, 120],                            // "you have not answered" reminders, minutes before the event
   remindersEnabled: true,
   // Attendance rules: who gets asked for a reason, who gets warnings, and when a warning goes away. 0 switches a limit off.
@@ -641,6 +642,18 @@ function pickEvent(b, ex) {
     // that genuinely needs the other kind (no Shotcaller access this one night, say, or a one-off trial of
     // voice tracking before switching the whole guild over). See effectiveAttendanceMode below.
     attendanceModeOverride: ['default', 'pin', 'voice'].includes(b.attendanceModeOverride) ? b.attendanceModeOverride : (ex ? ex.attendanceModeOverride || 'default' : 'default'),
+    // Only meaningful in voice mode (see "Voice channel tracking and Reminders" on the event page). On by
+    // default: tracking begins the moment Shotcaller actually starts for this event (posting its parties with
+    // "Also start Shotcaller" ticked), exactly as it always has. Switched off, that no longer happens on its
+    // own - an officer has to hit "Start tracking now" by hand once they're ready, so early arrivals getting
+    // Shotcaller running ahead of time never silently starts the clock on attendance too.
+    voiceTrackAuto: b.voiceTrackAuto === undefined ? (ex ? ex.voiceTrackAuto !== false : true) : b.voiceTrackAuto === true || b.voiceTrackAuto === 'true',
+    // Extra voice channels (besides whatever Shotcaller creates for THIS event) that count toward its own
+    // attendance - same idea as the guild-wide Admin > Events list, but scoped to one event, for a channel that
+    // only matters for this particular night rather than always.
+    voiceTrackExtraChannelIds: Array.isArray(b.voiceTrackExtraChannelIds)
+      ? [...new Set(b.voiceTrackExtraChannelIds.map((x) => String(x)))].filter((id) => /^\d{15,25}$/.test(id))
+      : (ex ? ex.voiceTrackExtraChannelIds || [] : []),
   };
 }
 // What actually governs this one event: its own override if it has one, otherwise the guild-wide default.
@@ -868,6 +881,7 @@ route('PUT', '/api/settings', ({ body, user }) => {
     st.voiceTrackStartOffsetMinutes = v;
   }
   if (body.voiceAttendanceIgnoreMuted !== undefined) st.voiceAttendanceIgnoreMuted = body.voiceAttendanceIgnoreMuted === true || body.voiceAttendanceIgnoreMuted === 'true';
+  if (body.voiceAttendanceIgnoreDeafened !== undefined) st.voiceAttendanceIgnoreDeafened = body.voiceAttendanceIgnoreDeafened === true || body.voiceAttendanceIgnoreDeafened === 'true';
   if (body.reminderMinutes !== undefined) {
     const list = (Array.isArray(body.reminderMinutes) ? body.reminderMinutes : []).map(int);
     need(list.every((v) => v >= 1 && v <= 10080) && list.length <= 6, 400, 'Reminders: up to 6 times, each between 1 minute and 7 days before the event.');
@@ -1303,7 +1317,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
 const shotcallerApi = require('./server-shotcaller')({
-  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, syncAttendancePoints, effectiveAttendanceMode,
+  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, findEvent, eventFor, syncAttendancePoints, effectiveAttendanceMode, partyIsPlaceholder,
   shotcaller: { url: SHOTCALLER_URL, apiKey: SHOTCALLER_API_KEY, get guildId() { return discord.cfg.guildId; } },
   get db() { return db; },
 });
