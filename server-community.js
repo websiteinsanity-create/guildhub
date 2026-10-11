@@ -225,6 +225,9 @@ module.exports = function install(ctx) {
         });
         audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session for "${ev.title}" while posting its parties to Discord.`);
         shotcaller = { ok: true, data: started };
+        // In 'voice' attendance mode, this is the moment attendance tracking for this event actually begins -
+        // see beginVoiceTracking in server-shotcaller.js. A no-op in 'pin' mode.
+        shotcallerApi.beginVoiceTracking(ev, started, realRest);
       } catch (e) {
         shotcaller = { ok: false, error: e.message || 'Could not start Shotcaller.' };
         // e.message here is already the real reason (the bot's own rejection text, or what went wrong

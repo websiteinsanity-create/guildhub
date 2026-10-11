@@ -118,6 +118,10 @@ no dependencies: just Node 18+ and one JSON file of data.
     (editable per event, 15 minutes by default) and their character is marked as attended (the event turns green). The window says
     whether sign-in is **not activated yet** (with the time it opens), **open** (with the input and the time it closes), or **too late**. Five wrong tries lock a player
     out for that event, and officers can always mark attendance by hand, send the PIN again, or create a new one.
+    The server also stays up and keeps working correctly if a large guild's whole roster types the PIN in within
+    the same minute or two: any unexpected error is logged and swallowed instead of taking the process down, and
+    the points bookkeeping behind attendance no longer re-scans the entire points history for every single player
+    in the burst.
   - **Reminders**: players who have not answered get a Discord message at editable times before the event
     (default 5 h and 2 h). Reminders stop when sign-ups close, and can be switched off per event. The message
     includes two one-tap buttons, **Can come** / **Can't come**, for anyone who would rather not open the site
@@ -393,6 +397,53 @@ for each party, one at a time - so starting (unlike the other quick status/mute/
 seconds before Guild Hall reports it as unreachable. The Start dialog closes the moment you click Start rather
 than sitting there for that whole stretch, and the Shotcaller page itself shows a "Starting…" state until the
 bot answers either way.
+
+### Attendance from Shotcaller voice (optional)
+
+Admin > Events has a **How attendance is confirmed** setting: **Attendance PIN** (the default, everything
+above and in "Attendance" elsewhere in this README) or **Shotcaller voice presence**. This is the guild-wide
+default, not a hard rule - the event edit dialog has its own **Attendance tracking** field, normally left on
+"Guild default" (it follows whatever this setting currently says, and flips automatically if the setting ever
+changes), but any single event can instead be pinned to **Always use the Attendance PIN** or **Always use
+Shotcaller voice presence** regardless of the guild-wide setting, for the rare event that genuinely needs the
+other kind. Whichever mode actually governs an event, switching it stops the PIN from ever being auto-sent for
+that event and shows "Tracked automatically from Shotcaller voice chat" to players instead of a PIN box. The PIN
+system itself stays completely intact underneath (an officer can still send one by hand from an event any time),
+so switching back to PIN mode later restores everything exactly as it was, nothing is lost by trying voice mode.
+
+With voice presence governing an event, posting its parties with "Also start Shotcaller" ticked does one extra
+thing once the session actually starts: Guild Hall starts watching - on its own clock, independent of the ~30s
+background tick that sends reminders, every 10 seconds by default (`VOICE_POLL_INTERVAL_MS`) - who the bot says
+is actually connected in each party's voice channel, not a guess, the bot's own live Discord voice-state list,
+and matches those Discord accounts against the characters assigned to that event's parties. Being seen at least
+twice within any rolling 30-second window (never just once, so briefly passing through on the way to the wrong
+channel doesn't count) marks that character attended, automatically, with no PIN and nothing for the player to
+type in. **Admin > Events** also has:
+- **Voice check**, for how strict the matching is: **only their own party's voice channel** (the default -
+  someone has to be in the specific channel their assigned character's party actually uses) or **anywhere in
+  the Shotcaller session** (looser - counts them seen anywhere in it, even parked in the wrong party's channel).
+- **Other channels always tracked**, a picker (loaded live from the bot) for standing voice channels - a
+  "Main"/"Raid Comms" channel some of the roster sits in instead of their assigned party's own channel, say -
+  that count toward attendance no matter which party channel they're in or what the Voice check scope is above.
+  These are never part of the Shotcaller session itself, so they're checked through their own call to the bot.
+- **Voice tracking starts** (minutes after the event begins, can be negative), for when tracking actually starts
+  crediting sightings - 0 means from the moment the event's listed start time arrives. An officer and early
+  arrivals setting up Shotcaller a few minutes before the event's start time shouldn't already count as having
+  attended it; this is the voice-mode equivalent of the existing PIN send-offset.
+- **Don't count a player muted AND deafened in voice as attended** - off by default. Turned on, a player who is
+  both mic-muted and deafened (cut off from the conversation in both directions - reads as AFK, alt-tabbed away,
+  or stepped away from the keyboard) is skipped, while someone merely mic-muted but still listening still counts.
+
+Either way, this only ever covers events an officer actually starts Shotcaller for from that event's own "Post
+to Discord" dialog - the Shotcaller page's own standalone Start dialog isn't tied to any one event's parties, so
+it never triggers attendance tracking. An event nobody starts Shotcaller for still has nobody confirming
+attendance but an officer's own hand, exactly as if the PIN had never been sent for it either.
+
+This needs Shotcaller bot **v4.3.0 or later** - that version added the channel-agnostic voice-presence endpoint
+("other channels always tracked" above reads through it) and started including each connected player's
+mute/deaf state, not just their id. Against an older bot, voice mode switches on without an error but never
+actually marks anyone attended (there's simply nobody for it to match, and the extra-channels/mute-aware
+features have nothing to call), so update the bot first if you're turning this on.
 
 1. Set up Shotcaller itself (its own repo, its own `docker-compose.yml`) and generate a shared secret for it:
    `openssl rand -hex 32`. Put that value in Shotcaller's own `CONTROL_API_KEY`.
