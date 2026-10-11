@@ -57,9 +57,13 @@ no dependencies: just Node 18+ and one JSON file of data.
   The leadership sees how many accepted and who has not, can turn a notice off, and can make everybody accept an edited
   notice again. Players who are already signed in get a new notice within a minute. (This is a reminder to read,
   not a security control: someone who talks to the server directly can skip the pop-up.)
-- **Time zones**: every player picks their own time zone on their profile (default Europe/Berlin, which is CEST in summer).
-  The calendar, event times, PIN windows and the "New event" form all use it. Times typed in the "New event" form are
-  taken as times in your zone.
+- **Time zones**: every player picks their own time zone on their profile, used for everything they *read* - the
+  calendar, event times, PIN windows. The guild itself also has one fixed zone (`defaultTimezone` in `config.json`,
+  Europe/Berlin unless changed), and that's the one the "Starts" field in the New/Edit event form always means,
+  regardless of which officer is doing the editing or what their own profile is set to - an event's real start
+  time is a guild-wide fact (a raid at 20:30 server time), not something that should quietly shift depending on
+  whoever happens to create it. The field's label always names the zone it's reading, so there's never a guess
+  involved. (A recurring series works the same way and always has, with its own explicit time zone picker.)
 - **Dashboard** (the landing page): the guild name in big letters, member count out of the guild cap, how many Tanks, Healers and DPS,
   the next event with an **Info** section under it (the leadership names it and creates categories and buttons; every button opens a
   popup with their own text), and a **Leadership** area in two parts: the tasks (only the leadership sees them) and a short "who is who"
@@ -430,14 +434,38 @@ type in. **Admin > Events** also has:
   crediting sightings - 0 means from the moment the event's listed start time arrives. An officer and early
   arrivals setting up Shotcaller a few minutes before the event's start time shouldn't already count as having
   attended it; this is the voice-mode equivalent of the existing PIN send-offset.
-- **Don't count a player muted AND deafened in voice as attended** - off by default. Turned on, a player who is
-  both mic-muted and deafened (cut off from the conversation in both directions - reads as AFK, alt-tabbed away,
-  or stepped away from the keyboard) is skipped, while someone merely mic-muted but still listening still counts.
+- **Don't count a player muted in voice as attended** and **Don't count a player deafened in voice as attended** -
+  two independent switches, both off by default (simply being connected is enough). Turn on just the first to
+  skip anyone mic-muted (even if they can still hear); just the second to skip anyone deafened (even if they
+  could still talk); or both to only skip someone fully cut off from the conversation in both directions - the
+  old combined behavior, back when this was a single setting.
 
 Either way, this only ever covers events an officer actually starts Shotcaller for from that event's own "Post
 to Discord" dialog - the Shotcaller page's own standalone Start dialog isn't tied to any one event's parties, so
 it never triggers attendance tracking. An event nobody starts Shotcaller for still has nobody confirming
 attendance but an officer's own hand, exactly as if the PIN had never been sent for it either.
+
+When an event uses voice tracking, its side panel is relabelled **Voice channel tracking and Reminders** and
+gains an **automatic tracking** toggle (on by default, admins only). Switching it off for that one event stops
+"Also start Shotcaller" from beginning tracking by itself; a **Start tracking now** button appears instead, and
+pressing it asks to confirm ("Sure to start tracking now?") before tracking the session that's already running.
+The same panel also lets an officer add **extra channels for this event**, on top of whatever "Other channels
+always tracked" already lists guild-wide in Admin > Events - useful for a one-off standing channel that only
+matters for that particular event.
+
+### Attendance tracking (no separate Attendance page)
+
+There is no standalone attendance checklist any more - it has been folded into each event's **roster** grid.
+Before an officer has recorded who came, every player there shows the usual three states (**Attending**,
+**Not attending**, **No reply**). Once attendance has been tracked for that event (a PIN was used, Shotcaller
+voice tracking ran, or an officer ticked people by hand), the same dropdown switches to six states instead, so
+nothing is lost in the merge: **Participated** (said Attending, came), **No show** (said Attending, didn't),
+**No reply** (never answered, didn't come), **No reply but participated** (never answered, came anyway),
+**Not attending** (said Can't, as expected), and **Signed off but participated** (said Can't, but showed up
+anyway). Changing a dropdown only stages the edit locally; nothing is sent until an officer presses
+**Save attendance** below the roster, which overwrites both the sign-up and the recorded attendance for
+everyone changed in one go - handy for fixing a player the automatic tracking missed, or undoing a mistake,
+without reopening a second window.
 
 ### Testing the voice pipeline (Admin > Testing)
 

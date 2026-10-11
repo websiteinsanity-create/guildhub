@@ -44,20 +44,29 @@ const avatarImg = (u) => (avatarUrl(u) ? `<img class="avatar" src="${esc(avatarU
 const pad = (n) => String(n).padStart(2, '0');
 const tzOk = (z) => { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return !!z; } catch { return false; } };
 const TZ = () => { const z = S.prefs && S.prefs.timezone; return z && tzOk(z) ? z : (S.cfg && S.cfg.defaultTimezone) || 'Europe/Berlin'; };
-const tzAbbr = (ms) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: TZ(), timeZoneName: 'short' }).formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName').value; } catch { return TZ(); } };
-// The date and time on a wall clock in the chosen zone.
-function wall(ms) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: TZ(), hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+// The guild's own fixed reference zone (Admin/config, e.g. "Europe/Berlin") - distinct from TZ(), which is
+// whatever zone the CURRENT VIEWER personally prefers for reading dates. An event's real start time is a
+// guild-wide fact (a raid at 20:30 "server time"), not something that should shift depending on which
+// officer happens to be the one creating or editing it - so the one-off event form below reads and writes
+// its "Starts" field in this zone always, regardless of the editing officer's own TZ() preference. (The
+// recurring-event form already got this right from the start: it has its own explicit tz picker, defaulting
+// to this same guild zone, completely separate from the creating officer's own display preference.)
+const guildTz = () => (S.cfg && S.cfg.defaultTimezone) || 'Europe/Berlin';
+const tzAbbr = (ms, tz = TZ()) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName').value; } catch { return tz; } };
+// The date and time on a wall clock in the chosen zone (the viewer's own TZ() unless told otherwise).
+function wall(ms, tz = TZ()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
   return { y: +p.year, m: +p.month, d: +p.day, hh: +p.hour, mm: +p.minute };
 }
 const wallKey = (ms) => { const w = wall(ms); return w.y * 10000 + w.m * 100 + w.d; };
 const todayTz = () => { const w = wall(Date.now()); return `${w.y}-${pad(w.m)}-${pad(w.d)}`; };
 const addDayStr = (str, n) => { const [y, m, d] = str.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
-// "2026-09-21T21:00" typed as wall-clock time in the chosen zone -> the real moment (ISO string)
-function tzToIso(str) {
+// "2026-09-21T21:00" typed as wall-clock time in the chosen zone (the viewer's own TZ() unless told
+// otherwise) -> the real moment (ISO string)
+function tzToIso(str, tz = TZ()) {
   const [dp, tp] = str.split('T'), [y, m, d] = dp.split('-').map(Number), [hh, mm] = (tp || '00:00').split(':').map(Number);
   const wallMs = Date.UTC(y, m - 1, d, hh, mm);
-  const off = (ms) => { const w = wall(ms); return Math.round((Date.UTC(w.y, w.m - 1, w.d, w.hh, w.mm) - Math.floor(ms / 60000) * 60000) / 60000); };
+  const off = (ms) => { const w = wall(ms, tz); return Math.round((Date.UTC(w.y, w.m - 1, w.d, w.hh, w.mm) - Math.floor(ms / 60000) * 60000) / 60000); };
   let utc = wallMs - off(wallMs) * 60000;
   utc = wallMs - off(utc) * 60000;
   return new Date(utc).toISOString();
@@ -151,7 +160,7 @@ function weaponLine(m) {
 }
 const fmtDate = (iso) => `${new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() })} ${tzAbbr(new Date(iso).getTime())}`;
 const fmtShort = (iso) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ() });
-const toLocalInput = (iso) => { const w = wall(new Date(iso).getTime()); return `${w.y}-${pad(w.m)}-${pad(w.d)}T${pad(w.hh)}:${pad(w.mm)}`; };
+const toLocalInput = (iso, tz = TZ()) => { const w = wall(new Date(iso).getTime(), tz); return `${w.y}-${pad(w.m)}-${pad(w.d)}T${pad(w.hh)}:${pad(w.mm)}`; };
 function until(iso) {
   const ms = new Date(iso) - Date.now(); const abs = Math.abs(ms);
   const d = Math.floor(abs / 864e5), h = Math.floor(abs % 864e5 / 36e5), m = Math.floor(abs % 36e5 / 6e4);
@@ -811,22 +820,51 @@ function eventRoster(ev) {
   return S.members.filter((m) => m.active && !m.mercenary && !(m.joinedAt && new Date(m.joinedAt).getTime() > evStart));
 }
 const ROSTER_STATUS = { yes: 'Attending', no: 'Not attending', none: 'No reply' };
-// One roster row: name, subclass and gearscore on the left, and - the whole point of this - a status control on
-// the right that replaces the old separate "change someone else's sign-up" dropdown entirely. Officers get a
-// live dropdown they can change at any time, including long after the event and after attendance was already
-// rolled (plain RSVP changes, same /api/events/:id/rsvp route "Your sign-up" above already uses - an officer
-// could always do this, it just used to live in its own clunky picker instead of inline here). Everybody else
-// gets the same information as a plain read-only chip - no change in what members could already see before.
-function rosterRow(ev, m, admin) {
-  const s = ev.rsvps[m.id] === 'yes' ? 'yes' : ev.rsvps[m.id] === 'no' ? 'no' : 'none';
+// Once attendance has actually been tracked for an event (rolled(ev) - the same test the Attendance/points
+// page already uses), the roster's status control folds in whether each person actually showed up, on top of
+// whether they RSVP'd - this is what replaced the old separate "Attendance" checklist panel entirely. Each of
+// the 6 combinations gets its own plain-English label and its own token (used as both the <select>'s value and
+// its data-rst, for the row's colour) - roster6Key looks a {rsvp, attended} pair back up to find which.
+const ROSTER6 = {
+  participated: { rsvp: 'yes', attended: true }, noshow: { rsvp: 'yes', attended: false },
+  noreply: { rsvp: 'none', attended: false }, 'noreply-att': { rsvp: 'none', attended: true },
+  notattending: { rsvp: 'no', attended: false }, 'signedoff-att': { rsvp: 'no', attended: true },
+};
+const ROSTER6_LABEL = {
+  participated: 'Participated', noshow: 'No show', noreply: 'No reply', 'noreply-att': 'No reply but participated',
+  notattending: 'Not attending', 'signedoff-att': 'Signed off but participated',
+};
+function roster6Key(rsvp, attended) {
+  return Object.keys(ROSTER6).find((k) => ROSTER6[k].rsvp === rsvp && ROSTER6[k].attended === attended) || (attended ? 'noreply-att' : 'noreply');
+}
+// One roster row: name, subclass and gearscore on the left, and - the whole point of the original rework - a
+// status control on the right that replaced the old separate "change someone else's sign-up" dropdown. Before
+// attendance is tracked, officers get the plain 3-state RSVP dropdown, saved instantly, same as it always was.
+// Once it is tracked, officers instead get the 6-state version above - but NOT saved instantly: changing it
+// only updates this one <select> (see CHANGES['roster-stage']), and nothing is actually sent to the server
+// until "Save attendance" is clicked, so picking several people's real status doesn't fire a request per click
+// and can't be half-applied by a stray background refresh mid-edit. Everybody else (and officers before
+// tracking starts) just sees the current status as a plain read-only chip.
+function rosterRow(ev, m, admin, tracked) {
+  const rsvp = ev.rsvps[m.id] === 'yes' ? 'yes' : ev.rsvps[m.id] === 'no' ? 'no' : 'none';
+  const attended = ev.attended.includes(m.id);
   const sub = classOf(m) || m.primaryWeapon;
-  const control = admin
-    ? `<select class="status-pick" data-rst="${s}" data-act="rsvp-row" data-ev="${ev.id}" data-m="${m.id}" aria-label="Attendance status for ${esc(m.name)}">
-        <option value="yes" ${s === 'yes' ? 'selected' : ''}>Attending</option>
-        <option value="no" ${s === 'no' ? 'selected' : ''}>Not attending</option>
-        <option value="none" ${s === 'none' ? 'selected' : ''}>No reply</option>
-      </select>`
-    : `<span class="status-chip" data-rst="${s}">${ROSTER_STATUS[s]}</span>`;
+  let control;
+  if (admin && tracked) {
+    const val = roster6Key(rsvp, attended);
+    control = `<select class="status-pick" data-rst="${val}" data-act="roster-stage" data-ev="${ev.id}" data-m="${m.id}" aria-label="Attendance status for ${esc(m.name)}">
+      ${Object.keys(ROSTER6).map((k) => `<option value="${k}" ${val === k ? 'selected' : ''}>${esc(ROSTER6_LABEL[k])}</option>`).join('')}
+    </select>`;
+  } else if (admin) {
+    control = `<select class="status-pick" data-rst="${rsvp}" data-act="rsvp-row" data-ev="${ev.id}" data-m="${m.id}" aria-label="Attendance status for ${esc(m.name)}">
+        <option value="yes" ${rsvp === 'yes' ? 'selected' : ''}>Attending</option>
+        <option value="no" ${rsvp === 'no' ? 'selected' : ''}>Not attending</option>
+        <option value="none" ${rsvp === 'none' ? 'selected' : ''}>No reply</option>
+      </select>`;
+  } else {
+    const label = tracked ? ROSTER6_LABEL[roster6Key(rsvp, attended)] : ROSTER_STATUS[rsvp];
+    control = `<span class="status-chip" data-rst="${tracked ? roster6Key(rsvp, attended) : rsvp}">${esc(label)}</span>`;
+  }
   return `<div class="mini roster-row"><span><b>${esc(m.name)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${control}</div>`;
 }
 
@@ -834,20 +872,24 @@ function eventDetail(ev) {
   const admin = isOfficer();
   const roster = eventRoster(ev);
   const goingN = roster.filter((m) => ev.rsvps[m.id] === 'yes').length;
-  const past = new Date(ev.start) < Date.now();
+  const tracked = rolled(ev);          // attendance has actually been recorded - the roster control becomes the 6-state version
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
   const myRows = mine().map((m) => rsvpRow(ev, m, locked)).join('');
   const cap = ev.maxSignups ? ` of ${ev.maxSignups}` : '';
-  const signupNote = past ? '' : closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
+  // closesAt is always at or before the event's own start, so a past event is always a closed one too - see
+  // the matching comment in eventSide() for why this no longer blanks the note out for past events.
+  const signupNote = closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
 
   return `
   <div class="panel"><h3>Going: ${goingN}${cap}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
     ${roster.length ? `<div class="cols">${S.cfg.roles.map((r) => {
       const g = roster.filter((m) => m.role === r).sort((a, b) => b.gearScore - a.gearScore);
       return `<div class="col" style="--c:${roleColor(r)}"><h3><span>${esc(r)}</span><span>${g.length}</span></h3>
-        ${g.map((m) => rosterRow(ev, m, admin)).join('') || '<div class="muted small">None</div>'}</div>`;
+        ${g.map((m) => rosterRow(ev, m, admin, tracked)).join('') || '<div class="muted small">None</div>'}</div>`;
     }).join('')}</div>` : '<div class="muted">Nobody on the roster yet.</div>'}
+    ${admin && tracked && roster.length ? `<div style="margin-top:14px"><button class="btn primary sm" data-act="roster-save" data-id="${ev.id}">Save attendance</button>
+      <span class="muted small">Change anyone's status above, then save - points (if on) are recalculated too.</span></div>` : ''}
   </div>
 
   ${(() => {
@@ -873,17 +915,20 @@ function eventDetail(ev) {
   </div>`;
   })()}
 
-  ${isOfficer() ? automationPanel(ev) : ''}
-  ${isOfficer() ? attendancePanel(ev, past) : ''}`;
+  ${isOfficer() ? automationPanel(ev) : ''}`;
 }
 
 // The window on the right of the calendar: the event, my sign-up, and the attendance PIN.
 function eventSide(ev) {
-  const past = new Date(ev.start) < Date.now();
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
   const myRows = mine().map((m) => rsvpRow(ev, m, locked)).join('');
-  const signupNote = past ? '' : closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
+  // closesAt is always at or before the event's own start (signupCloseMinutes can't go negative), so a past
+  // event is always a closed one too - there's no real "past but still open" state to special-case here. This
+  // used to blank the note out entirely once an event was past, which left the RSVP buttons sitting there
+  // disabled with no explanation at all - a member has no way to tell "sign-ups closed" apart from "this is
+  // broken" unless we actually say so, which is exactly what got reported as a bug.
+  const signupNote = closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
   const st = myStatus(ev);
   return `<div class="panel side-card" data-st="${st}">
     <div class="ev-title"><div style="min-width:0"><h2>${esc(ev.title)}</h2>
@@ -981,11 +1026,22 @@ function pinPanel(ev) {
   return `<div class="panel"><h3>Attendance PIN</h3><div class="muted small" style="margin:-6px 0 8px">${text}</div>${own.length ? rows : '<div class="muted small">Add a character to enter the PIN.</div>'}</div>`;
 }
 
-// Officers: the PIN itself, who got it, and what the reminders did.
+// Shared by both the PIN and voice-tracking versions of the admin automation panel below.
+function remindersBlock(ev) {
+  const st = S.settings;
+  const hrs = (m) => (m % 60 === 0 ? `${m / 60}h` : `${Math.round(m / 6) / 10}h`);
+  return `<div class="small" style="margin-top:12px">
+      <div class="ev-title"><span class="muted">Reminders for players who have not answered.</span></div>
+      <div class="muted" style="margin-top:2px">${!st.remindersEnabled ? 'Automatic reminders are switched off in Admin' : ev.reminders === false ? 'Automatic reminders are off for this event' : `Automatic: ${st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set'}`}. <span class="muted">(The "Send reminder now" button moved up to the event card above.)</span></div>
+      ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.manual ? `(sent by ${esc(l.by)})` : l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>`;
+}
+
+// Officers: the PIN itself, who got it, and what the reminders did. In voice mode, this becomes the "Voice
+// channel tracking and Reminders" panel instead - there is no PIN to show, so it shows the tracking controls.
 function automationPanel(ev) {
+  if (effectiveAttendanceMode(ev) === 'voice') return voiceTrackPanel(ev);
   const pin = ev.pin, info = ev.pinInfo, st = S.settings;
   const entered = Object.keys(ev.pinEntries || {}).length;
-  const hrs = (m) => (m % 60 === 0 ? `${m / 60}h` : `${Math.round(m / 6) / 10}h`);
   return `<div class="panel"><div class="ev-title"><h3>PIN and reminders</h3>
       <span class="seg"><button class="btn sm" data-act="pin-send" data-mode="send" data-id="${ev.id}">${pin ? 'Send the PIN again' : 'Create and send PIN now'}</button>${pin ? `<button class="btn sm" data-act="pin-send" data-mode="new" data-id="${ev.id}">New PIN</button>` : ''}${pin && info.state === 'closed' ? `<button class="btn sm" data-act="pin-send" data-mode="reopen" data-id="${ev.id}" title="Keeps the same code, just gives it a fresh window">Reopen window</button>` : ''}</span></div>
     ${pin ? `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin:6px 0 4px"><div class="pin-code" aria-label="PIN">${esc(pin.code)}</div>
@@ -994,11 +1050,47 @@ function automationPanel(ev) {
       : ev.pinEnabled
         ? `<div class="muted small">It will be created ${st.pinOffsetMinutes === 0 ? 'when the event starts' : `${Math.abs(st.pinOffsetMinutes)} minutes ${st.pinOffsetMinutes > 0 ? 'after the start' : 'before the start'}`} (around ${fmtTime(info.scheduledAt)}) and sent by Discord to the party leaders and the leadership. Change this in Admin.</div>`
         : `<div class="muted small">The PIN is switched off for this event (see "Attendance PIN" below) - nothing is sent automatically, but you can still create and send one by hand with the button above.</div>`}
-    <div class="small" style="margin-top:12px">
-      <div class="ev-title"><span class="muted">Reminders for players who have not answered.</span></div>
-      <div class="muted" style="margin-top:2px">${!st.remindersEnabled ? 'Automatic reminders are switched off in Admin' : ev.reminders === false ? 'Automatic reminders are off for this event' : `Automatic: ${st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set'}`}. <span class="muted">(The "Send reminder now" button moved up to the event card above.)</span></div>
-      ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.manual ? `(sent by ${esc(l.by)})` : l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>
+    ${remindersBlock(ev)}
   </div>`;
+}
+
+// Admin-only, voice mode's counterpart to the PIN panel above. Lets an officer see (and, if "automatic
+// tracking" is switched off for this event, control by hand) when Shotcaller voice tracking actually starts
+// crediting attendance, and pick extra channels to track for this one event besides whatever Shotcaller
+// creates for it.
+function voiceTrackPanel(ev) {
+  const auto = ev.voiceTrackAuto !== false;
+  const tracking = !!(ev.voiceTracking && ev.voiceTracking.active);
+  return `<div class="panel"><div class="ev-title"><h3>Voice channel tracking and Reminders</h3></div>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0 0 6px">
+      <input type="checkbox" data-act="voicetrack-auto" data-id="${ev.id}" ${auto ? 'checked' : ''}> Automatic tracking
+    </label>
+    <div class="muted small" style="margin:-2px 0 10px">${auto
+      ? 'Tracking starts on its own the moment Shotcaller is started for this event (posting its parties with "Also start Shotcaller" ticked).'
+      : tracking ? 'Tracking is already running for this event.' : 'Automatic tracking is off for this event - Shotcaller can still be started as usual, but attendance is only tracked once you start it by hand below.'}</div>
+    ${!auto && !tracking ? `<button class="btn sm" data-act="voicetrack-start" data-id="${ev.id}">Start tracking now</button>` : ''}
+    <div class="field" style="margin-top:14px"><label>Other channels tracked for this event (besides whatever Shotcaller creates)</label>
+      <form data-form="voicetrack-extra" data-id="${ev.id}">
+        ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(ev.voiceTrackExtraChannelIds || []) : ''}
+        <button class="btn sm" style="margin-top:8px">Save channels</button>
+      </form>
+    </div>
+    ${remindersBlock(ev)}
+  </div>`;
+}
+// Sends a full, current snapshot of every field the event PUT route understands, with `patch` merged over it -
+// pickEvent() (server.js) has no "leave the rest of the event alone" mode of its own, it always rebuilds the
+// whole event from whatever the request body says, so a partial update (like just this one toggle) has to
+// supply every other field's current value itself or risk silently resetting them to their type defaults.
+function patchEvent(ev, patch) {
+  return api(`/api/events/${ev.id}`, 'PUT', {
+    title: ev.title, type: ev.type, start: ev.start, description: ev.description, points: ev.points,
+    mandatory: ev.mandatory, pinEnabled: ev.pinEnabled, maxSignups: ev.maxSignups,
+    signupCloseMinutes: ev.signupCloseMinutes, pinWindowMinutes: ev.pinWindowMinutes, reminders: ev.reminders,
+    shotcallerAutoStart: ev.shotcallerAutoStart, attendanceModeOverride: ev.attendanceModeOverride,
+    voiceTrackAuto: ev.voiceTrackAuto, voiceTrackExtraChannelIds: ev.voiceTrackExtraChannelIds,
+    ...patch,
+  });
 }
 
 function rsvpRow(ev, m, locked) {
@@ -1344,21 +1436,9 @@ function mutateParties(el, fn, okMsg) {
   commitParties(kind, id, (parties) => { fn(parties, i); return parties; }, okMsg);
 }
 
-function attendancePanel(ev, past) {
-  const rank = (m) => (ev.rsvps[m.id] === 'yes' ? 0 : ev.rsvps[m.id] === 'no' ? 2 : 1);
-  const list = S.members.filter((m) => m.active || ev.attended.includes(m.id)).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  return `<div class="panel"><h3>Attendance</h3>
-    <p class="muted small" style="margin-top:0">${past ? '' : 'The event has not started yet. '}Tick who showed up${ev.points && pointsOn() ? `; each gets ${ev.points} points` : ''}.${pointsOn() ? ' Saving again updates points automatically.' : ''}</p>
-    <form data-form="attendance" data-id="${ev.id}">
-      <div class="attend-list">${list.map((m) => `<label><input type="checkbox" name="m" value="${m.id}" ${ev.attended.includes(m.id) ? 'checked' : ''}>
-        ${esc(m.name)} ${roleChip(m.role)} <span class="muted small">${ev.rsvps[m.id] === 'yes' ? 'signed up' : ev.rsvps[m.id] === 'no' ? "can't" : ''}${ev.pinEntries && ev.pinEntries[m.id] ? ' · entered the PIN' : ''}</span></label>`).join('')}</div>
-      <button class="btn primary">Save attendance</button>
-    </form></div>`;
-}
-
 function eventDialog(ev, dateStr) {
   const isNew = !ev;
-  const startIso = tzToIso((dateStr || addDayStr(todayTz(), 1)) + 'T20:00');      // 20:00 in your time zone
+  const startIso = tzToIso((dateStr || addDayStr(todayTz(), 1)) + 'T20:00', guildTz());      // 20:00 guild time
   ev = ev || { title: '', type: S.cfg.eventTypes[0].name, start: startIso, description: '', points: S.cfg.eventTypes[0].points, mandatory: !!S.cfg.eventTypes[0].mandatory, pinEnabled: !!S.cfg.eventTypes[0].mandatory, maxSignups: 0, shotcallerAutoStart: false };
   openDialog(`
   <form data-form="event" data-id="${ev.id || ''}">
@@ -1366,7 +1446,7 @@ function eventDialog(ev, dateStr) {
     <div class="field"><label>Title (optional, the type is used when this is empty)</label><input name="title" value="${esc(ev.title)}" maxlength="80"></div>
     <div class="row">
       <div class="field"><label>Type</label><select name="type" id="ev-type">${S.cfg.eventTypes.map((t) => `<option value="${esc(t.name)}" data-pts="${t.points}" data-mand="${t.mandatory ? 1 : 0}" ${t.name === ev.type ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Starts (${esc(TZ())}, ${esc(tzAbbr(new Date(ev.start).getTime()))})</label><input name="start" type="datetime-local" value="${toLocalInput(ev.start)}" required></div>
+      <div class="field"><label>Starts (${esc(guildTz())}, ${esc(tzAbbr(new Date(ev.start).getTime(), guildTz()))} - the guild's own time zone, not your personal display one)</label><input name="start" type="datetime-local" value="${toLocalInput(ev.start, guildTz())}" required></div>
     </div>
     <div class="row">
       ${pointsOn() ? `<div class="field"><label>Points for attending</label><input name="points" id="ev-pts" type="number" min="0" value="${ev.points}"></div>` : ''}
@@ -1378,10 +1458,10 @@ function eventDialog(ev, dateStr) {
     </div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${ev.reminders === false ? '' : 'checked'}> Remind players who have not answered (times are set in Admin)</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(ev.pinEnabled ?? ev.mandatory) ? 'checked' : ''}> Attendance PIN for this event (on by default for a mandatory event, off for an optional one - switch it either way here)</label>
+    <label id="ev-pin-row" style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" data-was-checked="${(ev.pinEnabled ?? ev.mandatory) ? '1' : '0'}" ${(ev.pinEnabled ?? ev.mandatory) ? 'checked' : ''}> Attendance PIN for this event (on by default for a mandatory event, off for an optional one - switch it either way here)</label>
     ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${ev.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting this event's parties to Discord (can still be switched either way at post time)</label>
     <div class="field"><label>Attendance tracking</label>
-      <select name="attendanceModeOverride">
+      <select name="attendanceModeOverride" data-act="event-attn-change">
         <option value="default" ${!ev.attendanceModeOverride || ev.attendanceModeOverride === 'default' ? 'selected' : ''}>Guild default (currently ${S.settings.attendanceMode === 'voice' ? 'Shotcaller voice' : 'Attendance PIN'})</option>
         <option value="pin" ${ev.attendanceModeOverride === 'pin' ? 'selected' : ''}>Always use the Attendance PIN for this event</option>
         <option value="voice" ${ev.attendanceModeOverride === 'voice' ? 'selected' : ''}>Always use Shotcaller voice presence for this event</option>
@@ -1393,7 +1473,29 @@ function eventDialog(ev, dateStr) {
       <button class="btn primary">Save event</button>
     </div>
   </form>`);
+  const attnSel = $('select[name=attendanceModeOverride]');
+  if (attnSel) applyEventPinForAttn(attnSel);     // the PIN checkbox starts disabled too if voice already governs this event (override, or guild default)
 }
+
+// The PIN isn't used at all once voice tracking governs an event - greys the "Attendance PIN for this event"
+// checkbox out and unchecks it while that's true, remembering whatever it was set to so switching the
+// Attendance tracking select back to PIN (or a default that resolves to PIN) restores it exactly as it was.
+function applyEventPinForAttn(selectEl) {
+  const pin = document.getElementById('ev-pin'), row = document.getElementById('ev-pin-row');
+  if (!pin) return;
+  const voice = selectEl.value === 'voice' || (selectEl.value === 'default' && S.settings.attendanceMode === 'voice');
+  if (voice) {
+    if (!pin.disabled) pin.dataset.wasChecked = pin.checked ? '1' : '0';
+    pin.checked = false;
+    pin.disabled = true;
+  } else {
+    pin.disabled = false;
+    pin.checked = pin.dataset.wasChecked === '1';
+  }
+  if (row) row.title = voice ? "Not used - this event is tracked by Shotcaller voice presence instead." : '';
+  if (row) row.classList.toggle('muted', voice);
+}
+CHANGES['event-attn-change'] = (el) => applyEventPinForAttn(el);
 
 // Greedy balancer: fills parties so each gets a similar mix of roles and gear score.
 function autoParties(ev) {
@@ -1552,8 +1654,9 @@ function adminEventRules() {
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-off">Create the PIN (minutes after start, negative = before)</label><input id="er-off" name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${st.pinOffsetMinutes}" ${voice ? '' : 'required'}></div>
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-win">PIN window (minutes players can enter it)</label><input id="er-win" name="pinWindowDefault" type="number" min="1" max="720" value="${st.pinWindowDefault}" ${voice ? '' : 'required'}></div>
       <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}><label for="er-track-off">Voice tracking starts (minutes after the event begins, negative = before)</label><input id="er-track-off" name="voiceTrackStartOffsetMinutes" type="number" min="-1440" max="1440" value="${st.voiceTrackStartOffsetMinutes ?? 0}"></div>
-      <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}>
-        <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="voiceAttendanceIgnoreMuted" ${st.voiceAttendanceIgnoreMuted ? 'checked' : ''}> Don't count a player muted AND deafened in voice as attended</label>
+      <div class="field" data-attn="voice" style="display:flex;flex-direction:column;gap:6px${voice ? '' : ';display:none'}">
+        <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="voiceAttendanceIgnoreMuted" ${st.voiceAttendanceIgnoreMuted ? 'checked' : ''}> Don't count a player muted (no mic) in voice as attended</label>
+        <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="voiceAttendanceIgnoreDeafened" ${st.voiceAttendanceIgnoreDeafened ? 'checked' : ''}> Don't count a player deafened (not listening) in voice as attended</label>
       </div>
       <div class="field" data-attn="voice" style="grid-column:1/-1${voice ? '' : ';display:none'}">
         <label>Other channels always tracked (besides whatever Shotcaller creates for the session)</label>
@@ -1694,11 +1797,45 @@ document.addEventListener('click', async (e) => {
   else if (a === 'test-dm') act(async () => { const r = await api('/api/admin/test-dm', 'POST', {}); if (!r.ok) throw new Error(r.error || 'The message could not be sent.'); toast('Test message sent. Check your Discord messages.'); });
   else if (a === 'link-owner') act(async () => { const r = await api('/api/admin/link-owner', 'POST', { from: d.from, to: $('#lk-' + d.i).value }); toast(`${r.moved} characters linked`); });
   else if (a === 'pin-send') act(() => api(`/api/events/${d.id}/pin/send`, 'POST', { mode: d.mode }), d.mode === 'new' ? 'New PIN created and sent' : d.mode === 'reopen' ? 'PIN window reopened' : 'PIN sent');
-  else if (a === 'reminder-send') act(() => api(`/api/events/${d.id}/reminders/send`, 'POST', {}), 'Reminder sent');
+  else if (a === 'voicetrack-start') {
+    if (!confirm('Sure to start tracking now?')) return;
+    act(() => api(`/api/events/${d.id}/voice-track/start`, 'POST', {}), 'Tracking started');
+  }
+  else if (a === 'roster-save') {
+    const evn = byId(S.events, d.id);
+    if (!evn) return;
+    // Reads the live DOM, not S.events - every row's <select> already holds whatever the admin last picked for
+    // it, staged and unsaved (see CHANGES['roster-stage']). The attended list is always sent in full (same as
+    // the old Attendance panel always did - "saving again updates points automatically"); RSVP changes go
+    // through one at a time, and only for rows that actually differ from what the server already has, so
+    // leaving 59 of 60 rows untouched doesn't fire 59 pointless requests.
+    const rows = [...document.querySelectorAll(`select[data-act="roster-stage"][data-ev="${d.id}"]`)];
+    const attendedIds = [], rsvpChanges = [];
+    for (const sel of rows) {
+      const mId = Number(sel.dataset.m), picked = ROSTER6[sel.value] || ROSTER6.noreply;
+      if (picked.attended) attendedIds.push(mId);
+      const curRsvp = evn.rsvps[mId] === 'yes' ? 'yes' : evn.rsvps[mId] === 'no' ? 'no' : 'none';
+      if (curRsvp !== picked.rsvp) rsvpChanges.push({ memberId: mId, status: picked.rsvp });
+    }
+    act(async () => {
+      for (const c of rsvpChanges) await api(`/api/events/${d.id}/rsvp`, 'POST', c);
+      await api(`/api/events/${d.id}/attendance`, 'POST', { memberIds: attendedIds });
+    }, 'Attendance saved');
+  }
+  // Disabling the button the instant it's clicked (before the request even goes out) is what actually stops
+  // a second click from firing a second send - sending reminders can take a moment (a Discord message per
+  // player who hasn't answered), and without this, someone who doesn't see an immediate reaction just clicks
+  // again, and again, each one firing its own batch of reminders. Restored in a .finally so a failed send
+  // (network hiccup, etc.) doesn't leave the button stuck disabled forever.
+  else if (a === 'reminder-send') {
+    el.disabled = true; const t = el.textContent; el.textContent = 'Sending…';
+    act(() => api(`/api/events/${d.id}/reminders/send`, 'POST', {}), 'Reminder sent').finally(() => { el.disabled = false; el.textContent = t; });
+  }
   else if (a === 'reminder-send-day') {
+    el.disabled = true; const t = el.textContent; el.textContent = 'Sending…';
     const ev = byId(S.events, d.id);
     const ids = S.events.filter((e) => wallKey(new Date(e.start).getTime()) === wallKey(new Date(ev.start).getTime()) && new Date(e.start) > Date.now()).map((e) => e.id);
-    act(() => api('/api/events/reminders/send-many', 'POST', { ids }), `Reminders sent for ${ids.length} events`);
+    act(() => api('/api/events/reminders/send-many', 'POST', { ids }), `Reminders sent for ${ids.length} events`).finally(() => { el.disabled = false; el.textContent = t; });
   }
   else if (a === 'loot-proof') act(() => api(`/api/loot/${d.id}/proof`, 'PUT', { confirmed: d.on === '1' }), d.on === '1' ? 'Proof of use confirmed' : 'Confirmation removed');
   else if (a === 'loot-edit') lootDialog(byId(S.loot, d.id));
@@ -1734,6 +1871,10 @@ document.addEventListener('change', (e) => {
   else if (el.dataset.act === 'party-rename') mutateParties(el, (ps, i) => { ps[i].name = el.value.trim() || `Party ${i + 1}`; });
   else if (el.dataset.act === 'points-toggle') act(() => api('/api/settings', 'PUT', { pointsEnabled: el.checked }), el.checked ? 'Points are on' : 'Points are off');
   else if (el.dataset.act === 'rsvp-row') rsvpNow(el.dataset.ev, el.dataset.m, el.value);
+  // Once attendance is tracked, the roster's 6-state dropdowns stage locally only - see rosterRow() - so this
+  // just keeps the row's own colour in sync with whatever is currently picked. Nothing is sent to the server
+  // until "Save attendance" (ACTIONS['roster-save']) is clicked.
+  else if (el.dataset.act === 'roster-stage') el.dataset.rst = el.value;
   else if (el.dataset.act === 'loot-date') act(() => api('/api/settings', 'PUT', { lootFrom: el.value }), 'Loot window updated');
   else if (el.dataset.act === 'preset-load') {
     const evn = byId(S.events, el.dataset.ev), p = byId(S.presets, el.value);
@@ -1795,7 +1936,7 @@ document.addEventListener('submit', async (e) => {
     if (await act(async () => { const r = await api(id ? '/api/members/' + id : '/api/members', id ? 'PUT' : 'POST', fd); pending = r.approvalPending || []; closeDialog(); }))
       toast(pending.length ? `Saved. Waiting for the leadership to approve: ${pending.join(', ')}.` : 'Character saved');
   } else if (kind === 'event') {
-    fd.start = tzToIso(fd.start);
+    fd.start = tzToIso(fd.start, guildTz());    // the "Starts" field is always typed in the guild's own zone (see guildTz())
     fd.mandatory = f.elements.mandatory.checked;
     fd.pinEnabled = f.elements.pinEnabled.checked;
     fd.reminders = f.elements.reminders.checked;
@@ -1804,9 +1945,6 @@ document.addEventListener('submit', async (e) => {
       const r = await api(id ? '/api/events/' + id : '/api/events', id ? 'PUT' : 'POST', fd);
       closeDialog(); location.hash = '#/events/' + r.id;
     }, 'Event saved');
-  } else if (kind === 'attendance') {
-    const ids = [...f.querySelectorAll('input[name=m]:checked')].map((i) => Number(i.value));
-    act(() => api(`/api/events/${id}/attendance`, 'POST', { memberIds: ids }), 'Attendance saved');
   } else if (kind === 'eventrules') {
     const mins = String(fd.reminderHours || '').split(/[,;]/).map((x) => x.trim()).filter(Boolean).map((x) => Math.round(parseFloat(x) * 60));
     if (mins.some((n) => !Number.isFinite(n))) return toast('Reminders: type hours separated by commas, for example 5, 2', true);
@@ -1814,6 +1952,7 @@ document.addEventListener('submit', async (e) => {
       attendanceMode: fd.attendanceMode, voiceAttendanceScope: fd.voiceAttendanceScope,
       voiceTrackStartOffsetMinutes: fd.voiceTrackStartOffsetMinutes,
       voiceAttendanceIgnoreMuted: !!f.elements.voiceAttendanceIgnoreMuted && f.elements.voiceAttendanceIgnoreMuted.checked,
+      voiceAttendanceIgnoreDeafened: !!f.elements.voiceAttendanceIgnoreDeafened && f.elements.voiceAttendanceIgnoreDeafened.checked,
       signupCloseDefault: fd.signupCloseDefault, pinOffsetMinutes: fd.pinOffsetMinutes, pinWindowDefault: fd.pinWindowDefault,
       reminderMinutes: mins, remindersEnabled: f.elements.remindersEnabled.checked,
     };
@@ -2337,6 +2476,22 @@ CHANGES['attendance-mode-change'] = (el) => {
   form.querySelectorAll('[data-attn="pin"] input').forEach((i) => { i.required = !voice; });
 };
 CHANGES['vod-vis'] = (el) => { const cls = el.closest('form').querySelector('[name=visibleClass]'); if (cls) cls.classList.toggle('hidden', el.value !== 'class'); };
+// Voice channel tracking and Reminders (an event's own panel, voice mode only): flips automatic tracking on or
+// off for just this one event, right away - not tied to the Edit Event form at all.
+CHANGES['voicetrack-auto'] = (el) => {
+  const evn = byId(S.events, Number(el.dataset.id));
+  if (!evn) return;
+  act(() => patchEvent(evn, { voiceTrackAuto: el.checked }), el.checked ? 'Automatic tracking is on' : 'Automatic tracking is off');
+};
+// Same panel's channel picker - saved on its own "Save channels" button, not folded into the Edit Event form,
+// since it can change far more often than the rest of the event's settings (a different voice channel in use
+// for just one night, say).
+FORMS['voicetrack-extra'] = (f, fd, id) => {
+  const evn = byId(S.events, Number(id));
+  if (!evn) return;
+  const ids = [...f.querySelectorAll('input[name=vtxc]:checked')].map((i) => i.value);
+  act(() => patchEvent(evn, { voiceTrackExtraChannelIds: ids }), 'Channels saved');
+};
 FORMS['vod-post'] = (f, fd) => act(async () => { await api('/api/vods', 'POST', fd); closeDialog(); }, 'Posted');
 FORMS['vod-marker'] = (f, fd) => act(async () => {
   const v = (S.vods || []).find((x) => x.id === Number(route().id));

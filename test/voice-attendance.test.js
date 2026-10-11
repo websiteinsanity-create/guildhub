@@ -246,19 +246,49 @@ withServer("voice tracking doesn't start crediting attendance before its configu
   assert.equal(finalEv.attended.length, 0, "nobody is marked before the event's own start time (and the configured offset) has passed");
 });
 
-withServer('ignoring fully-muted players: muted AND deafened does not count, muted-only (still listening) does', async (s) => {
+withServer('ignoring muted and ignoring deafened are two independent switches, not a combined "both" check', async (s) => {
   await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceAttendanceIgnoreMuted: true }, s.officer);
   const { ev, anchorMembers } = await makeTrackedEvent(s);
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
   assert.equal(r.status, 200, JSON.stringify(r.body));
   s.bot.setConnected('c0', [
-    { id: anchorMembers[0].owner, mute: true, deaf: true },   // fully cut off both ways - should NOT count
-    { id: anchorMembers[1].owner, mute: true, deaf: false },  // mic off but still listening - SHOULD count
+    { id: anchorMembers[0].owner, mute: true, deaf: false },  // mic off, still listening - ignoreMuted alone excludes this now
+    { id: anchorMembers[1].owner, mute: false, deaf: true },  // deafened, still able to talk - ignoreMuted alone does NOT exclude this
   ]);
   await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(anchorMembers[1].id) ? e : null; });
   const finalEv = await attendedOf(s, ev.id);
+  assert.ok(!finalEv.attended.includes(anchorMembers[0].id), 'ignoreMuted alone excludes anyone mic-muted, even if they can still hear');
+  assert.ok(finalEv.attended.includes(anchorMembers[1].id), 'ignoreMuted alone has no opinion about deafened players - still counts');
+});
+
+withServer('ignoring deafened players works the same way, independently of ignoring muted', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceAttendanceIgnoreDeafened: true }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  s.bot.setConnected('c0', [
+    { id: anchorMembers[0].owner, mute: false, deaf: true },  // deafened - ignoreDeafened alone excludes this
+    { id: anchorMembers[1].owner, mute: true, deaf: false },  // just muted - ignoreDeafened alone does NOT exclude this
+  ]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(anchorMembers[1].id) ? e : null; });
+  const finalEv = await attendedOf(s, ev.id);
+  assert.ok(!finalEv.attended.includes(anchorMembers[0].id), 'ignoreDeafened alone excludes anyone deafened, even if they can still talk');
+  assert.ok(finalEv.attended.includes(anchorMembers[1].id), 'ignoreDeafened alone has no opinion about muted players - still counts');
+});
+
+withServer('turning both switches on together reproduces the old "fully cut off both ways" behavior', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceAttendanceIgnoreMuted: true, voiceAttendanceIgnoreDeafened: true }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  s.bot.setConnected('c0', [
+    { id: anchorMembers[0].owner, mute: true, deaf: true },   // fully cut off both ways - should NOT count
+    { id: anchorMembers[1].owner, mute: true, deaf: false },  // mic off but still listening - still excluded now (ignoreMuted alone covers it)
+  ]);
+  await new Promise((res) => setTimeout(res, 400));
+  const finalEv = await attendedOf(s, ev.id);
   assert.ok(!finalEv.attended.includes(anchorMembers[0].id), 'fully muted and deafened should not count as attended');
-  assert.ok(finalEv.attended.includes(anchorMembers[1].id), 'just muted (still able to hear) should still count');
+  assert.ok(!finalEv.attended.includes(anchorMembers[1].id), 'with ignoreMuted also on, merely being muted is enough to exclude them too');
 });
 
 // server.js's tick() has a long-standing fallback for events that never use the PIN at all: once comfortably
@@ -297,7 +327,7 @@ withServer('Admin: the new attendance settings are validated', async (s) => {
   assert.equal(bad4.status, 400);
   const ok = await s.call('/api/settings', 'PUT', {
     attendanceMode: 'voice', voiceAttendanceScope: 'any-channel', voiceTrackExtraChannelIds: [EXTRA_CHANNEL],
-    voiceTrackStartOffsetMinutes: 1, voiceAttendanceIgnoreMuted: true,
+    voiceTrackStartOffsetMinutes: 1, voiceAttendanceIgnoreMuted: true, voiceAttendanceIgnoreDeafened: true,
   }, s.officer);
   assert.equal(ok.status, 200);
   assert.equal(ok.body.attendanceMode, 'voice');
@@ -305,6 +335,7 @@ withServer('Admin: the new attendance settings are validated', async (s) => {
   assert.deepEqual(ok.body.voiceTrackExtraChannelIds, [EXTRA_CHANNEL]);
   assert.equal(ok.body.voiceTrackStartOffsetMinutes, 1);
   assert.equal(ok.body.voiceAttendanceIgnoreMuted, true);
+  assert.equal(ok.body.voiceAttendanceIgnoreDeafened, true);
 });
 
 withServer('per-event attendanceModeOverride is accepted and round-trips', async (s) => {
