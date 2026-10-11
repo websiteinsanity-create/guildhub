@@ -261,6 +261,31 @@ withServer('ignoring fully-muted players: muted AND deafened does not count, mut
   assert.ok(finalEv.attended.includes(anchorMembers[1].id), 'just muted (still able to hear) should still count');
 });
 
+// server.js's tick() has a long-standing fallback for events that never use the PIN at all: once comfortably
+// over, trust whoever said "Going" and mark them attended automatically, since otherwise nobody is confirming
+// attendance for that event and everyone who meant to come would wrongly read as a no-show. Voice tracking is
+// the exact same kind of "something is actually confirming attendance" system as the PIN, so once Shotcaller
+// has actually been started for an event, that fallback must stay out of the way completely - a no-show who
+// said Going but was never seen in voice needs to stay a no-show, not get silently waved through by this
+// unrelated PIN-less-event fallback the moment the compliance delay passes.
+withServer('once Shotcaller has actually tracked an event, the no-PIN auto-attend fallback leaves its result alone - a no-show stays a no-show', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  await s.call('/api/admin/compliance', 'PUT', { finalAfterMinutes: 5 }, s.officer);
+  const { ev, anchorMembers, party2Members } = await makeTrackedEvent(s, -10);     // started 10 minutes ago
+  await s.call(`/api/events/${ev.id}`, 'PUT', { type: ev.type, start: ev.start, pinEnabled: false }, s.officer);
+  // Said Going, but never once shows up in voice - a genuine no-show the whole feature exists to catch.
+  await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: party2Members[0].id, status: 'yes' }, s.officer);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  s.bot.setConnected('c0', anchorMembers.map((m) => m.owner));
+  s.bot.setConnected('c1', []);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.length >= anchorMembers.length ? e : null; });
+  await new Promise((res) => setTimeout(res, 500));                              // give the scheduler's own tick a chance to run too
+  const finalEv = await attendedOf(s, ev.id);
+  for (const m of anchorMembers) assert.ok(finalEv.attended.includes(m.id), 'the people actually seen in voice are still marked attended');
+  assert.ok(!finalEv.attended.includes(party2Members[0].id), 'said Going but was never seen in voice - must stay a no-show, not get waved through just because this event has no PIN');
+}, { SCHEDULER_INTERVAL_MS: '200' });
+
 withServer('Admin: the new attendance settings are validated', async (s) => {
   const bad1 = await s.call('/api/settings', 'PUT', { attendanceMode: 'nonsense' }, s.officer);
   assert.equal(bad1.status, 400);

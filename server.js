@@ -1188,7 +1188,14 @@ async function tick() {
       // looking like a no-show. Once the event is comfortably over (the same delay compliance uses to judge
       // no-shows), count them as attended automatically instead. This runs once per event (autoAttended) and
       // never again once an officer has recorded attendance by hand, so a deliberate correction always sticks.
-      if (!ev.pinEnabled && !ev.autoAttended && now >= start + db.settings.compliance.finalAfterMinutes * 60000) {
+      // Voice tracking is this same kind of "something is actually confirming it" system, just like the PIN -
+      // same as the auto-PIN gate right above skips voice-mode events entirely, this fallback has to as well.
+      // Without that, a player who said Going but was never actually seen in voice could get silently waved
+      // through the moment the compliance delay passes, simply because this particular event has no PIN -
+      // regardless of whether Shotcaller has even been started for it yet. If a voice-mode event genuinely never
+      // gets tracked at all, it is left exactly where a PIN-mode event with no PIN sent and nobody hand-ticking
+      // attendance is: unconfirmed, for an officer to resolve by hand, not quietly decided by this fallback.
+      if (!ev.pinEnabled && effectiveAttendanceMode(ev) !== 'voice' && !ev.autoAttended && now >= start + db.settings.compliance.finalAfterMinutes * 60000) {
         const going = Object.entries(ev.rsvps).filter(([, s]) => s === 'yes').map(([id]) => Number(id));
         const before = ev.attended.length;
         ev.attended = [...new Set([...ev.attended, ...going])];

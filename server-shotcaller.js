@@ -187,6 +187,88 @@ module.exports = function install(ctx) {
   const VOICE_POLL_MS = Number(process.env.VOICE_POLL_INTERVAL_MS || 10000);
   setInterval(() => { pollVoiceAttendance().catch((e) => console.error('[voice-attendance] poll failed:', e)); }, VOICE_POLL_MS);
 
+  // ---------------------------------------------------------------- Testing: a live voice-attendance dry-run
+  // Admin > Testing: lets an officer actually watch the whole voice-attendance pipeline work, end to end,
+  // without needing a real event. Starts a throwaway 3-channel Shotcaller session (the anchor channel the
+  // officer picks, plus 2 new ones the bot creates), waits the same kind of lead time a real event's
+  // voiceTrackStartOffsetMinutes gives people to get settled, then watches for real people joining and reports
+  // back exactly who got confirmed - the same rolling 30s/2-sightings rule pollVoiceAttendance uses for real
+  // events - and whether they were muted/deafened at the time, so an officer can actually see the mute-ignoring
+  // setting's effect before trusting it on a real event. Confirmation here is never gated by the mute-ignoring
+  // setting itself - the whole point is to show every confirmed tester's mute state, not hide the ones it would
+  // exclude.
+  //
+  // Single in-memory slot, not db.* and never saved: a server restart just loses it, which is fine - it was
+  // only ever a live dry-run, nothing it does is a real event, nobody's attendance, points or warnings are
+  // touched by any of this.
+  let voiceTest = null;
+  // Overridable by env for tests only, same pattern as VOICE_POLL_INTERVAL_MS above - production always gets
+  // the real 3-minute lead time and 5s poll cadence; nothing here is meant to be guild-configurable.
+  const VT_TRACK_DELAY_MS = Number(process.env.VOICE_TEST_DELAY_MS || 3 * 60000);    // "after 3 minutes will start to track"
+  const VT_POLL_MS = Number(process.env.VOICE_TEST_POLL_MS || 5000);
+  const VT_MAX_MS = 20 * 60000;           // safety net: auto-stop an abandoned test rather than leave a Discord voice session running forever
+  const vtNameFor = (ownerId) => { const m = db().members.find((x) => x.owner === ownerId && x.active); return m ? m.name : nameOf(ownerId); };
+
+  route('GET', '/api/admin/voice-test', () => voiceTest || { phase: null }, { officer: true });
+
+  route('POST', '/api/admin/voice-test/start', async ({ body, user }) => {
+    need(!voiceTest || ['ended', 'error'].includes(voiceTest.phase), 409, 'A test is already running - stop it first.');
+    voiceTest = { phase: 'starting', startedAt: Date.now(), trackAt: null, channels: [], error: null, confirmed: [], seenAt: {} };
+    try {
+      const r = await startSession({ channelId: body.channelId, count: 3, partyNames: ['Test channel 2', 'Test channel 3'] });
+      voiceTest.channels = (r.parties || []).map((p) => ({ channelId: p.channelId, name: p.name }));
+      voiceTest.trackAt = Date.now() + VT_TRACK_DELAY_MS;
+      voiceTest.phase = 'waiting';
+      audit(user, 'voicetest.start', { type: 'guild' }, `${user.name} started a voice-attendance test.`);
+    } catch (e) {
+      voiceTest.phase = 'error';
+      voiceTest.error = e.message || 'Could not start Shotcaller.';
+    }
+    return voiceTest;
+  }, { officer: true });
+
+  route('POST', '/api/admin/voice-test/stop', async ({ user }) => {
+    if (voiceTest && ['starting', 'waiting', 'tracking'].includes(voiceTest.phase)) {
+      try { await callSession('/stop', 'POST'); } catch { /* best effort - the test slot is cleared below regardless */ }
+      audit(user, 'voicetest.stop', { type: 'guild' }, `${user.name} stopped the voice-attendance test.`);
+    }
+    voiceTest = null;
+    return { ok: true };
+  }, { officer: true });
+
+  async function pollVoiceTest() {
+    if (!voiceTest) return;
+    if (Date.now() - voiceTest.startedAt > VT_MAX_MS) {                  // forgotten/abandoned - clean up quietly
+      try { await callSession('/stop', 'POST'); } catch { /* already gone, or never really started - nothing to clean up */ }
+      voiceTest = null;
+      return;
+    }
+    if (voiceTest.phase === 'waiting') { if (Date.now() >= voiceTest.trackAt) voiceTest.phase = 'tracking'; return; }
+    if (voiceTest.phase !== 'tracking') return;
+    let status;
+    try { status = await callSession(''); }
+    catch { return; }                                                   // briefly unreachable - this poll just learns nothing new
+    if (!status || !status.active) { voiceTest.phase = 'ended'; return; }   // stopped from elsewhere (Discord command, say)
+    const testIds = new Set(voiceTest.channels.map((c) => c.channelId));
+    const now = Date.now();
+    const latestState = new Map();                                      // ownerId -> {mute, deaf}, refreshed every poll
+    for (const p of status.parties || []) {
+      if (!testIds.has(p.channelId)) continue;
+      for (const s of p.connectedStates || []) {
+        latestState.set(s.id, { mute: !!s.mute, deaf: !!s.deaf });
+        const times = (voiceTest.seenAt[s.id] = voiceTest.seenAt[s.id] || []);
+        times.push(now);
+        while (times.length && now - times[0] > 30000) times.shift();
+        if (times.length >= 2 && !voiceTest.confirmed.some((c) => c.ownerId === s.id)) {
+          voiceTest.confirmed.push({ ownerId: s.id, name: vtNameFor(s.id), mute: !!s.mute, deaf: !!s.deaf, confirmedAt: new Date(now).toISOString() });
+        }
+      }
+    }
+    // Keep an already-confirmed tester's mute/deaf current instead of frozen at the moment they first qualified.
+    for (const c of voiceTest.confirmed) { const st = latestState.get(c.ownerId); if (st) { c.mute = st.mute; c.deaf = st.deaf; } }
+  }
+  setInterval(() => { pollVoiceTest().catch((e) => console.error('[voice-test] poll failed:', e)); }, VT_POLL_MS);
+
   // ---------------------------------------------------------------- live panel
   route('GET', '/api/shotcaller/status', () => callSession(''), { officer: true });
 

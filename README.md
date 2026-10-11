@@ -439,6 +439,16 @@ to Discord" dialog - the Shotcaller page's own standalone Start dialog isn't tie
 it never triggers attendance tracking. An event nobody starts Shotcaller for still has nobody confirming
 attendance but an officer's own hand, exactly as if the PIN had never been sent for it either.
 
+### Testing the voice pipeline (Admin > Testing)
+
+At the very bottom of Admin is a **Testing** section with a one-button **dry run** of the voice-attendance
+pipeline above, for checking Shotcaller and the confirmation logic actually work before trusting them to a real
+event. Pick an anchor channel and run it: Guild Hall starts a throwaway 3-channel Shotcaller session (the anchor
+plus 2 new channels), waits a few minutes, then tracks who it actually sees using the exact same rolling
+30-second/2-sightings rule as a real event - live in a popup that updates itself - and lists everyone confirmed
+along with whether they were muted or deafened at the time. It never touches any real event, attendance, points
+or warnings, and can be stopped at any time.
+
 This needs Shotcaller bot **v4.3.0 or later** - that version added the channel-agnostic voice-presence endpoint
 ("other channels always tracked" above reads through it) and started including each connected player's
 mute/deaf state, not just their id. Against an older bot, voice mode switches on without an error but never
