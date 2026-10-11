@@ -326,6 +326,27 @@ FORMS['sc-extra'] = (f) => {
 };
 ACTIONS['sc-extra-remove'] = (el, d) => scAct(() => api('/api/shotcaller/additional-callers', 'POST', { userIds: (SC.data.additionalCallers || []).filter((id) => id !== d.id) }), 'Removed');
 
+/* ---------------------------------------------------------------- Admin > Events: extra always-tracked channels */
+// Cache of the bot's live voice-channel list, loaded on demand (same shape scStartDialog already fetches),
+// so Admin > Events doesn't have to await anything itself just to render - it shows saved ids as plain chips
+// until an officer actually asks for names, then re-renders with real ones.
+let SC_CHANNELS = null;
+ACTIONS['sc-load-channels'] = () => act(async () => { SC_CHANNELS = (await api('/api/shotcaller/voice-channels')).channels || []; });
+function voiceExtraChannelsField(selectedIds) {
+  if (!S.cfg.shotcallerOn) return '<div class="muted small">Set up Shotcaller first (see the README) to pick channels here.</div>';
+  if (!SC_CHANNELS) {
+    return `<div class="muted small" style="margin-bottom:6px">${selectedIds.length ? `${selectedIds.length} channel${selectedIds.length === 1 ? '' : 's'} saved.` : 'None picked yet.'}</div>
+      <button type="button" class="btn sm" data-act="sc-load-channels">Load channel list</button>`;
+  }
+  // A saved id the bot no longer lists (renamed/deleted channel, or the bot removed from the server) still
+  // shows, still checked, so saving the form again doesn't silently drop it without anyone noticing - an
+  // officer has to actually untick it to remove it.
+  const known = new Set(SC_CHANNELS.map((c) => c.id));
+  const stale = selectedIds.filter((id) => !known.has(id));
+  const rows = SC_CHANNELS.concat(stale.map((id) => ({ id, name: `(channel ${id}, not found)` })));
+  return `<div class="scrollbox" style="max-height:160px">${rows.map((c) => `<label class="tagpick"><input type="checkbox" name="vtxc" value="${esc(c.id)}" ${selectedIds.includes(c.id) ? 'checked' : ''}> 🔊 ${esc(c.name)}</label>`).join('') || '<span class="muted small">No voice channels found.</span>'}</div>`;
+}
+
 /* ---------------------------------------------------------------- Admin: who can be picked as a caller */
 function shotcallerAdmin() {
   const st = S.settings.shotcaller, ids = st.candidateUserIds || [];

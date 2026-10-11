@@ -893,8 +893,40 @@ function pinState(ev) {
   const around = new Date(info.scheduledAt).getTime();
   return Date.now() > around + (info.windowMinutes || 15) * 60000 ? 'none' : 'early';
 }
+// What actually governs this event: its own override (Event edit > Attendance tracking) if it has one,
+// otherwise the guild-wide Admin > Events default - mirrors server.js's effectiveAttendanceMode exactly, so
+// the client never has to round-trip to ask.
+function effectiveAttendanceMode(ev) {
+  return ev.attendanceModeOverride && ev.attendanceModeOverride !== 'default' ? ev.attendanceModeOverride : S.settings.attendanceMode;
+}
 function pinSide(ev) {
-  const info = ev.pinInfo || {}, kind = pinState(ev), own = mine();
+  const own = mine();
+  // The officer's two reminder buttons live right here, under the attendance box, rather than further down the
+  // page (in "PIN and reminders") - this card is the first thing you see on a phone after opening an event, so
+  // nudging stragglers no longer needs a scroll past parties and the whole box first. Shared by both the PIN
+  // and voice-tracking versions below - neither one changes anything about reminders.
+  const upcoming = new Date(ev.start) > new Date();
+  const sameDay = upcoming ? S.events.filter((e) => wallKey(new Date(e.start).getTime()) === wallKey(new Date(ev.start).getTime()) && new Date(e.start) > Date.now()) : [];
+  const reminderBtns = isOfficer() && upcoming ? `<div class="seg" style="margin-top:10px">
+      <button class="btn sm" data-act="reminder-send" data-id="${ev.id}">Send reminder now</button>
+      ${sameDay.length > 1 ? `<button class="btn sm" data-act="reminder-send-day" data-id="${ev.id}" title="Sends a reminder for every one of today's events that has not started yet">Send reminders for all of today's events (${sameDay.length})</button>` : ''}
+    </div>` : '';
+  // This guild has fully swapped to voice-tracked attendance (Admin > Attendance) - there is no PIN for a
+  // player to type in at all, so showing the PIN box here would just be confusing. Whether THIS event ever
+  // actually gets tracked depends on an officer starting Shotcaller for it (see beginVoiceTracking,
+  // server-shotcaller.js) - from a player's side there is nothing to do either way, so the message stays the
+  // same regardless.
+  if (effectiveAttendanceMode(ev) === 'voice') {
+    const rows = own.map((m) => {
+      const label = `<span><b>${esc(m.name)}</b> ${roleChip(m.role)}</span>`;
+      const status = ev.attended.includes(m.id) ? '<span class="ok-text">Recorded &#10003;</span>' : '<span class="muted small">Not seen yet</span>';
+      return `<div class="pin-row">${label}${status}</div>`;
+    }).join('');
+    return `<div class="pin-box" data-pin="voice"><h3 class="side-h">Attendance</h3>
+      <div class="muted small" style="margin:-2px 0 8px">Tracked automatically from Shotcaller voice chat - join your party's voice channel during the session and you'll be marked present, usually within a minute or two. Nothing to type in.</div>
+      ${own.length ? rows : '<div class="muted small">Add a character to be tracked.</div>'}${reminderBtns}</div>`;
+  }
+  const info = ev.pinInfo || {}, kind = pinState(ev);
   const badge = { early: ['Not activated yet', 'st-open'], open: ['Open now', 'st-approved'], late: ['Too late', 'st-rejected'], none: ['Not used', ''] }[kind];
   const text = {
     early: `The PIN is not activated yet. It opens around ${fmtTime(info.scheduledAt)} (${until(info.scheduledAt)}) when your party leader gets it, and stays open for ${info.windowMinutes} minutes.`,
@@ -909,15 +941,6 @@ function pinSide(ev) {
       <span class="go"><input name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="PIN" autocomplete="off" required aria-label="Attendance PIN for ${esc(m.name)}"><button class="btn primary sm">Confirm</button></span></form>`;
     return `<div class="pin-row">${label}<span class="muted small">${kind === 'late' ? 'too late' : kind === 'early' ? 'not open yet' : ''}</span></div>`;
   }).join('');
-  // The officer's two reminder buttons live right here, under the PIN box, rather than further down the page
-  // (in "PIN and reminders") - this card is the first thing you see on a phone after opening an event, so
-  // nudging stragglers no longer needs a scroll past parties and the whole PIN panel first.
-  const upcoming = new Date(ev.start) > new Date();
-  const sameDay = upcoming ? S.events.filter((e) => wallKey(new Date(e.start).getTime()) === wallKey(new Date(ev.start).getTime()) && new Date(e.start) > Date.now()) : [];
-  const reminderBtns = isOfficer() && upcoming ? `<div class="seg" style="margin-top:10px">
-      <button class="btn sm" data-act="reminder-send" data-id="${ev.id}">Send reminder now</button>
-      ${sameDay.length > 1 ? `<button class="btn sm" data-act="reminder-send-day" data-id="${ev.id}" title="Sends a reminder for every one of today's events that has not started yet">Send reminders for all of today's events (${sameDay.length})</button>` : ''}
-    </div>` : '';
   return `<div class="pin-box" data-pin="${kind}"><h3 class="side-h">Attendance PIN <span class="st-pill ${badge[1]}">${badge[0]}</span></h3>
     <div class="muted small" style="margin:-2px 0 8px">${text}</div>${own.length ? rows : '<div class="muted small">Add a character to check in with the PIN.</div>'}${reminderBtns}</div>`;
 }
@@ -1340,7 +1363,13 @@ function eventDialog(ev, dateStr) {
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${ev.reminders === false ? '' : 'checked'}> Remind players who have not answered (times are set in Admin)</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${ev.mandatory ? 'checked' : ''}> Mandatory event (counts toward "Qualified for loot")</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(ev.pinEnabled ?? ev.mandatory) ? 'checked' : ''}> Attendance PIN for this event (on by default for a mandatory event, off for an optional one - switch it either way here)</label>
-    ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${ev.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting this event's parties to Discord (can still be switched either way at post time)</label>` : ''}
+    ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${ev.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting this event's parties to Discord (can still be switched either way at post time)</label>
+    <div class="field"><label>Attendance tracking</label>
+      <select name="attendanceModeOverride">
+        <option value="default" ${!ev.attendanceModeOverride || ev.attendanceModeOverride === 'default' ? 'selected' : ''}>Guild default (currently ${S.settings.attendanceMode === 'voice' ? 'Shotcaller voice' : 'Attendance PIN'})</option>
+        <option value="pin" ${ev.attendanceModeOverride === 'pin' ? 'selected' : ''}>Always use the Attendance PIN for this event</option>
+        <option value="voice" ${ev.attendanceModeOverride === 'voice' ? 'selected' : ''}>Always use Shotcaller voice presence for this event</option>
+      </select></div>` : ''}
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(ev.description)}</textarea></div>
     <div class="dlg-actions">
       ${isNew ? '' : '<button type="button" class="btn danger left" data-act="event-delete">Delete</button>'}
@@ -1488,16 +1517,39 @@ function adminSignIn() {
 }
 function adminEventRules() {
   const st = S.settings, hours = (st.reminderMinutes || []).map((m) => Math.round(m / 6) / 10).join(', ');
-  return `<div class="panel"><h3>Events: sign-ups, attendance PIN and reminders</h3>
+  const voice = st.attendanceMode === 'voice';
+  return `<div class="panel"><h3>Events: sign-ups, attendance and reminders</h3>
     <form data-form="eventrules" class="rules-grid" style="padding-bottom:0">
-      <div class="field"><label for="er-close">Close sign-ups (minutes before start)</label><input id="er-close" name="signupCloseDefault" type="number" min="0" max="10080" value="${st.signupCloseDefault}" required></div>
-      <div class="field"><label for="er-off">Create the PIN (minutes after start, negative = before)</label><input id="er-off" name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${st.pinOffsetMinutes}" required></div>
-      <div class="field"><label for="er-win">PIN window (minutes players can enter it)</label><input id="er-win" name="pinWindowDefault" type="number" min="1" max="720" value="${st.pinWindowDefault}" required></div>
+      <div class="field"><label for="er-mode">How attendance is confirmed</label>
+        <select id="er-mode" name="attendanceMode" data-act="attendance-mode-change">
+          <option value="pin" ${voice ? '' : 'selected'}>Attendance PIN (Discord DM + typed in)</option>
+          <option value="voice" ${voice ? 'selected' : ''}>Shotcaller voice presence (automatic, no PIN)</option>
+        </select>
+      </div>
+      <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}><label for="er-scope">Voice check</label>
+        <select id="er-scope" name="voiceAttendanceScope">
+          <option value="own-party" ${st.voiceAttendanceScope === 'any-channel' ? '' : 'selected'}>Only their own party's voice channel</option>
+          <option value="any-channel" ${st.voiceAttendanceScope === 'any-channel' ? 'selected' : ''}>Anywhere in the Shotcaller session</option>
+        </select>
+      </div>
+      <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-close">Close sign-ups (minutes before start)</label><input id="er-close" name="signupCloseDefault" type="number" min="0" max="10080" value="${st.signupCloseDefault}" ${voice ? '' : 'required'}></div>
+      <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-off">Create the PIN (minutes after start, negative = before)</label><input id="er-off" name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${st.pinOffsetMinutes}" ${voice ? '' : 'required'}></div>
+      <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-win">PIN window (minutes players can enter it)</label><input id="er-win" name="pinWindowDefault" type="number" min="1" max="720" value="${st.pinWindowDefault}" ${voice ? '' : 'required'}></div>
+      <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}><label for="er-track-off">Voice tracking starts (minutes after the event begins, negative = before)</label><input id="er-track-off" name="voiceTrackStartOffsetMinutes" type="number" min="-1440" max="1440" value="${st.voiceTrackStartOffsetMinutes ?? 0}"></div>
+      <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}>
+        <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="voiceAttendanceIgnoreMuted" ${st.voiceAttendanceIgnoreMuted ? 'checked' : ''}> Don't count a player muted AND deafened in voice as attended</label>
+      </div>
+      <div class="field" data-attn="voice" style="grid-column:1/-1${voice ? '' : ';display:none'}">
+        <label>Other channels always tracked (besides whatever Shotcaller creates for the session)</label>
+        ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(st.voiceTrackExtraChannelIds || []) : ''}
+      </div>
       <div class="field"><label for="er-rem">Reminders (hours before the event)</label><input id="er-rem" name="reminderHours" value="${esc(hours)}" placeholder="5, 2"></div>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="remindersEnabled" ${st.remindersEnabled ? 'checked' : ''}> Send reminders</label>
       <button class="btn primary">Save</button>
     </form>
-    <p class="muted small" style="margin:12px 0 0">These are the defaults for new events. Each event can override the sign-up close time and the PIN window in its edit dialog. The PIN is sent by Discord to the leader of every party and to the leadership. Reminders go to players who have not answered Going or Can't with any character; "5, 2" means the first reminder 5 hours before the event and the second 2 hours before.</p>
+    <p class="muted small" style="margin:12px 0 0">${voice
+      ? "With voice presence picked, nobody gets sent a PIN any more - a player is marked attended automatically once they're seen in a tracked voice channel during a session an officer started for that event (Admin > Shotcaller, or \"Post to Discord\" with \"Also start Shotcaller\" ticked). An event Shotcaller never gets started for has nobody confirming attendance but an officer's own hand, same as always. Any event can override this guild default either way, in its own edit dialog. The PIN fields above are unused while this is picked, not deleted - switching back to PIN restores them exactly as they were."
+      : 'These are the defaults for new events. Each event can override the sign-up close time, the PIN window, and the attendance mode itself in its edit dialog. The PIN is sent by Discord to the leader of every party and to the leadership.'} Reminders go to players who have not answered Going or Can't with any character; "5, 2" means the first reminder 5 hours before the event and the second 2 hours before.</p>
   </div>`;
 }
 function adminPointsToggle() {
@@ -1742,7 +1794,18 @@ document.addEventListener('submit', async (e) => {
   } else if (kind === 'eventrules') {
     const mins = String(fd.reminderHours || '').split(/[,;]/).map((x) => x.trim()).filter(Boolean).map((x) => Math.round(parseFloat(x) * 60));
     if (mins.some((n) => !Number.isFinite(n))) return toast('Reminders: type hours separated by commas, for example 5, 2', true);
-    act(() => api('/api/settings', 'PUT', { signupCloseDefault: fd.signupCloseDefault, pinOffsetMinutes: fd.pinOffsetMinutes, pinWindowDefault: fd.pinWindowDefault, reminderMinutes: mins, remindersEnabled: f.elements.remindersEnabled.checked }), 'Saved');
+    const payload = {
+      attendanceMode: fd.attendanceMode, voiceAttendanceScope: fd.voiceAttendanceScope,
+      voiceTrackStartOffsetMinutes: fd.voiceTrackStartOffsetMinutes,
+      voiceAttendanceIgnoreMuted: !!f.elements.voiceAttendanceIgnoreMuted && f.elements.voiceAttendanceIgnoreMuted.checked,
+      signupCloseDefault: fd.signupCloseDefault, pinOffsetMinutes: fd.pinOffsetMinutes, pinWindowDefault: fd.pinWindowDefault,
+      reminderMinutes: mins, remindersEnabled: f.elements.remindersEnabled.checked,
+    };
+    // Only touch the saved extra-channels list when the picker actually rendered real checkboxes (the bot's
+    // channel list was loaded) - otherwise there is nothing to read, and sending an empty array here would
+    // silently wipe out a previously-saved list just because nobody clicked "Load channel list" first.
+    if (f.querySelector('input[name=vtxc]')) payload.voiceTrackExtraChannelIds = [...f.querySelectorAll('input[name=vtxc]:checked')].map((i) => i.value);
+    act(() => api('/api/settings', 'PUT', payload), 'Saved');
   } else if (kind === 'pin') {
     act(() => api(`/api/events/${f.dataset.ev}/pin`, 'POST', { memberId: f.dataset.m, pin: fd.pin }), 'Attendance recorded');
   } else if (kind === 'loot') {
@@ -2246,6 +2309,17 @@ ACTIONS['notice-accept'] = (el, d) => act(() => api(`/api/notices/${d.id}/ack`, 
 
 // Lucent is an amount, everything else is a named item: the item field slides away and the amount field grows into its place.
 CHANGES['vod-type'] = (el) => { $('#vf-enemy-field').classList.toggle('off', !S.cfg.vodTypesWithEnemy.includes(el.value)); };
+// Admin > Events: swapping "How attendance is confirmed" between PIN and voice toggles which fields show,
+// live, without a full re-render (that would also throw away the just-picked dropdown value, reverting it to
+// whatever is still saved). `required` has to move with them - a hidden PIN field left `required` blocks
+// saving the form entirely once it's picked voice, and vice versa.
+CHANGES['attendance-mode-change'] = (el) => {
+  const form = el.closest('form'), voice = el.value === 'voice';
+  form.querySelectorAll('[data-attn]').forEach((div) => { div.style.display = div.dataset.attn === (voice ? 'voice' : 'pin') ? '' : 'none'; });
+  // Only the PIN fields are ever required - left required while hidden (now that voice is picked) would
+  // block saving the form entirely.
+  form.querySelectorAll('[data-attn="pin"] input').forEach((i) => { i.required = !voice; });
+};
 CHANGES['vod-vis'] = (el) => { const cls = el.closest('form').querySelector('[name=visibleClass]'); if (cls) cls.classList.toggle('hidden', el.value !== 'class'); };
 FORMS['vod-post'] = (f, fd) => act(async () => { await api('/api/vods', 'POST', fd); closeDialog(); }, 'Posted');
 FORMS['vod-marker'] = (f, fd) => act(async () => {

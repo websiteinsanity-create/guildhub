@@ -8,7 +8,7 @@
 // Guild Hall already knows its own Discord server and there is no reason to ask for that twice.
 
 module.exports = function install(ctx) {
-  const { route, need, HttpError, save, audit, shotcaller } = ctx;
+  const { route, need, HttpError, save, audit, shotcaller, findMember, syncAttendancePoints } = ctx;
   const db = () => ctx.db;
   const yes = (v) => v === true || v === 'true';
   const configured = () => !!(shotcaller.url && shotcaller.apiKey && shotcaller.guildId);
@@ -88,6 +88,105 @@ module.exports = function install(ctx) {
     return callSession('/start', 'POST', { count, channelId: chId, dedicatedCallerId: callerId, partyNames: names }, START_TIMEOUT_MS(count));
   }
 
+  // ---------------------------------------------------------------- voice-presence attendance
+  // Started only from server-community.js's post-parties route, right after a Shotcaller session starts
+  // successfully for a specific event - never from the standalone Start panel (server-shotcaller's own
+  // /api/shotcaller/start), which isn't tied to any one event or its party line-up, so it has nothing to match
+  // voice presence against. `started` is the bot's own /session/start response (its `parties[]`, in the same
+  // order the bot created them); `realRest` is the exact same filtered, ordered list of ev.parties the caller
+  // already built to name those channels in the first place - reusing it here instead of recomputing it is what
+  // keeps this lined up with the real channel ids even when some of ev.parties are placeholders skipped
+  // entirely from the session.
+  function beginVoiceTracking(ev, started, realRest) {
+    if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
+    if (!started || !Array.isArray(started.parties)) return;
+    // Only one Shotcaller session can ever be active for this guild at a time (starting a new one stops
+    // anything old first - see startSession's autoReplace) - so any OTHER event still flagged as "being
+    // tracked" right now is stale the moment this one starts. Stop watching it rather than risk crediting the
+    // wrong event later from a channel id the new session happens to reuse (the anchor channel, especially,
+    // is very often the same existing voice channel every time).
+    for (const other of db().events) if (other.id !== ev.id && other.voiceTracking) other.voiceTracking.active = false;
+    const partyChannels = [{ channelId: started.parties[0] && started.parties[0].channelId, members: [...ev.parties[0].members] }]
+      .concat(realRest.map((p, i) => ({ channelId: started.parties[i + 1] && started.parties[i + 1].channelId, members: [...p.members] })))
+      .filter((pc) => pc.channelId);
+    ev.voiceTracking = { active: true, partyChannels, seenAt: {} };
+    save();
+  }
+
+  // Someone fully cut off from the conversation in both directions - can't be heard AND can't hear anyone
+  // else - reads as "not really there" (AFK, alt-tabbed away, stepped away) rather than someone just
+  // listening along without a mic. Only matters when Admin > Events has switched this check on; otherwise
+  // simply being connected has always been enough.
+  function presentIds(states, ignoreMuted) {
+    return new Set((states || []).filter((s) => !(ignoreMuted && s.mute && s.deaf)).map((s) => s.id));
+  }
+
+  // Runs on its own clock (VOICE_POLL_INTERVAL_MS, default 10s - "check 3 times within any 30-second window"),
+  // deliberately separate from the once-per-30s scheduler tick server.js already uses for reminders: that
+  // cadence was fine for a single confirmation a minute or so later, but a faster, independently-checked
+  // clock is what actually lets a 30-second-wide window hold more than one real sighting.
+  async function pollVoiceAttendance() {
+    const settings = db().settings;
+    const tracked = db().events.filter((ev) => ev.voiceTracking && ev.voiceTracking.active && ctx.effectiveAttendanceMode(ev) === 'voice');
+    if (!tracked.length) return;
+    let status;
+    try { status = await callSession(''); }
+    catch { return; } // the bot being briefly unreachable just means this poll learns nothing new - try again next time
+    if (!status || !status.active) {
+      // The session ended (an officer stopped it, or it was auto-replaced by a new one for another event) -
+      // nothing more to learn. Whoever was already marked attended during the session stays marked; this only
+      // ends the watch so the next poll doesn't keep calling the bot about a session that is no longer there.
+      for (const ev of tracked) ev.voiceTracking.active = false;
+      save();
+      return;
+    }
+    const ignoreMuted = !!settings.voiceAttendanceIgnoreMuted;
+    const byChannel = new Map();
+    for (const p of status.parties || []) {
+      byChannel.set(p.channelId, presentIds(p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id })), ignoreMuted));
+    }
+    // Extra channels (Admin > Events) are never part of the session itself, so they're read through the bot's
+    // own channel-agnostic endpoint instead - read fresh every poll, since an admin could change the list at
+    // any time and a stale list would keep checking (or stop checking) the wrong channels.
+    const extraIds = (settings.voiceTrackExtraChannelIds || []).filter(Boolean);
+    const extraSet = new Set();
+    if (extraIds.length) {
+      try {
+        const r = await callBot(`/voice-presence?channels=${extraIds.map(encodeURIComponent).join(',')}`);
+        for (const c of r.channels || []) if (c.found) for (const id of presentIds(c.connectedStates, ignoreMuted)) extraSet.add(id);
+      } catch { /* extra channels are a bonus, not a reason to skip the party channels below */ }
+    }
+    const anyChannel = new Set(extraSet);
+    for (const s of byChannel.values()) for (const id of s) anyChannel.add(id);
+    const scope = settings.voiceAttendanceScope === 'any-channel' ? 'any-channel' : 'own-party';
+    const offsetMs = (Number(settings.voiceTrackStartOffsetMinutes) || 0) * 60000;
+    const now = Date.now();
+    let anyChanged = false;
+    for (const ev of tracked) {
+      if (now < Date.parse(ev.start) + offsetMs) continue; // tracking hasn't opened yet for this event
+      let evChanged = false;
+      for (const party of ev.voiceTracking.partyChannels) {
+        const own = byChannel.get(party.channelId) || new Set();
+        const connected = scope === 'any-channel' ? anyChannel : (extraSet.size ? new Set([...own, ...extraSet]) : own);
+        for (const memberId of party.members) {
+          const m = findMember(memberId);
+          if (!m || !connected.has(m.owner)) continue;
+          // A rolling 30-second window, not a lifetime count - "seen at least twice within the last 30
+          // seconds" is what "overall checktime: 30s, 3 times within it" actually asks for, rather than any
+          // two sightings ever, however far apart.
+          const times = (ev.voiceTracking.seenAt[memberId] = ev.voiceTracking.seenAt[memberId] || []);
+          times.push(now);
+          while (times.length && now - times[0] > 30000) times.shift();
+          if (times.length >= 2 && !ev.attended.includes(memberId)) { ev.attended.push(memberId); evChanged = true; }
+        }
+      }
+      if (evChanged) { syncAttendancePoints(ev); anyChanged = true; }
+    }
+    if (anyChanged) save();
+  }
+  const VOICE_POLL_MS = Number(process.env.VOICE_POLL_INTERVAL_MS || 10000);
+  setInterval(() => { pollVoiceAttendance().catch((e) => console.error('[voice-attendance] poll failed:', e)); }, VOICE_POLL_MS);
+
   // ---------------------------------------------------------------- live panel
   route('GET', '/api/shotcaller/status', () => callSession(''), { officer: true });
 
@@ -156,6 +255,6 @@ module.exports = function install(ctx) {
   }, { officer: true });
 
   // Exposed to server.js, which passes it on to server-features.js/server-community.js (as ctx.shotcallerApi) -
-  // see server-community.js's post-parties route, the only other caller of startSession.
-  return { configured, checkCandidates, startSession };
+  // see server-community.js's post-parties route, the only other caller of startSession and of beginVoiceTracking.
+  return { configured, checkCandidates, startSession, beginVoiceTracking };
 };

@@ -20,6 +20,16 @@ try {
   }
 } catch { /* no .env file: fine */ }
 
+// Safety net: the HTTP server below is `http.createServer(async (req, res) => {...})` - Node never awaits the
+// listener's own returned promise, so any exception that escapes it (anything outside the try/catch around
+// `/api/*` routes - static files, uploads, the Discord OAuth callback, etc) becomes an unhandled promise
+// rejection, and Node's default behaviour for one of those is to crash the entire process. With dozens of
+// players hitting the server at once (typing an attendance PIN in during the same minute, say), a rare edge
+// case that would normally just be one failed request instead takes the whole server down for everyone still
+// connected. Logging it and carrying on is strictly better than that, every time.
+process.on('unhandledRejection', (e) => console.error('Unhandled rejection (server kept running):', e));
+process.on('uncaughtException', (e) => console.error('Uncaught exception (server kept running):', e));
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.LISTEN_HOST || '';                  // empty = listen on every network address; 127.0.0.1 = only through a reverse proxy on this machine
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -59,6 +69,39 @@ const SETTING_DEFAULTS = {
   signupCloseDefault: 30,                                 // sign-ups close this many minutes before an event starts
   pinOffsetMinutes: 0,                                    // the attendance PIN is created this many minutes after the event starts
   pinWindowDefault: 15,                                   // players have this many minutes to type the PIN in
+  // How attendance gets confirmed, guild-wide by default. 'pin' is the original flow (the whole PIN system
+  // above). 'voice' replaces it with automatic tracking from Shotcaller: once an officer starts a session for
+  // an event (see server-community.js's post-parties route), a player showing up in Shotcaller's voice gets
+  // marked attended on their own - no PIN sent, no PIN window, nothing for them to type in. This is the
+  // guild-wide default, not a hard rule: any event can override it the other way (ev.attendanceModeOverride,
+  // see pickEvent and effectiveAttendanceMode below) - changing this setting only ever changes events still
+  // left on "guild default", exactly like pinEnabled already defaults to (but can independently override)
+  // Mandatory. Either mode, this only ever matters for events where Shotcaller actually gets started -
+  // anything else still has nobody confirming attendance but an officer's own hand, same as always.
+  attendanceMode: 'pin',                                  // 'pin' | 'voice'
+  // How strict the voice check is, only relevant in 'voice' mode. 'own-party': only counts if seen in the
+  // specific voice channel their assigned character's party uses for this event - catches someone chatting in
+  // the wrong channel instead of crediting them. 'any-channel': counts if seen anywhere in the session at all -
+  // looser, but still catches a player whose character was never actually placed into a party for the event.
+  // Either way, voiceTrackExtraChannelIds below always counts, regardless of scope.
+  voiceAttendanceScope: 'own-party',                      // 'own-party' | 'any-channel'
+  // Channels besides the Shotcaller session's own party channels that always count toward voice attendance -
+  // a standing "Main"/"Raid Comms" channel some of the roster sits in instead of their assigned party's own
+  // channel, say. Checked through the bot's channel-agnostic /voice-presence endpoint (needs bot v4.3.0+),
+  // not the session status, since these channels are never part of the session itself. Admin-picked (Admin >
+  // Events), a list of Discord voice channel ids.
+  voiceTrackExtraChannelIds: [],
+  // Delay, in minutes, after an event's own start time before voice attendance starts actually crediting
+  // sightings for it - 0 means "from the moment the event starts". An officer and early arrivals setting up
+  // Shotcaller a few minutes before the event's listed start time shouldn't already count as having attended
+  // it; this is the voice-mode equivalent of pinOffsetMinutes above. Can be negative (tracking opens before
+  // the listed start), same range as pinOffsetMinutes.
+  voiceTrackStartOffsetMinutes: 0,
+  // When on, a player who is both muted AND deafened in their voice channel does not count as present - fully
+  // cut off from the conversation in both directions reads as "not really there" (AFK, alt-tabbed away,
+  // stepped away from the keyboard), rather than someone just listening along without a mic. Off by default:
+  // simply being connected is enough, as it always was before this setting existed.
+  voiceAttendanceIgnoreMuted: false,
   reminderMinutes: [300, 120],                            // "you have not answered" reminders, minutes before the event
   remindersEnabled: true,
   // Attendance rules: who gets asked for a reason, who gets warnings, and when a warning goes away. 0 switches a limit off.
@@ -404,12 +447,25 @@ function pickMember(b, existing) {
 }
 
 function syncAttendancePoints(ev) {
-  // Keep ledger entries for this event in step with the attendance list.
+  // Keep ledger entries for this event in step with the attendance list. This runs once per player every time
+  // a PIN entry (or a manual attendance edit) adds them to ev.attended, so with dozens of players typing the
+  // PIN in within the same minute or two, it can run dozens of times in a short burst - and db.points only ever
+  // grows over a guild's lifetime (every event, every attendee, forever), so a full O(points.length) rescan for
+  // EACH attended member here (the old `.some()` below) turned into O(attended x points) synchronous work per
+  // burst once that ledger got into the thousands - enough to visibly stall the single-threaded server for
+  // everyone, not just the player who triggered it. One pass over db.points now covers both the cleanup and
+  // building the "who already has one" lookup, so this is O(points + attended) instead.
   const attended = new Set(ev.attended || []);
-  db.points = db.points.filter((p) => !(p.eventId === ev.id && !attended.has(p.memberId)));
+  const existing = new Set();                   // memberIds that already have a point entry for this event
+  db.points = db.points.filter((p) => {
+    if (p.eventId !== ev.id) return true;
+    if (!attended.has(p.memberId)) return false;
+    existing.add(p.memberId);
+    return true;
+  });
   if (ev.points > 0 && db.settings.pointsEnabled) {
     for (const memberId of attended) {
-      if (!db.points.some((p) => p.eventId === ev.id && p.memberId === memberId)) {
+      if (!existing.has(memberId)) {
         db.points.push({
           id: newId(), memberId, delta: ev.points,
           reason: `Attended: ${ev.title}`, eventId: ev.id, at: new Date().toISOString(), by: 'system',
@@ -469,7 +525,7 @@ function pinInfo(ev) {
 // Officers get the whole event. Everybody else gets it without the PIN itself.
 function eventFor(ev, user) {
   const out = { ...ev, pinInfo: pinInfo(ev), signupClosesAt: new Date(closeAt(ev)).toISOString() };
-  if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; }
+  if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; delete out.voiceTracking; }
   return out;
 }
 
@@ -579,7 +635,20 @@ function pickEvent(b, ex) {
     // series, every event it generates) - that checkbox can still be switched either way at post time, this is
     // only the default. Meaningless (and simply ignored) while Shotcaller itself isn't configured.
     shotcallerAutoStart: b.shotcallerAutoStart === undefined ? !!(ex && ex.shotcallerAutoStart) : b.shotcallerAutoStart === true || b.shotcallerAutoStart === 'true',
+    // Overrides the guild-wide attendanceMode setting for just this event - 'default' (the normal case)
+    // follows whatever Admin > Events currently has picked, and flips automatically if that ever changes.
+    // 'pin' or 'voice' pins this one event to that mode regardless of the guild default, for the rare event
+    // that genuinely needs the other kind (no Shotcaller access this one night, say, or a one-off trial of
+    // voice tracking before switching the whole guild over). See effectiveAttendanceMode below.
+    attendanceModeOverride: ['default', 'pin', 'voice'].includes(b.attendanceModeOverride) ? b.attendanceModeOverride : (ex ? ex.attendanceModeOverride || 'default' : 'default'),
   };
+}
+// What actually governs this one event: its own override if it has one, otherwise the guild-wide default.
+// Shared by tick()'s auto-PIN gate, server-shotcaller.js's beginVoiceTracking/pollVoiceAttendance, and the
+// client (eventFor exposes attendanceModeOverride so public/app.js can compute the same thing from
+// S.settings.attendanceMode without a round trip).
+function effectiveAttendanceMode(ev) {
+  return ev.attendanceModeOverride && ev.attendanceModeOverride !== 'default' ? ev.attendanceModeOverride : db.settings.attendanceMode;
 }
 const clone = (x) => JSON.parse(JSON.stringify(x));
 // A party preset can be tied to an event type ("use it for every Wargames"). New events of that type get it automatically.
@@ -777,6 +846,28 @@ route('PUT', '/api/settings', ({ body, user }) => {
     need(v >= 1 && v <= 720, 400, 'The PIN window must be between 1 and 720 minutes.');
     st.pinWindowDefault = v;
   }
+  if (body.attendanceMode !== undefined) {
+    const v = String(body.attendanceMode);
+    need(v === 'pin' || v === 'voice', 400, 'Attendance mode must be "pin" or "voice".');
+    st.attendanceMode = v;
+  }
+  if (body.voiceAttendanceScope !== undefined) {
+    const v = String(body.voiceAttendanceScope);
+    need(v === 'own-party' || v === 'any-channel', 400, 'Voice attendance scope must be "own-party" or "any-channel".');
+    st.voiceAttendanceScope = v;
+  }
+  if (body.voiceTrackExtraChannelIds !== undefined) {
+    const list = Array.isArray(body.voiceTrackExtraChannelIds) ? body.voiceTrackExtraChannelIds : [];
+    const ids = [...new Set(list.map((x) => String(x)))];
+    need(ids.every((id) => /^\d{15,25}$/.test(id)), 400, 'Those don\'t all look like real Discord channel ids.');
+    st.voiceTrackExtraChannelIds = ids;
+  }
+  if (body.voiceTrackStartOffsetMinutes !== undefined) {
+    const v = int(body.voiceTrackStartOffsetMinutes);
+    need(v >= -1440 && v <= 1440, 400, 'Voice tracking can start between 24 hours before and 24 hours after the event begins.');
+    st.voiceTrackStartOffsetMinutes = v;
+  }
+  if (body.voiceAttendanceIgnoreMuted !== undefined) st.voiceAttendanceIgnoreMuted = body.voiceAttendanceIgnoreMuted === true || body.voiceAttendanceIgnoreMuted === 'true';
   if (body.reminderMinutes !== undefined) {
     const list = (Array.isArray(body.reminderMinutes) ? body.reminderMinutes : []).map(int);
     need(list.every((v) => v >= 1 && v <= 10080) && list.length <= 6, 400, 'Reminders: up to 6 times, each between 1 minute and 7 days before the event.');
@@ -1087,7 +1178,11 @@ async function tick() {
       // officer can turn it on for an optional event (or off for a mandatory one) independently; see pickEvent.
       // Either way, an officer can still always create and send one by hand ("Create and send PIN now" on the
       // event), which has no check of its own, so this only changes what happens with nobody touching it.
-      if (!ev.pin && !ev.pinSkip && ev.pinEnabled && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
+      // In 'voice' mode attendance comes from Shotcaller instead (see pollVoiceAttendance in
+      // server-shotcaller.js) - the PIN system stays fully intact underneath (an officer can still send one by
+      // hand any time), but nothing auto-sends one, so a player never sees a PIN window open for an event this
+      // guild isn't using the PIN for any more.
+      if (!ev.pin && !ev.pinSkip && ev.pinEnabled && effectiveAttendanceMode(ev) !== 'voice' && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
       // An event that does not use the attendance PIN has nobody confirming they actually showed up unless an
       // officer remembers to tick the Attendance box by hand - which leaves everyone who said "Going" wrongly
       // looking like a no-show. Once the event is comfortably over (the same delay compliance uses to judge
@@ -1201,7 +1296,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
 const shotcallerApi = require('./server-shotcaller')({
-  route, need, HttpError, save, isOfficer, audit: audit.log,
+  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, syncAttendancePoints, effectiveAttendanceMode,
   shotcaller: { url: SHOTCALLER_URL, apiKey: SHOTCALLER_API_KEY, get guildId() { return discord.cfg.guildId; } },
   get db() { return db; },
 });
