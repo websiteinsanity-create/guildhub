@@ -125,6 +125,22 @@ tr.click:hover td { background: var(--panel-2); }
 .col h3 { display: flex; justify-content: space-between; border-bottom: 2px solid var(--c); padding-bottom: 6px; margin-bottom: 8px; font-family: var(--body); font-weight: 600; font-size: 15px; }
 .mini { padding: 4px 0; display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
 .mini small { color: var(--muted); }
+/* The merged roster row in the Going section: name/subclass/gearscore on the left, attendance status on the
+   right - either a plain read-only chip, or (officers only) a live dropdown that replaces the old separate
+   "change someone else's sign-up" picker entirely. --sc follows the same colour convention used for a
+   player's own event status elsewhere (STATUS_TEXT/[data-st]). */
+/* flex-wrap, not a fixed min-width squeeze: these party-size columns are often too narrow to fit a name and a
+   dropdown ("Not attending" is the long one) on one line - wrapping the status control onto its own line below
+   the name when needed keeps the name fully readable instead of the two fighting over width and the name losing. */
+.roster-row { flex-wrap: wrap; row-gap: 2px; }
+.roster-row > span:first-child { flex: 1 1 100px; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-row > span:first-child small { display: block; }
+.status-chip, .status-pick { flex: 0 0 auto; border: 1px solid var(--sc); color: var(--sc); border-radius: 20px; font-size: 12px; }
+.status-chip { padding: 2px 10px; white-space: nowrap; }
+.status-pick { padding: 2px 6px; background: var(--panel-2); cursor: pointer; max-width: 100%; }
+.status-chip[data-rst="yes"], .status-pick[data-rst="yes"] { --sc: #6fcf8b; }
+.status-chip[data-rst="no"], .status-pick[data-rst="no"] { --sc: #eba23c; }
+.status-chip[data-rst="none"], .status-pick[data-rst="none"] { --sc: #8a8a95; }
 .parties { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .party { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .party h4 { margin: 0 0 8px; font-family: var(--display); font-weight: 400; font-size: 16px; display: flex; justify-content: space-between; }

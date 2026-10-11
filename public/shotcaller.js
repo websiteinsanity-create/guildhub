@@ -347,6 +347,91 @@ function voiceExtraChannelsField(selectedIds) {
   return `<div class="scrollbox" style="max-height:160px">${rows.map((c) => `<label class="tagpick"><input type="checkbox" name="vtxc" value="${esc(c.id)}" ${selectedIds.includes(c.id) ? 'checked' : ''}> 🔊 ${esc(c.name)}</label>`).join('') || '<span class="muted small">No voice channels found.</span>'}</div>`;
 }
 
+/* ---------------------------------------------------------------- Admin > Testing: a live voice-attendance dry-run */
+// A real end-to-end test of the whole voice-attendance pipeline (Admin > Events) without needing a real event:
+// starts a throwaway 3-channel Shotcaller session, waits 3 minutes, then watches who actually shows up and
+// reports back who got confirmed - same rolling 30s/2-sightings rule the real feature uses - and whether they
+// were muted/deafened at the time. Nothing here ever touches a real event, attendance, points or warnings.
+let VT_TIMER = null;
+function voiceTestAnchorPicker() {
+  if (!S.cfg.shotcallerOn) return '<div class="muted small">Set up Shotcaller first (see the README) to run this test.</div>';
+  if (!SC_CHANNELS) return '<button type="button" class="btn sm" data-act="sc-load-channels">Load channel list</button>';
+  if (!SC_CHANNELS.length) return '<div class="muted small">No voice channels found for the bot to use as an anchor.</div>';
+  return `<select id="vt-anchor" aria-label="Anchor voice channel for the test">${SC_CHANNELS.map((c) => `<option value="${esc(c.id)}">🔊 ${esc(c.name)}</option>`).join('')}</select>`;
+}
+function testingAdmin() {
+  if (!S.cfg.shotcallerOn) return '';
+  return `<div class="panel"><h3>Testing</h3>
+    <div class="muted small" style="margin:-6px 0 10px">Run a live dry-run of voice-attendance tracking (Admin &gt; Events) without a real event. This starts a throwaway Shotcaller session: the anchor channel you pick below, plus 2 new channels the bot creates (3 total). After 3 minutes it starts checking who is actually present, the same way a real tracked event would, and shows exactly who gets confirmed and whether they were muted or deafened at the time. Nothing here touches any real event, attendance, points or warnings - stop it any time.</div>
+    <div class="field"><label>Anchor channel</label>${voiceTestAnchorPicker()}</div>
+    <button class="btn" data-act="voicetest-run" style="margin-top:4px">Run attendance test</button>
+  </div>`;
+}
+function voiceTestDialogHtml(t) {
+  if (!t || !t.phase) return `<h3>Attendance tracking test</h3><div class="muted">No test is running.</div><div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`;
+  if (t.phase === 'error') {
+    return `<h3>Attendance tracking test</h3><div class="err" style="margin-bottom:10px">${esc(t.error || 'Something went wrong.')}</div>
+      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`;
+  }
+  // Three checklist steps, each either done (already past), active (the phase we're literally in right now,
+  // including "ended" counting as tracking still being the active/most-recent step) or pending (not reached yet).
+  const steps = ['starting', 'waiting', 'tracking'];
+  const at = steps.indexOf(t.phase === 'ended' ? 'tracking' : t.phase);
+  const step = (key, label, extra) => {
+    const i = steps.indexOf(key);
+    const mark = i < at ? '✅' : i > at ? '○' : t.phase === 'ended' ? '✅' : '⏳';
+    return `<div class="muted small" style="margin:3px 0"><span style="margin-right:6px">${mark}</span>${esc(label)}${extra || ''}</div>`;
+  };
+  const waitLeft = t.trackAt ? until(new Date(t.trackAt).toISOString()) : '';
+  const channelNames = t.channels.length ? t.channels.map((c) => esc(c.name)).join(', ') : '';
+  return `<h3>Attendance tracking test</h3>
+    ${step('starting', 'Starting bots…')}
+    ${step('waiting', t.channels.length ? `Bots are active${channelNames ? ` (${channelNames})` : ''}` : 'Bots are active')}
+    ${t.phase === 'waiting' ? `<div class="muted small" style="margin:3px 0 3px 22px">Waiting ${waitLeft.replace(/^in /, '')} before tracking starts…</div>` : ''}
+    ${step('tracking', t.phase === 'ended' ? 'Tracking ended' : 'Tracking now')}
+    <div style="margin-top:14px"><b>Confirmed players</b>
+      ${t.confirmed.length ? `<div class="scrollbox" style="max-height:220px;margin-top:6px">${t.confirmed.map((c) => `<div class="rsvp-row"><span>${esc(c.name)}</span><span class="muted small">${c.mute && c.deaf ? 'Muted + deafened' : c.mute ? 'Muted' : c.deaf ? 'Deafened' : 'Not muted'}</span></div>`).join('')}</div>`
+        : `<div class="muted small" style="margin-top:6px">${t.phase === 'tracking' ? `Nobody confirmed yet - join one of the test channels${channelNames ? `: ${channelNames}` : ''} and stay a moment.` : 'Nobody has been checked yet.'}</div>`}
+    </div>
+    <div class="dlg-actions" style="margin-top:14px"><button type="button" class="btn danger" data-act="voicetest-stop">Stop test</button></div>`;
+}
+async function pollVoiceTest() {
+  let t;
+  try { t = await api('/api/admin/voice-test'); } catch { return; }
+  if (!$('#dlg').open) { clearInterval(VT_TIMER); VT_TIMER = null; return; }
+  if (!t.phase) { clearInterval(VT_TIMER); VT_TIMER = null; }
+  openDialog(voiceTestDialogHtml(t), false);
+}
+ACTIONS['voicetest-run'] = async () => {
+  const sel = $('#vt-anchor');
+  if (!sel || !sel.value) return toast('Pick an anchor channel first.', true);
+  openDialog(voiceTestDialogHtml({ phase: 'starting', channels: [], confirmed: [] }));
+  try {
+    await api('/api/admin/voice-test/start', 'POST', { channelId: sel.value });
+  } catch (e) {
+    // A failure here (most often "already running", or the bot unreachable) never even got as far as creating
+    // a server-side voiceTest slot with its own phase:'error' - show it directly instead of leaving the
+    // placeholder dialog stuck on "Starting bots..." forever with no poll loop ever started to move it along.
+    openDialog(voiceTestDialogHtml({ phase: 'error', error: e.message, channels: [], confirmed: [] }));
+    return;
+  }
+  clearInterval(VT_TIMER);
+  VT_TIMER = setInterval(pollVoiceTest, 2000);
+  pollVoiceTest();
+};
+ACTIONS['voicetest-stop'] = () => {
+  clearInterval(VT_TIMER); VT_TIMER = null;
+  act(async () => { await api('/api/admin/voice-test/stop', 'POST'); closeDialog(); }, 'Test stopped');
+};
+// Closing the dialog any other way (Escape, clicking the backdrop) must stop the live test too, not just the
+// polling - otherwise the throwaway Shotcaller session (and its 2 bot-created channels) is left running with
+// nobody watching it until the server's own VT_MAX_MS safety net eventually cleans it up.
+$('#dlg').addEventListener('close', () => {
+  if (!VT_TIMER) return;
+  clearInterval(VT_TIMER); VT_TIMER = null;
+  api('/api/admin/voice-test/stop', 'POST').catch(() => {});
+});
+
 /* ---------------------------------------------------------------- Admin: who can be picked as a caller */
 function shotcallerAdmin() {
   const st = S.settings.shotcaller, ids = st.candidateUserIds || [];

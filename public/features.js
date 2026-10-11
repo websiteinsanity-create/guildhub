@@ -1636,5 +1636,6 @@ VIEWS.admin = () => {
     + accessAdmin()
     + adminSignIn()
     + adminBackup()
-    + adminCustomizingText();
+    + adminCustomizingText()
+    + (typeof testingAdmin === 'function' ? testingAdmin() : '');
 };

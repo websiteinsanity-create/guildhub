@@ -283,6 +283,23 @@ withServer('the event chart counts who is coming, not coming and silent, per rol
   assert.deepEqual(chart.roles.Tank, { yes: 2, no: 0, none: 0, leave: 0 }, 'an answered character counts under its own role');
 });
 
+withServer('the event chart leaves out a player entirely for an event that happened before they ever joined - not counted as silent, not in the denominator', async (s) => {
+  const c = await cast(s);                                                     // Ann DPS, Bob Tank, Cat Healer - all backdated a year
+  const past = await pastEvent(s, 1, { came: [], yes: [c.bob], no: [] });       // Bob going, Cat and Ann silent
+  let chart = (await state(s, 'officer')).events.find((e) => e.id === past.id).chart;
+  assert.deepEqual(chart.total, { yes: 1, no: 0, none: 2, leave: 0 }, 'before the new player exists, both silent characters count as usual');
+  // A brand new player joins today and creates their first character - strictly after that past event already happened.
+  const newbie = (await s.call('/api/login', 'POST', { name: 'Newbie', passcode: 'm1' })).body.token;
+  await s.call('/api/members', 'POST', { name: 'NewbieChar', role: 'DPS' }, newbie);
+  chart = (await state(s, 'officer')).events.find((e) => e.id === past.id).chart;
+  // The new character must not appear as a silent "none" for an event that predates it, and must not inflate
+  // the "Everybody" denominator either - the chart should read exactly as it did before the new player joined.
+  assert.deepEqual(chart.total, { yes: 1, no: 0, none: 2, leave: 0 }, 'the brand new character is left out of the chart for the pre-join event entirely');
+  const futureEv = (await s.call('/api/events', 'POST', { type: 'Wargames', start: inDays(2) }, s.officer)).body;
+  chart = (await state(s, 'officer')).events.find((e) => e.id === futureEv.id).chart;
+  assert.equal(chart.total.none, 4, 'the same new character is counted normally (alongside Ann, Bob and Cat) for an event after they joined');
+});
+
 withServer('a backup brings back everything: recurring events, tags, requests, profiles, notices, the info section, leave and warnings', async (s) => {
   const c = await cast(s);
   await s.call('/api/series', 'POST', { type: 'Boonstone', weekdays: [1], time: '21:00' }, s.officer);

@@ -174,6 +174,15 @@ module.exports = function install(ctx) {
     for (const r of config.roles) roles[r] = zero();
     const bump = (role, k) => { (roles[role] = roles[role] || zero())[k]++; total[k]++; };
     for (const [owner, chars] of P) {
+      // Same reasoning as playerStats (above): a player cannot have been a "no reply" for an event that
+      // happened before they had any character in the guild at all - leaving them out of the chart entirely
+      // for that event (rather than lumping them into "none") keeps the per-event percentage and every other
+      // guild member's "X of Y going" honest instead of permanently and wrongly inflating Y for every event
+      // that predates them. Earliest joinedAt across their characters, same as playerStats; missing joinedAt
+      // (only on characters from before this field existed) falls back to "always counted", the old behavior.
+      const joinTimes = chars.map((c) => Date.parse(c.joinedAt)).filter(Number.isFinite);
+      const joinedAt = joinTimes.length ? Math.min(...joinTimes) : -Infinity;
+      if (start < joinedAt) continue;
       const answered = chars.filter((c) => ev.rsvps[c.id] === 'yes' || ev.rsvps[c.id] === 'no');
       if (answered.length) { for (const c of answered) bump(c.role, ev.rsvps[c.id]); continue; }
       bump(chars[0].role, isOnLeave(owner, start) ? 'leave' : 'none');                    // somebody who did not answer counts once, under their main character

@@ -800,15 +800,40 @@ function viewEvents(selId) {
   <div id="ev-detail">${sel ? eventDetail(sel) : '<div class="empty">No events yet.' + (isOfficer() ? ' Click a day in the calendar or use "New event".' : '') + '</div>'}</div>`;
 }
 
+// Everybody who belongs on this event's roster: every active, non-mercenary guild member - not just whoever
+// has answered so far. Mercenaries are added straight into the parties for one event and never go through
+// RSVP, so they stay off this list, same as before. A character that joined after this event already happened
+// cannot possibly have answered it, so it is left off entirely here too (same reasoning as the server's
+// per-event chart and the compliance no-reply rule) rather than permanently showing up as "No reply" on every
+// event that predates them.
+function eventRoster(ev) {
+  const evStart = new Date(ev.start).getTime();
+  return S.members.filter((m) => m.active && !m.mercenary && !(m.joinedAt && new Date(m.joinedAt).getTime() > evStart));
+}
+const ROSTER_STATUS = { yes: 'Attending', no: 'Not attending', none: 'No reply' };
+// One roster row: name, subclass and gearscore on the left, and - the whole point of this - a status control on
+// the right that replaces the old separate "change someone else's sign-up" dropdown entirely. Officers get a
+// live dropdown they can change at any time, including long after the event and after attendance was already
+// rolled (plain RSVP changes, same /api/events/:id/rsvp route "Your sign-up" above already uses - an officer
+// could always do this, it just used to live in its own clunky picker instead of inline here). Everybody else
+// gets the same information as a plain read-only chip - no change in what members could already see before.
+function rosterRow(ev, m, admin) {
+  const s = ev.rsvps[m.id] === 'yes' ? 'yes' : ev.rsvps[m.id] === 'no' ? 'no' : 'none';
+  const sub = classOf(m) || m.primaryWeapon;
+  const control = admin
+    ? `<select class="status-pick" data-rst="${s}" data-act="rsvp-row" data-ev="${ev.id}" data-m="${m.id}" aria-label="Attendance status for ${esc(m.name)}">
+        <option value="yes" ${s === 'yes' ? 'selected' : ''}>Attending</option>
+        <option value="no" ${s === 'no' ? 'selected' : ''}>Not attending</option>
+        <option value="none" ${s === 'none' ? 'selected' : ''}>No reply</option>
+      </select>`
+    : `<span class="status-chip" data-rst="${s}">${ROSTER_STATUS[s]}</span>`;
+  return `<div class="mini roster-row"><span><b>${esc(m.name)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${control}</div>`;
+}
+
 function eventDetail(ev) {
-  const going = [], no = [];
-  for (const [id, st] of Object.entries(ev.rsvps)) {
-    const m = byId(S.members, id); if (!m) continue;
-    (st === 'yes' ? going : no).push(m);
-  }
-  // Active, non-mercenary characters with no answer at all yet - mercenaries are added straight into the
-  // roster for one event and never go through RSVP, so they do not belong on either list.
-  const noReply = S.members.filter((m) => m.active && !m.mercenary && !(m.id in ev.rsvps));
+  const admin = isOfficer();
+  const roster = eventRoster(ev);
+  const goingN = roster.filter((m) => ev.rsvps[m.id] === 'yes').length;
   const past = new Date(ev.start) < Date.now();
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
@@ -817,14 +842,12 @@ function eventDetail(ev) {
   const signupNote = past ? '' : closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
 
   return `
-  <div class="panel"><h3>Going: ${going.length}${cap}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
-    ${going.length ? `<div class="cols">${S.cfg.roles.map((r) => {
-      const g = going.filter((m) => m.role === r).sort((a, b) => b.gearScore - a.gearScore);
+  <div class="panel"><h3>Going: ${goingN}${cap}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
+    ${roster.length ? `<div class="cols">${S.cfg.roles.map((r) => {
+      const g = roster.filter((m) => m.role === r).sort((a, b) => b.gearScore - a.gearScore);
       return `<div class="col" style="--c:${roleColor(r)}"><h3><span>${esc(r)}</span><span>${g.length}</span></h3>
-        ${g.map((m) => `<div class="mini"><span>${esc(m.name)}</span><small>${esc(classOf(m) || m.primaryWeapon)} ${m.gearScore || ''}</small></div>`).join('') || '<div class="muted small">None yet</div>'}</div>`;
-    }).join('')}</div>` : '<div class="muted">Nobody yet.</div>'}
-    ${no.length ? `<p class="small" style="margin-bottom:0"><span class="muted">Can't make it (${no.length}):</span> ${no.map((m) => esc(m.name)).join(', ')}</p>` : ''}
-    ${noReply.length ? `<p class="small" style="margin-bottom:0"><span class="muted">No reply yet (${noReply.length}):</span> ${noReply.map((m) => esc(m.name)).join(', ')}</p>` : ''}
+        ${g.map((m) => rosterRow(ev, m, admin)).join('') || '<div class="muted small">None</div>'}</div>`;
+    }).join('')}</div>` : '<div class="muted">Nobody on the roster yet.</div>'}
   </div>
 
   ${(() => {
@@ -860,11 +883,6 @@ function eventSide(ev) {
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
   const myRows = mine().map((m) => rsvpRow(ev, m, locked)).join('');
-  // Every other active character, not just the ones who have not answered yet - an officer changing someone's
-  // answer (told in Discord they can no longer make it, say) needs to be able to pick them here too, not only
-  // the still-unanswered ones.
-  const others = isOfficer() ? S.members.filter((m) => m.active && m.owner !== S.user.key) : [];
-  const otherStatus = (m) => (ev.rsvps[m.id] === 'yes' ? ' - attending' : ev.rsvps[m.id] === 'no' ? " - can't make it" : ' - no answer yet');
   const signupNote = past ? '' : closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
   const st = myStatus(ev);
   return `<div class="panel side-card" data-st="${st}">
@@ -876,8 +894,6 @@ function eventSide(ev) {
     <h3 class="side-h">Your sign-up</h3>
     ${signupNote ? `<div class="muted small" style="margin:-4px 0 8px">${signupNote}</div>` : ''}
     ${myRows || `<div class="muted small">You have no active characters. <a href="#/profile" data-act="goto-add">Add one</a> to sign up.</div>`}
-    ${others.length ? `<div class="rsvp-row"><select id="other-char" style="max-width:230px" aria-label="Change another character's sign-up">${others.map((m) => `<option value="${m.id}">${esc(m.name)} (${esc(ownerName(m.owner))})${otherStatus(m)}</option>`).join('')}</select>
-      <span class="seg"><button class="btn sm" data-act="rsvp-other" data-s="yes" data-ev="${ev.id}">Attend</button><button class="btn sm" data-act="rsvp-other" data-s="no" data-ev="${ev.id}">Not attend</button><button class="btn sm" data-act="rsvp-other" data-s="none" data-ev="${ev.id}">Clear</button></span></div>` : ''}
     ${pinSide(ev)}
   </div>`;
 }
@@ -1625,7 +1641,6 @@ document.addEventListener('click', async (e) => {
   else if (a === 'duty-del') act(() => api('/api/duties/' + d.id, 'DELETE'));
   else if (a === 'toggle-past') { UI.showPast = !UI.showPast; render(); }
   else if (a === 'rsvp') rsvpNow(d.ev, d.m, d.s);
-  else if (a === 'rsvp-other') rsvpNow(d.ev, $('#other-char').value, d.s);
   else if (a === 'parties-build') {
     const e2 = ev(); if (e2.parties.length && !confirm('Replace the current parties?')) return;
     const p = autoParties(e2);
@@ -1718,6 +1733,7 @@ document.addEventListener('change', (e) => {
   if (el.dataset.ui) { UI[el.dataset.ui] = el.type === 'checkbox' ? el.checked : el.value; render(); }
   else if (el.dataset.act === 'party-rename') mutateParties(el, (ps, i) => { ps[i].name = el.value.trim() || `Party ${i + 1}`; });
   else if (el.dataset.act === 'points-toggle') act(() => api('/api/settings', 'PUT', { pointsEnabled: el.checked }), el.checked ? 'Points are on' : 'Points are off');
+  else if (el.dataset.act === 'rsvp-row') rsvpNow(el.dataset.ev, el.dataset.m, el.value);
   else if (el.dataset.act === 'loot-date') act(() => api('/api/settings', 'PUT', { lootFrom: el.value }), 'Loot window updated');
   else if (el.dataset.act === 'preset-load') {
     const evn = byId(S.events, el.dataset.ev), p = byId(S.presets, el.value);
