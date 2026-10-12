@@ -360,13 +360,57 @@ function voiceTestAnchorPicker() {
   return `<select id="vt-anchor" aria-label="Anchor voice channel for the test">${SC_CHANNELS.map((c) => `<option value="${esc(c.id)}">🔊 ${esc(c.name)}</option>`).join('')}</select>`;
 }
 function testingAdmin() {
-  if (!S.cfg.shotcallerOn) return '';
+  const showVoice = S.cfg.shotcallerOn;
   return `<div class="panel"><h3>Testing</h3>
-    <div class="muted small" style="margin:-6px 0 10px">Run a live dry-run of voice-attendance tracking (Admin &gt; Events) without a real event. This starts a throwaway Shotcaller session: the anchor channel you pick below, plus 2 new channels the bot creates (3 total). After 3 minutes it starts checking who is actually present, the same way a real tracked event would, and shows exactly who gets confirmed and whether they were muted or deafened at the time. Nothing here touches any real event, attendance, points or warnings - stop it any time.</div>
+    ${showVoice ? `<div class="muted small" style="margin:-6px 0 10px">Run a live dry-run of voice-attendance tracking (Admin &gt; Events) without a real event. This starts a throwaway Shotcaller session: the anchor channel you pick below, plus 2 new channels the bot creates (3 total). After 3 minutes it starts checking who is actually present, the same way a real tracked event would, and shows exactly who gets confirmed and whether they were muted or deafened at the time. Nothing here touches any real event, attendance, points or warnings - stop it any time.</div>
     <div class="field"><label>Anchor channel</label>${voiceTestAnchorPicker()}</div>
     <button class="btn" data-act="voicetest-run" style="margin-top:4px">Run attendance test</button>
+    <h4 class="sub-head" style="margin-top:18px">DM button test</h4>` : ''}
+    <div class="muted small" style="margin:${showVoice ? '-2px' : '-6px'} 0 10px">Sends a real Discord DM with Yes/No buttons to the players picked below - the same mechanism event reminders use (see README, "Discord setup" step 8) - so you can check end-to-end that DMs and button clicks actually work. The popup below fills in live as each player taps a button; their own DM then changes to say which one they clicked.</div>
+    <div class="field"><label>Players</label>${playerPickerFor('dmtest', [])}</div>
+    <button type="button" class="btn" data-act="dmtest-run" style="margin-top:4px">Start test</button>
   </div>`;
 }
+function dmTestDialogHtml(t) {
+  if (!t || !t.id) return `<h3>DM button test</h3><div class="muted">No test is running.</div><div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`;
+  const rows = t.players.map((p) => {
+    const r = t.results[p.key];
+    const status = !r ? '<span class="muted small">Waiting…</span>'
+      : r.answer === 'yes' ? '<span class="pos small">Clicked Yes</span>'
+      : r.answer === 'no' ? '<span class="neg small">Clicked No</span>'
+      : `<span class="muted small">Could not be sent${r.error ? ` (${esc(r.error)})` : ''}</span>`;
+    return `<div class="rsvp-row"><span>${esc(p.name)}</span>${status}</div>`;
+  }).join('');
+  return `<h3>DM button test</h3>
+    <div class="scrollbox" style="max-height:260px;margin-top:6px">${rows}</div>
+    <div class="dlg-actions" style="margin-top:14px"><button type="button" class="btn danger" data-act="dmtest-stop">Stop test</button></div>`;
+}
+let DMT_TIMER = null;
+async function pollDmTest() {
+  let t;
+  try { t = await api('/api/admin/dm-test'); } catch { return; }
+  if (!$('#dlg').open) { clearInterval(DMT_TIMER); DMT_TIMER = null; return; }
+  openDialog(dmTestDialogHtml(t), false);
+}
+ACTIONS['dmtest-run'] = async () => {
+  const keys = [...document.querySelectorAll('input[name=dmtest]:checked')].map((i) => i.value);
+  if (!keys.length) return toast('Pick at least one player.', true);
+  openDialog(dmTestDialogHtml({ id: 'pending', players: keys.map((k) => ({ key: k, name: k })), results: {} }));
+  let t;
+  try {
+    t = await api('/api/admin/dm-test/start', 'POST', { playerKeys: keys });
+  } catch (e) {
+    openDialog(`<h3>DM button test</h3><div class="err" style="margin-bottom:10px">${esc(e.message)}</div><div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`);
+    return;
+  }
+  openDialog(dmTestDialogHtml(t), false);
+  clearInterval(DMT_TIMER);
+  DMT_TIMER = setInterval(pollDmTest, 2000);
+};
+ACTIONS['dmtest-stop'] = () => {
+  clearInterval(DMT_TIMER); DMT_TIMER = null;
+  act(async () => { await api('/api/admin/dm-test/stop', 'POST'); closeDialog(); }, 'Test stopped');
+};
 function voiceTestDialogHtml(t) {
   if (!t || !t.phase) return `<h3>Attendance tracking test</h3><div class="muted">No test is running.</div><div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`;
   if (t.phase === 'error') {
@@ -427,9 +471,8 @@ ACTIONS['voicetest-stop'] = () => {
 // polling - otherwise the throwaway Shotcaller session (and its 2 bot-created channels) is left running with
 // nobody watching it until the server's own VT_MAX_MS safety net eventually cleans it up.
 $('#dlg').addEventListener('close', () => {
-  if (!VT_TIMER) return;
-  clearInterval(VT_TIMER); VT_TIMER = null;
-  api('/api/admin/voice-test/stop', 'POST').catch(() => {});
+  if (VT_TIMER) { clearInterval(VT_TIMER); VT_TIMER = null; api('/api/admin/voice-test/stop', 'POST').catch(() => {}); }
+  if (DMT_TIMER) { clearInterval(DMT_TIMER); DMT_TIMER = null; api('/api/admin/dm-test/stop', 'POST').catch(() => {}); }
 });
 
 /* ---------------------------------------------------------------- Admin: who can be picked as a caller */

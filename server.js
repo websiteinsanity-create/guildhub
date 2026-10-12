@@ -234,25 +234,6 @@ function readToken(token) {
     return u;
   } catch { return null; }
 }
-// One-tap RSVP links for reminder DMs: short, signed, no session or login needed - the token itself is the
-// proof of who it is for. Deliberately NOT a full session token (makeToken/readToken above): this is good for
-// exactly one thing, expires with sign-ups for the event, and carries no identity beyond "this Discord account,
-// this event, this answer".
-function makeRsvpToken(eventId, owner, answer, expiresAt) {
-  const body = Buffer.from(JSON.stringify({ e: eventId, o: owner, a: answer, exp: expiresAt })).toString('base64url');
-  return `${body}.${sign(body)}`;
-}
-function readRsvpToken(token) {
-  const [body, sig] = String(token || '').split('.');
-  if (!body || !sig) return null;
-  const expected = sign(body);
-  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-  try {
-    const t = JSON.parse(Buffer.from(body, 'base64url').toString());
-    if (!(t.exp > Date.now())) return null;
-    return t;
-  } catch { return null; }
-}
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a)).digest();
   const hb = crypto.createHash('sha256').update(String(b)).digest();
@@ -1116,6 +1097,26 @@ async function generatePin(ev, by) {
   await sendPinDMs(ev);
 }
 
+// Shared by the automatic schedule and the officer's manual "Send reminder now" button: same recipients, same
+// message shape, same buttons - just a different opening line and a different trigger. The buttons answer
+// right inside Discord (see /discord/interactions above): no link, no token, no website hand-off.
+async function sendReminderDMs(ev, opening) {
+  const people = reminderRecipients(ev);
+  const failed = [];
+  const closeMs = closeAt(ev);
+  const text = [
+    opening,
+    `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeMs / 1000)}:R>.`,
+    `Tap a button below, or open the event here: ${appUrl()}/#/events/${ev.id}`,
+  ].join('\n');
+  const buttons = discord.rsvpButtons(ev.id);
+  for (const r of people) {
+    const res = await discord.sendDM(r.id, text, null, buttons);
+    if (!res.ok) failed.push({ id: r.id, name: r.name, error: res.error });
+  }
+  return { people, failed };
+}
+
 async function runReminders(ev, now) {
   const st = db.settings;
   if (!st.remindersEnabled || ev.reminders === false) return;
@@ -1130,24 +1131,7 @@ async function runReminders(ev, now) {
   save();
   if (!fresh) return;
   const number = offsets.indexOf(latest) + 1;
-  const people = reminderRecipients(ev);
-  const failed = [];
-  const closeMs = closeAt(ev);
-  for (const r of people) {
-    const text = [
-      `⏰ **Reminder ${number}/${offsets.length}:** you have not answered for **${ev.title}** yet.`,
-      `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeMs / 1000)}:R>.`,
-      `Tap a button below, or open the event here: ${appUrl()}/#/events/${ev.id}`,
-    ].join('\n');
-    // One-tap buttons alongside the link, for anyone who would rather not open the site at all right now. Both
-    // point at the signed /rsvp/ page (see the request handler), which expires along with sign-ups.
-    const buttons = discord.linkButtons([
-      { label: '✅ Can come', url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'yes', closeMs)}` },
-      { label: "❌ Can't come", url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'no', closeMs)}` },
-    ]);
-    const res = await discord.sendDM(r.id, text, null, buttons);
-    if (!res.ok) failed.push({ id: r.id, name: r.name, error: res.error });
-  }
+  const { people, failed } = await sendReminderDMs(ev, `⏰ **Reminder ${number}/${offsets.length}:** you have not answered for **${ev.title}** yet.`);
   ev.reminderLog.push({ number, minutesBefore: latest, at: new Date().toISOString(), sent: people.length - failed.length, failed });
   save();
   console.log(`[reminder ${number}/${offsets.length}] ${ev.title}: ${people.length - failed.length}/${people.length} delivered`);
@@ -1158,22 +1142,7 @@ async function runReminders(ev, now) {
 // for an event with reminders switched off, or just to nudge stragglers again before sign-ups close. Logged
 // alongside the automatic entries (see automationPanel client-side), marked manual so the two read differently.
 async function sendManualReminders(ev, by) {
-  const people = reminderRecipients(ev);
-  const failed = [];
-  const closeMs = closeAt(ev);
-  for (const r of people) {
-    const text = [
-      `⏰ **Reminder:** you have not answered for **${ev.title}** yet.`,
-      `It starts <t:${unix(ev.start)}:F> (<t:${unix(ev.start)}:R>). Sign-ups close <t:${Math.floor(closeMs / 1000)}:R>.`,
-      `Tap a button below, or open the event here: ${appUrl()}/#/events/${ev.id}`,
-    ].join('\n');
-    const buttons = discord.linkButtons([
-      { label: '✅ Can come', url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'yes', closeMs)}` },
-      { label: "❌ Can't come", url: `${appUrl()}/rsvp/${makeRsvpToken(ev.id, r.id, 'no', closeMs)}` },
-    ]);
-    const res = await discord.sendDM(r.id, text, null, buttons);
-    if (!res.ok) failed.push({ id: r.id, name: r.name, error: res.error });
-  }
+  const { people, failed } = await sendReminderDMs(ev, `⏰ **Reminder:** you have not answered for **${ev.title}** yet.`);
   ev.reminderLog.push({ number: 'manual', manual: true, by, at: new Date().toISOString(), sent: people.length - failed.length, failed });
   save();
   console.log(`[reminder manual, by ${by}] ${ev.title}: ${people.length - failed.length}/${people.length} delivered`);
@@ -1301,6 +1270,31 @@ route('POST', '/api/admin/test-dm', async ({ user }) => {
   const res = await discord.sendDM(user.key, '✅ Guild Hall can send you direct messages. PINs and reminders will arrive like this.');
   return { ok: !!res.ok, error: res.error || '', bot: discord.botEnabled };
 }, { officer: true });
+
+// Admin > Testing: send a real DM with two live buttons to one or more picked players, so an officer can watch
+// end-to-end that DMs and button interactions actually work (the same mechanism reminders use - see
+// sendReminderDMs above and the dmtest: branch in the /discord/interactions handler below) before relying on
+// it for real. Single in-memory slot, never saved - a restart just loses it, same as the voice-attendance test.
+let dmTest = null;
+route('GET', '/api/admin/dm-test', () => dmTest || { id: null, players: [], results: {} }, { officer: true });
+route('POST', '/api/admin/dm-test/start', async ({ body, user }) => {
+  const keys = [...new Set((Array.isArray(body.playerKeys) ? body.playerKeys : []).map(String))].filter(Boolean);
+  need(keys.length, 400, 'Pick at least one player.');
+  const id = crypto.randomUUID();
+  dmTest = { id, startedAt: Date.now(), players: keys.map((k) => ({ key: k, name: nameOfOwner(k) })), results: {} };
+  const buttons = discord.actionButtons([{ label: 'Yes', style: 3, customId: `dmtest:${id}:yes` }, { label: 'No', style: 4, customId: `dmtest:${id}:no` }]);
+  for (const k of keys) {
+    const res = await discord.sendDM(k, 'This is a test, press any button to go further.', null, buttons);
+    if (!res.ok) dmTest.results[k] = { answer: null, error: res.error };
+  }
+  audit.log(user, 'dmtest.start', { type: 'guild' }, `${user.name} started a DM button test with ${keys.length} player(s).`);
+  return dmTest;
+}, { officer: true });
+route('POST', '/api/admin/dm-test/stop', ({ user }) => {
+  if (dmTest) audit.log(user, 'dmtest.stop', { type: 'guild' }, `${user.name} stopped the DM button test.`);
+  dmTest = null;
+  return { ok: true };
+}, { officer: true });
 // Characters created before Discord sign-in belong to a display name. This links them to a Discord player.
 route('POST', '/api/admin/link-owner', ({ body, user }) => {
   const from = clean(body.from, 40), to = clean(body.to, 40);
@@ -1425,31 +1419,53 @@ http.createServer(async (req, res) => {
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
   }
 
-  // A tap from the "Can come" / "Can't come" buttons on a reminder DM - no login, the token is the proof. A
-  // small standalone page, not the app shell, since the whole point is not needing to open the website.
-  if (url.pathname.startsWith('/rsvp/') && req.method === 'GET') {
-    const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const page = (title, body) => {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>${title}</title><style>body{background:#0e0a0c;color:#ebe5e3;font:17px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
-      .card{max-width:420px}h1{font-size:22px;margin:0 0 10px}p{color:#a39499;margin:0 0 6px}a{color:#e7879a}</style></head>
-      <body><div class="card"><h1>${title}</h1>${body}</div></body></html>`);
-    };
-    const t = readRsvpToken(url.pathname.slice('/rsvp/'.length));
-    if (!t) { page('This link has expired', '<p>Reminder links stop working once sign-ups close for that event. Open the site to answer instead.</p>'); return; }
-    const ev = findEvent(t.e);
-    if (!ev) { page('Event not found', '<p>This event may have been deleted.</p>'); return; }
-    const m = db.members.find((x) => x.owner === t.o && x.active);
-    if (!m) { page('Character not found', '<p>We could not find your character. Open the site to answer instead.</p>'); return; }
-    if (Date.now() >= closeAt(ev)) { page('Sign-ups are closed', `<p>Sign-ups for <b>${escHtml(ev.title)}</b> already closed.</p>`); return; }
-    if (t.a === 'yes' && ev.maxSignups) {
-      const going = Object.entries(ev.rsvps).filter(([id, s]) => s === 'yes' && Number(id) !== m.id).length;
-      if (going >= ev.maxSignups) { page('This event is full', `<p><b>${escHtml(ev.title)}</b> has no open spots left. Open the site to see where you stand.</p>`); return; }
+  // A tap on the "Can come" / "Can't come" buttons on a reminder DM. Discord POSTs the click here as an
+  // "Interaction" (set as this app's Interactions Endpoint URL in the Discord Developer Portal - see
+  // README.md "Discord setup") instead of opening anything in a browser; the reply below edits that same DM
+  // message in place, so the player never leaves Discord. Needs the *raw* body for signature verification,
+  // so this reads the request itself rather than going through readBody()'s JSON-eager parser.
+  if (url.pathname === '/discord/interactions' && req.method === 'POST') {
+    try {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      const raw = Buffer.concat(chunks);
+      const sig = req.headers['x-signature-ed25519'];
+      const ts = req.headers['x-signature-timestamp'];
+      if (!discord.verifyInteraction(sig, ts, raw)) { res.writeHead(401); res.end('bad signature'); return; }
+      let interaction;
+      try { interaction = JSON.parse(raw.toString()); } catch { res.writeHead(400); res.end('bad request'); return; }
+      if (interaction.type === 1) { return send(res, 200, { type: 1 }); }                 // PING, sent once when the portal verifies the URL
+      if (interaction.type === 3 && typeof interaction.data?.custom_id === 'string' && interaction.data.custom_id.startsWith('rsvp:')) {
+        const [, eventId, answer] = interaction.data.custom_id.split(':');
+        const update = (content) => send(res, 200, { type: 7, data: { content, components: [] } }); // edits the clicked DM message itself
+        const ev = findEvent(eventId);
+        if (!ev) return update('This event could not be found (it may have been deleted).');
+        const clickerId = (interaction.user || interaction.member?.user || {}).id;
+        const m = db.members.find((x) => x.owner === clickerId && x.active);
+        if (!m) return update('We could not find your character for this. Please open the site to answer instead.');
+        if (Date.now() >= closeAt(ev)) return update(`Sign-ups for **${ev.title}** are already closed.`);
+        if (answer === 'yes' && ev.maxSignups) {
+          const going = Object.entries(ev.rsvps).filter(([id, s]) => s === 'yes' && Number(id) !== m.id).length;
+          if (going >= ev.maxSignups) return update(`**${ev.title}** has no open spots left. Open the site to see where you stand.`);
+        }
+        ev.rsvps[m.id] = answer === 'yes' ? 'yes' : 'no';
+        save();
+        return update(answer === 'yes' ? '✅ You have signed up for this event.' : '🚫 You have signed off for this event.');
+      }
+      if (interaction.type === 3 && typeof interaction.data?.custom_id === 'string' && interaction.data.custom_id.startsWith('dmtest:')) {
+        const [, testId, answer] = interaction.data.custom_id.split(':');
+        const update = (content) => send(res, 200, { type: 7, data: { content, components: [] } }); // edits the clicked DM message itself
+        if (!dmTest || dmTest.id !== testId) return update('This test is no longer running.');
+        const clickerId = (interaction.user || interaction.member?.user || {}).id;
+        if (!dmTest.players.some((p) => p.key === clickerId)) return update('You were not part of this test.');
+        dmTest.results[clickerId] = { answer, at: Date.now() };
+        return update(`You clicked ${answer === 'yes' ? 'Yes' : 'No'}.`);
+      }
+      res.writeHead(400); res.end('unrecognized interaction');
+    } catch (e) {
+      console.error('discord interaction:', e);
+      if (!res.headersSent) send(res, 200, { type: 4, data: { content: 'Something went wrong handling that. Please open the site instead.', flags: 64 } });
     }
-    ev.rsvps[m.id] = t.a;
-    save();
-    page(t.a === 'yes' ? "You're marked as Going" : "You're marked as Can't come", `<p><b>${escHtml(m.name)}</b> for <b>${escHtml(ev.title)}</b>. Changed your mind? <a href="${appUrl()}/#/events/${ev.id}">Open the event</a> any time.</p>`);
     return;
   }
   if (url.pathname === '/api/logout' && req.method === 'POST') {

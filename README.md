@@ -42,7 +42,10 @@ no dependencies: just Node 18+ and one JSON file of data.
   attendance percentage once that time has passed, not the moment it starts or the moment any single person happens to check in, so nobody
   still inside their own valid PIN window gets wrongly counted as a no-show. A player over a limit gets a **full-screen pop-up asking for a reason** when they open the site. The pop-up only goes away
   once they typed a reason and sent it for approval; the leadership accepts or rejects it under Approvals (a rejected one asks again, with the
-  answer). Too many no-shows or unanswered events also give an **automatic warning**, once per new offence. The **Warnings** page lists them
+  answer). Too many no-shows or unanswered events also give an **automatic warning**, once per new offence - but a reason that is still
+  waiting for a decision, or that was approved, holds that warning back for exactly the no-shows or no-replies it covers, so a player who
+  explains themselves before the automatic check gets to them isn't warned for the same thing the pop-up already asked about. A rejected
+  reason stops covering anything, and a later, different no-show is still its own new offence either way. The **Warnings** page lists them
   (a member only sees their own) and a player's active warnings always show on their dashboard. Warnings end by themselves after N
   days, or when there was no new warning for N quiet days (the oldest few or all of them vanish), or when the leadership removes them
   one at a time, or **all at once** for a player with the "Clear all" button on the Warnings page. With N active warnings a player is
@@ -129,11 +132,11 @@ no dependencies: just Node 18+ and one JSON file of data.
   - **Reminders**: players who have not answered get a Discord message at editable times before the event
     (default 5 h and 2 h). Reminders stop when sign-ups close, and can be switched off per event. The message
     includes two one-tap buttons, **Can come** / **Can't come**, for anyone who would rather not open the site
-    right now - tapping one answers immediately and shows a small "got it" confirmation, no sign-in needed. These
-    are Discord link buttons: tapping one just opens a page, the same as tapping a normal link, so they work with
-    nothing more than what this bot already does (no Gateway connection, no public interactions endpoint, neither
-    of which this project asks a self-hosted server to run). Each button stops working once sign-ups close for
-    that event, same as the reminder itself.
+    right now - tapping one is answered right inside Discord: the message itself changes to "You have signed up
+    for this event" or "You have signed off for this event", no site ever opens and no sign-in is needed. This
+    needs the one-time **Interactions Endpoint** setup (see "Discord setup" step 8) - without it the buttons show
+    "This interaction failed" instead, though the reminder and its plain event link still arrive either way. Each
+    button stops working once sign-ups close for that event, same as the reminder itself.
 - **Going chart**: every event shows how many are going, not going and have not answered, per role (Tank, Healer, DPS), as bars or as rings.
   People on leave are shown separately instead of as "no reply".
 - **Hidden presets**: the leadership can hide a party preset from normal members. The "use for several events" panel on the Parties page is a
@@ -205,6 +208,16 @@ Do this once. It takes about 10 minutes. You need to be an admin of your Discord
    `npm run check-discord`. It goes through everything and tells you in plain words what works. See "Testing your bot" below.
 7. **Start the app** (`start.bat`, `docker compose up -d`, or `node server.js`). The start-up log says
    `Sign-in: Discord` and `Discord bot: on`. Sign in, open **Admin > Discord**, press *Check the connection*, then *Send me a test message*.
+8. **Reminder buttons (optional, needs the app reachable on the internet first).** The "Can come / Can't come"
+   buttons on reminder DMs answer right inside Discord - no browser opens - but that needs Discord to be able to
+   reach your app directly. With the app already running at its real `PUBLIC_URL` (not `localhost`): open the
+   Developer Portal application, *General Information*, copy the **Public Key** into `.env` as `DISCORD_PUBLIC_KEY`,
+   restart the app, then on that same page set **Interactions Endpoint URL** to `PUBLIC_URL/discord/interactions`
+   and save. Discord sends a test ping immediately and only saves the URL if it answers correctly - if it refuses
+   to save, double check the app is actually running and reachable at that address first. Skip this step and a
+   button click shows the player "This interaction failed" in Discord instead of recording anything - reminders
+   themselves still send fine either way, and the plain event link in the same message always works as a
+   fallback, so do this before telling players to use the buttons.
 
 ### Testing your bot
 

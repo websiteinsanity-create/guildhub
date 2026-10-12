@@ -1,14 +1,30 @@
-// Discord integration for Guild Hall (no dependencies, uses Node's built-in fetch).
+// Discord integration for Guild Hall (no dependencies, uses Node's built-in fetch and crypto).
 //
 //  1. "Sign in with Discord" (OAuth2). Only members of your Discord server can sign in; their Discord roles
 //     decide who is an officer.
 //  2. Direct messages from a bot: attendance PINs and "you have not answered" reminders.
+//  3. Reminder DM buttons answer inside Discord itself (a Message Component interaction), handled by
+//     verifyInteraction() below plus the /discord/interactions route in server.js.
 //
 // Everything is configured with environment variables, see README.md ("Discord setup").
 
+const crypto = require('crypto');
 const csv = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isSnowflake = (v) => /^\d{15,25}$/.test(String(v));
+
+// Discord's interaction signatures are plain Ed25519 over (timestamp + rawBody), verified with the
+// application's Public Key (Developer Portal > General Information). Node's crypto can verify Ed25519
+// natively since v12 - it just wants the raw 32-byte key wrapped in its fixed SPKI/DER header, which is
+// always the same 12 bytes for every Ed25519 key, so no real ASN.1 parsing is needed. No npm dependency
+// (discord-interactions or tweetnacl, which most examples reach for) required for this.
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+function ed25519PublicKey(hex) {
+  const raw = Buffer.from(hex, 'hex');
+  if (raw.length !== 32) return null;
+  try { return crypto.createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, raw]), format: 'der', type: 'spki' }); }
+  catch { return null; }
+}
 
 function createDiscord(env = process.env) {
   const cfg = {
@@ -20,6 +36,7 @@ function createDiscord(env = process.env) {
     officerRoleIds: csv(env.DISCORD_OFFICER_ROLE_IDS),    // members with one of these roles are officers
     officerUserIds: csv(env.DISCORD_OFFICER_USER_IDS),    // or list Discord user IDs directly
     publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''), // where this app is reachable, e.g. https://guild.example.com
+    publicKey: env.DISCORD_PUBLIC_KEY || '',              // Developer Portal > General Information - verifies reminder-button clicks
     apiBase: (env.DISCORD_API_BASE || 'https://discord.com/api/v10').replace(/\/+$/, ''),
     authorizeUrl: env.DISCORD_AUTHORIZE_URL || 'https://discord.com/oauth2/authorize',
     dmDelayMs: Number(env.DISCORD_DM_DELAY_MS ?? 600),    // pause between DMs so Discord's rate limit is respected
@@ -86,6 +103,33 @@ function createDiscord(env = process.env) {
   // nothing beyond the plain REST calls this file already makes (no Gateway connection, no interactions
   // endpoint - a real limitation of a bot with no public, always-on server to receive those).
   const linkButtons = (buttons) => [{ type: 1, components: buttons.slice(0, 5).map((b) => ({ type: 2, style: 5, label: b.label, url: b.url })) }];
+
+  // Real (non-link) buttons: a click is POSTed by Discord to /discord/interactions instead of just opening a
+  // url on the player's own device, so the bot can answer right there - no website ever opens. Unlike
+  // linkButtons, there is no token to embed: Discord's own signed interaction payload already says exactly
+  // who clicked (interaction.user.id in a DM), so a custom_id only needs to carry whatever the receiving route
+  // needs to make sense of the click (an event id, a test id, ...) plus the choice itself.
+  // buttons: [{ label, style (1-4, default 3/green), customId }], up to 5, one row.
+  const actionButtons = (buttons) => [{ type: 1, components: buttons.slice(0, 5).map((b) => ({ type: 2, style: b.style || 3, label: b.label, custom_id: b.customId })) }];
+  const rsvpButtons = (eventId) => actionButtons([
+    { label: '✅ Can come', style: 3, customId: `rsvp:${eventId}:yes` },
+    { label: "❌ Can't come", style: 4, customId: `rsvp:${eventId}:no` },
+  ]);
+
+  // signatureHex/timestamp come from the X-Signature-Ed25519 / X-Signature-Timestamp headers Discord sends
+  // with every interaction request; rawBody must be the exact, unparsed request body bytes - verifying
+  // against a re-serialized JSON.stringify(JSON.parse(body)) would fail for most real payloads (key order,
+  // whitespace), which is why server.js must collect the raw bytes for this route instead of using the
+  // ordinary JSON-eager body reader.
+  function verifyInteraction(signatureHex, timestamp, rawBody) {
+    if (!cfg.publicKey || !signatureHex || !timestamp) return false;
+    const key = ed25519PublicKey(cfg.publicKey);
+    if (!key) return false;
+    try {
+      const message = Buffer.concat([Buffer.from(String(timestamp)), Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody)]);
+      return crypto.verify(null, message, key, Buffer.from(signatureHex, 'hex'));
+    } catch { return false; }
+  }
 
   // file (optional): { name, type, buffer } - same shape postMessage() already uses for channel pictures. A DM
   // with a file has to go through the same multipart upload Discord needs for any attachment, so this branch
@@ -205,7 +249,7 @@ function createDiscord(env = process.env) {
 
   const avatarUrl = (u) => (u && u.avatar && isSnowflake(u.id) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '');
 
-  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons };
+  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons, rsvpButtons, actionButtons, verifyInteraction };
 }
 
 module.exports = { createDiscord, isSnowflake };

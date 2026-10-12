@@ -177,6 +177,38 @@ withServer('too many no-shows: pop-up asks for a reason, the leadership answers,
   assert.equal(later.warnings.filter((w) => w.status === 'active').length, 2, 'the new no-show is a second warning');
 });
 
+// Reported bug: a player explains their no-shows, the leadership approves it, but the automatic warning check
+// still goes ahead and warns them for the very offences they were just excused for - because runChecks() only
+// ever looked at the warnings it had already handed out (lastUpTo), never at explanations at all. An approved
+// (or even still-pending) explanation has to actually hold the automatic warning back, not just silence the
+// "please explain" pop-up while a warning fires behind it anyway.
+withServer('an explanation sent and approved before the automatic check ever runs stops that warning from firing', async (s) => {
+  const c = await cast(s);
+  await rules(s, { noShowLimit: 2, noReplyLimit: 0, minAttendance: 0, windowDays: 30, expiryDays: 10 });
+  await pastEvent(s, 2, { came: [c.bob], yes: [c.ann, c.bob] });
+  await pastEvent(s, 1, { came: [c.bob], yes: [c.ann, c.bob] });
+  // Ann explains and is approved *before* the compliance check has ever run once - nothing has been warned yet.
+  const x = (await s.call('/api/explanations', 'POST', { reason: 'Family emergency both times, sorry.' }, s.ann)).body;
+  await s.call('/api/explanations/' + x.id, 'PUT', { status: 'approved' }, s.officer);
+  await run(s);
+  const approved = await state(s, 'ann');
+  assert.equal(approved.warnings.length, 0, 'the two no-shows were already explained and approved - no warning for them');
+  assert.equal(approved.alert, null, 'and the pop-up stays gone too');
+
+  // A pending (not yet decided) explanation holds the warning back the same way, giving the leadership a real
+  // window to review it instead of a race against the next tick of the automatic check.
+  await pastEvent(s, 0.3, { came: [c.bob], yes: [c.ann, c.bob] });        // a third, new no-show for Ann
+  const x2 = (await s.call('/api/explanations', 'POST', { reason: 'Still catching up, one more explanation.' }, s.ann)).body;
+  assert.equal(x2.status, 'pending');
+  await run(s);
+  assert.equal((await state(s, 'ann')).warnings.length, 0, 'a pending explanation holds the warning back too');
+
+  // Rejecting it removes the cover - the very next check is free to warn for it.
+  await s.call('/api/explanations/' + x2.id, 'PUT', { status: 'rejected', note: 'Not convincing' }, s.officer);
+  await run(s);
+  assert.equal((await state(s, 'ann')).warnings.length, 1, 'a rejected explanation no longer blocks the warning');
+});
+
 withServer('warnings run out by a timer, by a quiet period, or by the leadership; enough active warnings disqualify', async (s) => {
   const c = await cast(s);
   await rules(s, { noShowLimit: 1, noReplyLimit: 0, minAttendance: 0, expiryDays: 10, quietDays: 0, disqualifyAt: 2 });
