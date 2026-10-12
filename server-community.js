@@ -4,6 +4,7 @@
 //   - the Discord connection check, the invite link for the bot, the channel for party pictures
 //   - "Post to Discord": the picture of the parties of an event goes into a channel
 
+const crypto = require('crypto');
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 module.exports = function install(ctx) {
@@ -107,6 +108,13 @@ module.exports = function install(ctx) {
     const out = {
       login: discord.loginEnabled, bot: discord.botEnabled, redirectUri: discord.loginEnabled ? discord.redirectUri() : '', guildIdSet: !!discord.cfg.guildId,
       memberRole: !!discord.cfg.memberRoleId, inviteUrl: discord.inviteUrl(false), inviteUrlWithRoles: discord.inviteUrl(true), channels: [], roles: [],
+      // Lets an officer confirm the *running* app actually has the right DISCORD_PUBLIC_KEY loaded, without ever
+      // showing the key itself - compare this short fingerprint against the one for the value in the Developer
+      // Portal. Useful after a deploy where it's unclear whether a changed .env value actually reached the
+      // container (a common gap with Docker: editing .env or a dashboard's env vars does not update an already
+      // running container - that needs a restart/recreate that actually re-reads the new value).
+      publicKeySet: !!discord.cfg.publicKey,
+      publicKeyFingerprint: discord.cfg.publicKey ? crypto.createHash('sha256').update(discord.cfg.publicKey).digest('hex').slice(0, 16) : null,
     };
     if (discord.botEnabled) {
       const [b, g, c, ro] = await Promise.all([discord.botInfo(), discord.guildInfo(), discord.listChannels(), discord.listRoles()]);
