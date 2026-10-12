@@ -8,6 +8,19 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { startFakeDiscord } = require('./fake-discord');
+const crypto = require('node:crypto');
+
+// A throwaway Ed25519 keypair standing in for the one Discord would generate for a real application - the
+// public half goes into DISCORD_PUBLIC_KEY (as the server would get it from the Developer Portal), the
+// private half signs fake interaction requests here exactly the way Discord signs real ones.
+const interactionKeys = crypto.generateKeyPairSync('ed25519');
+const interactionPublicKeyHex = interactionKeys.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex');
+function signedInteraction(bodyObj) {
+  const body = JSON.stringify(bodyObj);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = crypto.sign(null, Buffer.concat([Buffer.from(timestamp), Buffer.from(body)]), interactionKeys.privateKey).toString('hex');
+  return { body, headers: { 'Content-Type': 'application/json', 'X-Signature-Ed25519': signature, 'X-Signature-Timestamp': timestamp } };
+}
 
 const GUILD = '111111111111111111', OFFICER_ROLE = '900000000000000001';
 const A = '100000000000000001', B = '100000000000000002', C = '100000000000000003', D = '100000000000000004', OUTSIDER = '100000000000000009';
@@ -29,6 +42,7 @@ async function startServer(seedDb) {
       ...process.env, PORT: String(port), DATA_DIR: dir, SCHEDULER_INTERVAL_MS: '300', DISCORD_DM_DELAY_MS: '0',
       DISCORD_CLIENT_ID: '555', DISCORD_CLIENT_SECRET: 'shh', PUBLIC_URL: base, DISCORD_GUILD_ID: GUILD,
       DISCORD_OFFICER_ROLE_IDS: OFFICER_ROLE, DISCORD_BOT_TOKEN: 'bot-token', DISCORD_API_BASE: fake.url,
+      DISCORD_PUBLIC_KEY: interactionPublicKeyHex,
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -303,26 +317,49 @@ test('reminders go only to players who have not answered, at the editable times'
   assert.equal(log.length, 1); assert.equal(log[0].number, 1);
   assert.equal((await state('B')).events.find((e) => e.id === in3h.id).reminderLog, undefined);
 
-  // the reminder also carries two one-tap buttons, each a direct link (no interaction sent to the bot at all -
-  // see linkButtons() in discord.js) to a signed /rsvp/ page that needs no login
+  // the reminder carries two real (non-link) buttons - a click is answered inside Discord itself, by POSTing
+  // a signed Interaction to /discord/interactions, not by opening any website
   const dmB = threeH.find((d) => d.to === B);
   assert.equal(dmB.components.length, 1, 'one action row');
   const [goBtn, noBtn] = dmB.components[0].components;
-  assert.equal(goBtn.style, 5, 'a LINK-style button, not one that would need an interactions endpoint');
+  assert.equal(goBtn.url, undefined, 'not a LINK-style button any more');
   assert.match(goBtn.label, /Can come/); assert.match(noBtn.label, /Can't come/);
-  assert.match(goBtn.url, /\/rsvp\//); assert.match(noBtn.url, /\/rsvp\//);
+  assert.equal(goBtn.custom_id, `rsvp:${in3h.id}:yes`); assert.equal(noBtn.custom_id, `rsvp:${in3h.id}:no`);
 
-  const r1 = await fetch(goBtn.url);
+  const click = async (customId, userId) => {
+    const { body, headers } = signedInteraction({ type: 3, data: { custom_id: customId }, user: { id: userId } });
+    const res = await fetch(`${base}/discord/interactions`, { method: 'POST', headers, body });
+    return { status: res.status, body: await res.json() };
+  };
+
+  const r1 = await click(goBtn.custom_id, lead.owner);
   assert.equal(r1.status, 200);
-  const html1 = await r1.text();
-  assert.match(html1, /marked as Going/);
-  assert.equal((await state('A')).events.find((e) => e.id === in3h.id).rsvps[lead.id], 'yes', 'actually recorded, no login involved at all');
+  assert.equal(r1.body.type, 7, 'UPDATE_MESSAGE - edits the clicked DM in place');
+  assert.equal(r1.body.data.content, '✅ You have signed up for this event.');
+  assert.deepEqual(r1.body.data.components, [], 'buttons are removed once answered');
+  assert.equal((await state('A')).events.find((e) => e.id === in3h.id).rsvps[lead.id], 'yes', 'actually recorded, no login or redirect involved at all');
 
-  const badToken = await fetch(goBtn.url.slice(0, -3) + 'xyz');
-  assert.equal((await badToken.text()).includes('expired'), true, 'a tampered token is rejected, not silently accepted');
+  const r2 = await click(noBtn.custom_id, lead.owner);
+  assert.equal(r2.body.data.content, '🚫 You have signed off for this event.');
+  assert.equal((await state('A')).events.find((e) => e.id === in3h.id).rsvps[lead.id], 'no');
 
-  const closedBtn = (await fetch(`${base}/rsvp/doesnotexist`));
-  assert.match(await closedBtn.text(), /expired/);
+  // tampered/unsigned requests are rejected, not silently accepted
+  const tampered = await fetch(`${base}/discord/interactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Signature-Ed25519': '00'.repeat(64), 'X-Signature-Timestamp': String(Math.floor(Date.now() / 1000)) },
+    body: JSON.stringify({ type: 3, data: { custom_id: goBtn.custom_id }, user: { id: A } }),
+  });
+  assert.equal(tampered.status, 401);
+
+  // a PING (sent once by the Developer Portal when the Interactions Endpoint URL is first configured) gets a plain PONG
+  const { body: pingBody, headers: pingHeaders } = signedInteraction({ type: 1 });
+  const ping = await fetch(`${base}/discord/interactions`, { method: 'POST', headers: pingHeaders, body: pingBody });
+  assert.deepEqual(await ping.json(), { type: 1 });
+
+  // an event that no longer exists is handled gracefully, not a crash
+  const { body: missingBody, headers: missingHeaders } = signedInteraction({ type: 3, data: { custom_id: 'rsvp:999999:yes' }, user: { id: A } });
+  const missing = await fetch(`${base}/discord/interactions`, { method: 'POST', headers: missingHeaders, body: missingBody });
+  assert.match((await missing.json()).data.content, /could not be found/);
 
   // moving the event restarts its reminders; switching them off globally stops everything
   assert.equal((await call('/api/settings', 'PUT', { remindersEnabled: false }, 'A')).status, 200);
@@ -715,4 +752,49 @@ test('a Discord role or a specific player can be granted officer status from Adm
   assert.equal((await state('norole2')).user.role, 'officer', 'a specific player can be made an officer even with no special role at all');
 
   await call('/api/admin/officers', 'PUT', { roleIds: [], userIds: [] }, 'A');
+});
+
+// ---------------------------------------------------------------- Admin > Testing: the DM button test
+test('Admin > Testing can send a live DM button test to picked players and watch what each one clicks', async () => {
+  assert.equal((await call('/api/admin/dm-test/start', 'POST', { playerKeys: [B] }, 'B')).status, 403, 'members cannot run this');
+  assert.equal((await call('/api/admin/dm-test/start', 'POST', { playerKeys: [] }, 'A')).status, 400, 'needs at least one player');
+
+  const started = await call('/api/admin/dm-test/start', 'POST', { playerKeys: [B, C] }, 'A');
+  assert.equal(started.status, 200);
+  assert.equal(started.body.players.length, 2);
+  assert.deepEqual(started.body.results, {}, 'nobody has answered yet');
+
+  const dm = fake.state.dms.filter((d) => d.content === 'This is a test, press any button to go further.');
+  assert.deepEqual(dm.map((d) => d.to).sort(), [B, C].sort());
+  const [goBtn, noBtn] = dm[0].components[0].components;
+  assert.equal(goBtn.url, undefined, 'a real button, not a link');
+  assert.equal(goBtn.label, 'Yes'); assert.equal(noBtn.label, 'No');
+  assert.equal(goBtn.custom_id, `dmtest:${started.body.id}:yes`);
+
+  const click = async (customId, userId) => {
+    const { body, headers } = signedInteraction({ type: 3, data: { custom_id: customId }, user: { id: userId } });
+    const res = await fetch(`${base}/discord/interactions`, { method: 'POST', headers, body });
+    return { status: res.status, body: await res.json() };
+  };
+  const r = await click(goBtn.custom_id, B);
+  assert.equal(r.body.type, 7);
+  assert.equal(r.body.data.content, 'You clicked Yes.');
+  assert.deepEqual(r.body.data.components, []);
+
+  const mid = await call('/api/admin/dm-test', 'GET', null, 'A');
+  assert.equal(mid.body.results[B].answer, 'yes');
+  assert.equal(mid.body.results[C], undefined, 'C has not clicked anything yet');
+
+  const r2 = await click(noBtn.custom_id, C);
+  assert.equal(r2.body.data.content, 'You clicked No.');
+  assert.equal((await call('/api/admin/dm-test', 'GET', null, 'A')).body.results[C].answer, 'no');
+
+  // an outsider clicking a stale/foreign custom_id is handled gracefully, not a crash
+  const stranger = await click(goBtn.custom_id, OUTSIDER);
+  assert.match(stranger.body.data.content, /not part of this test/);
+
+  assert.equal((await call('/api/admin/dm-test/stop', 'POST', null, 'A')).status, 200);
+  assert.equal((await call('/api/admin/dm-test', 'GET', null, 'A')).body.id, null, 'the slot is cleared');
+  const afterStop = await click(goBtn.custom_id, B);
+  assert.match(afterStop.body.data.content, /no longer running/);
 });

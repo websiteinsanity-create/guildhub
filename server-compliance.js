@@ -149,13 +149,20 @@ module.exports = function install(ctx) {
       for (const [owner, chars] of players()) {
         if (isLeader(owner, chars)) continue;
         const s = playerStats(owner, chars, t);
+        // Mirrors alertFor()'s own "an explanation covers everything up to the latest missed event it was
+        // written about" rule - a pending explanation gets its review window before being turned into a
+        // warning behind the leadership's back, and an approved one is the leadership saying "this one's
+        // excused," which has to actually mean something here, not just silence the pop-up while the warning
+        // fires anyway. A rejected explanation stops covering anything, same as if it had never been sent -
+        // the very next tick of this function is free to warn for it.
+        const explainedUpTo = D.explanations.filter((x) => x.ownerKey === owner && (x.status === 'pending' || x.status === 'approved')).map((x) => x.upTo || '').sort().pop() || '';
         for (const [kind, limit, label, offence] of [
           ['noshow', c.noShowLimit, 'no-shows', (x) => x.status === 'noshow'],
           ['noreply', c.noReplyLimit, 'events without an answer', (x) => !x.replied && x.status !== 'leave'],
         ]) {
           if (!limit || s[kind] < limit) continue;
           const lastUpTo = D.warnings.filter((w) => w.ownerKey === owner && w.kind === kind && w.auto).map((w) => w.upTo || w.at).sort().pop() || '';
-          const fresh = s.list.filter((x) => offence(x) && x.ev.start > lastUpTo);      // needs a newer offence than the ones the last warning was about
+          const fresh = s.list.filter((x) => offence(x) && x.ev.start > lastUpTo && x.ev.start > explainedUpTo);      // needs a newer offence than the ones the last warning (or a covering explanation) was about
           if (!fresh.length) continue;
           const w = addWarning({ owner, kind, auto: true, reason: `${s[kind]} ${label} in the last ${c.windowDays} days (limit ${limit})` });
           w.upTo = s.list.filter(offence).map((x) => x.ev.start).sort().pop();
