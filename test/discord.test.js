@@ -604,6 +604,11 @@ test('the connection check tells the leadership what works, and the invite link 
   assert.deepEqual(c.channels.map((x) => x.name), ['general', 'parties'], 'only text channels, in the order of the server');
   assert.match(c.inviteUrl, /client_id=555&scope=bot&permissions=35840/);
   assert.match(c.inviteUrlWithRoles, /permissions=268471296/);
+  // The connection check also reports a short, non-secret fingerprint of the loaded DISCORD_PUBLIC_KEY, so an
+  // officer can confirm the *running* process actually has the right value (a common gap after deploys where a
+  // changed .env/dashboard value never reaches an already-running container) without ever exposing the key itself.
+  assert.equal(c.publicKeySet, true);
+  assert.equal(c.publicKeyFingerprint, crypto.createHash('sha256').update(interactionPublicKeyHex).digest('hex').slice(0, 16));
   fake.state.botInGuild = false;
   const bad = (await call('/api/admin/discord-check', 'GET', null, 'A')).body;
   assert.match(bad.guildError, /not in your Discord server/); assert.deepEqual(bad.channels, []);
