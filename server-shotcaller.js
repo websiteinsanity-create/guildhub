@@ -122,6 +122,15 @@ module.exports = function install(ctx) {
     clearAutoFinishTimer(ev.id);
     autoFinishTimers.set(ev.id, setTimeout(() => { const fresh = findEvent(ev.id); if (fresh) finishVoiceTracking(fresh, null); }, AUTO_FINISH_MS));
   }
+  // Some Shotcaller bot builds only report a per-party headcount (parties[].connected), not who specifically
+  // is in each channel (no connectedStates or connectedUserIds at all) - enough for party management, but
+  // voice-attendance crediting (pollVoiceAttendance below) has no ids to match members against, so it would
+  // silently never credit anyone, forever, with nothing on screen to explain why. Detected once when tracking
+  // begins and surfaced on the dashboard's Attendance Tracking card (features.js) instead.
+  function presenceUnsupported(status) {
+    const parties = (status && status.parties) || [];
+    return parties.length > 0 && parties.every((p) => !Array.isArray(p.connectedStates) && !Array.isArray(p.connectedUserIds));
+  }
   function beginVoiceTracking(ev, started, realRest) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
     if (!started || !Array.isArray(started.parties)) return;
@@ -140,6 +149,11 @@ module.exports = function install(ctx) {
       .concat(realRest.map((p, i) => ({ channelId: started.parties[i + 1] && started.parties[i + 1].channelId, members: [...p.members] })))
       .filter((pc) => pc.channelId);
     ev.voiceTracking = { active: true, partyChannels, seenAt: {}, startedAt: Date.now(), finishedAt: null };
+    if (presenceUnsupported(started)) {
+      ev.voiceTracking.presenceUnsupported = true;
+      audit({ name: 'Guild Hall' }, 'event.voicetrack.unsupported', { type: 'event', id: ev.id, name: ev.title },
+        `Voice-attendance tracking started for "${ev.title}", but the Shotcaller bot in use only reports a headcount per channel, not who is in it - nobody will be credited until the bot reports per-user voice presence.`);
+    }
     clearAutoFinishTimer(ev.id);
     save();
   }
@@ -213,7 +227,7 @@ module.exports = function install(ctx) {
         }
       } catch { /* bot unreachable right now just reads back as 0 - not worth failing the whole panel over */ }
     }
-    return { active: !!(vt && vt.active), startedAt: (vt && vt.startedAt) || null, finishedAt: (vt && vt.finishedAt) || null, trackedCount, deafenedCount, noShowCount };
+    return { active: !!(vt && vt.active), startedAt: (vt && vt.startedAt) || null, finishedAt: (vt && vt.finishedAt) || null, trackedCount, deafenedCount, noShowCount, presenceUnsupported: !!(vt && vt.presenceUnsupported) };
   }, { officer: true });
 
   // Two independent checks - mic-muted and deafened don't have to come together to be excluded any more.

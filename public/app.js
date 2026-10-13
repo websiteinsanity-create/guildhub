@@ -215,6 +215,12 @@ const enc = encodeURIComponent;
 const classPreviewText = (a, b) => { const c = classFor(a, b); return c ? 'Class: ' + c : a && b && a !== b ? 'Class: this pair has no name in the list yet (it works, the weapons are shown instead)' : 'Class: pick two different weapons'; };
 // Leave of absence and warnings (the server sends the leadership everything and a member only their own).
 const guildDate = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: S.cfg.defaultTimezone || 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+// The guild's "day" for scheduling purposes doesn't flip at local midnight - it flips at 4am in the guild's
+// own reference zone (Europe/Berlin by default), matching the game's own daily reset, so every member sees
+// the same "today" on the Daily Schedule panel no matter which real-world timezone they're sitting in.
+// Shifting the instant back 4 hours before bucketing it by guildDate means anything from 00:00-03:59 local
+// still counts as belonging to the previous day.
+const gameDay = (ms) => guildDate(ms - 4 * 3600000);
 const onLeaveAt = (owner, ms) => { const d = guildDate(ms); return (S.leaves || []).some((l) => l.ownerKey === owner && l.status === 'approved' && l.from <= d && d <= l.to); };
 const activeWarn = (owner) => (S.warnings || []).filter((w) => w.ownerKey === owner && w.status === 'active');
 const isDisqualified = (owner) => { const n = (S.settings.compliance || {}).disqualifyAt || 0; return n > 0 && activeWarn(owner).length >= n; };

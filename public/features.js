@@ -962,6 +962,7 @@ function attVoiceControls(ev) {
         </div>
       </div>
     </div>
+    ${(running || awaitingSave) && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
     <div class="att-sect att-action">
       ${running
         ? `<button class="btn att-running-btn" disabled><span class="sc-spinner"></span> Running</button>`
@@ -996,7 +997,10 @@ VIEWS.dashboard = () => {
   const { order, hidden } = dashPrefs(), off = isOfficer();
   const active = S.members.filter((m) => m.active);
   const leaders = active.filter((m) => LEAD().includes(m.rank)).sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank) || a.name.localeCompare(b.name));
-  const upcoming = S.events.filter((e) => new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start));
+  // Daily Schedule only ever shows today's events, "today" meaning the guild's own 4am-cutover game day
+  // (gameDay, app.js) rather than each viewer's local midnight - otherwise a guild spread across time zones
+  // would each see a different cutoff, and everyone with events days out would see them creep onto the panel.
+  const upcoming = S.events.filter((e) => gameDay(new Date(e.start).getTime()) === gameDay(Date.now())).sort((a, b) => new Date(a.start) - new Date(b.start));
   const ann = brand().announcement;
   const showLeadership = !hidden.has('leadership') && (off || !hiddenFromMembers('leadership'));
   const showNext = !hidden.has('next');
