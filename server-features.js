@@ -487,6 +487,11 @@ module.exports = function install(ctx) {
     const D = db(), st = D.settings, touched = [];
     if (body.approvals && typeof body.approvals === 'object') { for (const g of groups) if (body.approvals[g.key] !== undefined) st.approvals[g.key] = yes(body.approvals[g.key]); touched.push('approval requirements'); }
     if (Array.isArray(body.hiddenSections)) { st.hiddenSections = [...new Set(body.hiddenSections.filter((k) => HIDEABLE.has(k)))]; touched.push('what members can see'); }
+    if (Array.isArray(body.classOrder)) {
+      const names = new Set((config.classes || []).map((c) => c.name));
+      st.classOrder = [...new Set(body.classOrder.filter((n) => names.has(n)))];
+      touched.push('class order');
+    }
     if (body.branding && typeof body.branding === 'object') {
       const b = st.branding, x = body.branding;
       if (x.name !== undefined) b.name = clean(x.name, 40);
@@ -530,7 +535,7 @@ module.exports = function install(ctx) {
   route('PUT', '/api/prefs', ({ body, user }) => {
     const D = db(), ok = (arr) => [...new Set((Array.isArray(arr) ? arr : []).filter((k) => PANEL_KEYS.includes(k)))];
     const cur = D.prefs[user.key] || {}, next = { ...cur };
-    need(isOfficer(user) || (body.dashboardHidden === undefined && body.dashboardOrder === undefined), 403, 'Only the leadership can change the dashboard layout.');
+    need(isOfficer(user) || (body.dashboardHidden === undefined && body.dashboardOrder === undefined && body.quickShotcaller === undefined), 403, 'Only the leadership can change this.');
     if (body.dashboardHidden !== undefined) next.dashboardHidden = ok(body.dashboardHidden);
     if (body.dashboardOrder !== undefined) next.dashboardOrder = ok(body.dashboardOrder);
     if (body.dashboardHidden !== undefined || body.dashboardOrder !== undefined) { next.dashboardHidden = next.dashboardHidden || []; next.dashboardOrder = next.dashboardOrder || []; }
@@ -538,6 +543,19 @@ module.exports = function install(ctx) {
       const tz = String(body.timezone || '');
       need(tz === '' || validTimeZone(tz), 400, 'Unknown time zone.');
       if (tz) next.timezone = tz; else delete next.timezone;
+    }
+    // Per-officer defaults for the dashboard's quickstart Shotcaller card only - entirely separate
+    // from the guild-wide Admin > Shotcaller settings (candidateUserIds/defaultCallerId), which this
+    // never reads or writes.
+    if (body.quickShotcaller !== undefined) {
+      const q = body.quickShotcaller && typeof body.quickShotcaller === 'object' ? body.quickShotcaller : {};
+      const mode = ['8', '12', 'custom'].includes(q.mode) ? q.mode : '8';
+      next.quickShotcaller = {
+        channelId: typeof q.channelId === 'string' ? q.channelId.slice(0, 64) : '',
+        mode,
+        customCount: Math.min(12, Math.max(1, Math.round(Number(q.customCount)) || 8)),
+        dedicatedCallerId: typeof q.dedicatedCallerId === 'string' ? q.dedicatedCallerId.slice(0, 64) : '',
+      };
     }
     D.prefs[user.key] = next;
     save();

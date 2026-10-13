@@ -168,6 +168,264 @@ tr.click:hover td { background: var(--panel-2); }
 .stat .s { color: var(--muted); font-size: 14px; }
 .stat .bar { height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
 .stat .bar i { display: block; height: 100%; background: var(--c, var(--accent)); }
+
+/* The stats row (members always see this; leadership can pick it as an alternative to the
+   Member-bar layout) now has all four tiles done as art cards instead of plain colored tiles -
+   Members, Tank, Healer, DPS, each with its own matching banner (all 1672x941, same wordmark
+   layout, just a different color scheme per role). The full image fills the whole tile, zoomed in
+   (background-size 160%, not the native 100%) so the wordmark reads at a reasonable size even
+   though these tiles are much narrower than the full-width cards elsewhere - 100% was tried first
+   and made the word a barely-readable sliver, so this crops in on the center via
+   background-position: center top, same idea as the dashboard's Member-bar-head strip but carried
+   through the whole tile instead of just a header band. padding-top on the body scales with the
+   zoom (30% at 100% scale, so 30% * 1.6 = 48% at this 160% scale) to keep clearing the wordmark at
+   any tile width. The count/bar/subtitle sit on top of a dark gradient, same as the big cards. */
+.stat-art { position: relative; overflow: hidden; padding: 0;
+  background-size: 160% auto; background-position: center top; background-repeat: no-repeat;
+}
+.stat-art::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.25), rgba(10,7,9,.85) 65%, rgba(10,7,9,.95)); pointer-events: none; }
+.stat-art-body { position: relative; z-index: 1; padding: 48% 18px 16px; }
+.stat-members { background-image: url('/img/members-banner.jpg'); }
+.stat-tank { background-image: url('/img/tank-tile.jpg'); }
+.stat-healer { background-image: url('/img/healer-tile.jpg'); }
+.stat-dps { background-image: url('/img/dps-tile.jpg'); }
+
+/* Officer-only reworked "Guild name and numbers" panel: a slim Member bar, then five
+   role columns naming who's in each instead of just a count (see statsOrHeroHtml). */
+.member-bar { display: flex; flex-direction: column; gap: 14px; margin-bottom: 4px; }
+/* "Members" banner - unlike the other wordmark art, this one is a self-contained decorative
+   strip rather than a card body growing underneath it: nothing overlaps the image, so it just
+   shows the whole picture at its own native proportions (1672x941) and the count sits in a plain
+   line right below it, the same way a muted subtitle sits under a plain page <h1> elsewhere. */
+.members-banner {
+  position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 941;
+  background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+/* The dashboard's compact "Member" header bar (above the class columns) uses the same artwork as
+   a background, but cropped tight to just its top ~40% - the "MEMBERS" wordmark, its ornamental
+   border and a little of the castle scene below - rather than the whole scene, since this is a
+   slim header strip, not a full banner. aspect-ratio 1672:380 locks that crop in at any column
+   width (background-size: 100% auto scales the full image to the box's width, and
+   overflow:hidden on a shorter box just crops off the rest below, which never moves since the
+   image is still anchored to the top). The extra room versus the plain wordmark-only crop is
+   there on purpose: it gives the member count and its growth bar a proper patch of background to
+   sit on, over a dark gradient fade for legibility, instead of being squeezed right under the title. */
+.member-bar-head {
+  position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 380; min-height: 150px;
+  background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  display: flex; align-items: flex-end; justify-content: flex-end; padding: 16px 22px;
+}
+.member-bar-head::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,0) 40%, rgba(10,7,9,.88) 75%, rgba(10,7,9,.94)); pointer-events: none; }
+/* min-height keeps this readable at narrow widths: aspect-ratio alone would make the box short
+   enough there that the bottom-right count/bar would collide with the gear icon's own corner
+   (top right, see .sc-gear) - a fixed floor keeps the two corners apart at any width, and never
+   shows blank space below the art since the image itself (scaled to the box's width) always
+   renders taller than this floor at any width this box actually reaches. */
+.member-bar-stats { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 9px; min-width: 190px; }
+.member-bar-count { font-family: var(--display); font-size: 42px; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+.member-bar-count small { color: var(--muted); font-family: var(--body); font-size: 20px; }
+.member-bar-bar { width: 100%; height: 9px; border-radius: 5px; overflow: hidden; background: rgba(255,255,255,.14); }
+.member-bar-bar i { display: block; height: 100%; background: var(--accent); }
+.member-bar-cols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-items: start; }
+/* Each class column is a baked bordered-card illustration (title + crest art on top, a plain
+   bordered panel below) rather than a plain CSS box. Drawn with no runtime border math needed:
+   three background-image layers share the exact same `background-size: 100% auto` horizontal
+   scale, so their border lines land on identical x-positions at any column width and the "seam"
+   between layers is invisible. Listed first-to-last: [top-cap, bottom-cap, middle] - in CSS,
+   earlier layers paint IN FRONT of later ones, so the two caps sit on top of (visually cover)
+   the repeat-y middle tile at the exact places they overlap it, letting the middle show through
+   only in the gap between them.
+   The box's own height is never set explicitly - instead `padding-top`/`padding-bottom`
+   percentages (computed from each card's own top-cap/bottom-cap pixel height over its own pixel
+   width, since padding resolves against the *width* of its containing block, a CSS quirk used
+   throughout this file) guarantee a minimum total height equal to both caps combined when the
+   member list is empty or short (so the caps never collide or overlap each other), while letting
+   the box grow freely - and the middle tile keep tiling into the newly exposed space - for a
+   column with many members. */
+.member-col {
+  position: relative; min-width: 0; border-radius: 10px; overflow: hidden;
+  background-repeat: no-repeat, no-repeat, repeat-y;
+  background-position: top center, bottom center, top center;
+  background-size: 100% auto, 100% auto, 100% auto;
+}
+.member-col-tanks { background-image: url('/img/colcard-tanks-top.png'), url('/img/colcard-tanks-bot.png'), url('/img/colcard-tanks-mid.png'); padding-top: 88.16%; padding-bottom: 16.91%; }
+.member-col-caster { background-image: url('/img/colcard-caster-top.png'), url('/img/colcard-caster-bot.png'), url('/img/colcard-caster-mid.png'); padding-top: 88.16%; padding-bottom: 16.91%; }
+.member-col-melee { background-image: url('/img/colcard-melee-top.png'), url('/img/colcard-melee-bot.png'), url('/img/colcard-melee-mid.png'); padding-top: 88.16%; padding-bottom: 16.91%; }
+.member-col-ranged { background-image: url('/img/colcard-ranged-top.png'), url('/img/colcard-ranged-bot.png'), url('/img/colcard-ranged-mid.png'); padding-top: 87.95%; padding-bottom: 16.87%; }
+.member-col-oracleSeeker { background-image: url('/img/colcard-oracle_seeker-top.png'), url('/img/colcard-oracle_seeker-bot.png'), url('/img/colcard-oracle_seeker-mid.png'); padding-top: 88.59%; padding-bottom: 16.99%; }
+.member-col-list { padding: 0 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.member-col-count { color: var(--muted); font-size: 12px; text-align: center; }
+.member-col-group:not(:first-child) { border-top: 1px solid rgba(255,255,255,.12); padding-top: 9px; }
+.member-col-sub { font-family: var(--display); font-size: 13px; letter-spacing: .02em; color: var(--text); opacity: .9; margin-bottom: 5px; }
+.member-col-names { display: flex; flex-direction: column; gap: 4px; }
+.member-bar-note { color: var(--muted); font-size: 13px; }
+@media (max-width: 900px) { .member-bar-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Shotcaller dashboard card: a corner "lightbar" (left + top edge) instead of the usual single
+   top accent, so the session's state reads at a glance - a saturated neon edge with a soft glow,
+   not the muted palette used for the loot-qualification rates elsewhere. Wine red while inactive,
+   neon orange while starting, a darker (not mint) neon green once live. */
+.sc-card {
+  border-left-width: 3px !important; border-top-width: 3px !important;
+  position: relative; overflow: hidden; text-align: center; padding: 0;
+  /* The art covers the whole card now - button and data panels included - not just a strip up top.
+     Scaled by WIDTH only (background-size: 100% auto), not "cover", and anchored to the top - a
+     plain "cover" would scale against whichever of width/height is more constraining, which changes
+     per state since the three states aren't the same height (the active state is taller, with its
+     data panels), making the "SHOTCALLER" wordmark drift to a different vertical spot each time.
+     Scaling by width alone means the image is always the same scale for a given card width regardless
+     of its height, so the wordmark sits at the same spot from the top in every state. Below the
+     image's own height, the card's plain dark background shows through (no-repeat) rather than the
+     art stretching or tiling - which reads fine since the overlay below is already going dark there. */
+  background-image: url('/img/shotcaller-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+/* Dark overlay so the status text, button and data panels stay readable over the art. */
+.sc-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+/* Top padding is a PERCENTAGE, not a fixed px value, on purpose: percentage padding-top/bottom is
+   defined by the CSS spec to resolve against the containing block's WIDTH, which is exactly how the
+   background image above is scaled (background-size: 100% auto) - so this clears the "SHOTCALLER"
+   wordmark by the same margin at any card size, instead of a fixed px gap that would be too small on
+   a wide card or too large on a narrow one. The art is now a square (1254x1254) rather than the old
+   2.5:1 banner, so its rendered height equals the card's width - the wordmark+ornament sit in about
+   the top 31% of that square, hence ~35% of the card's width here, not the old banner's 20%. */
+.sc-card-body { position: relative; z-index: 1; padding: 35% 20px 26px; }
+/* Not scoped to .sc-card any more - any art-backed card (.sc-card, .lead-card, more later) puts its
+   gear in the same corner the same way, as long as the card itself is position:relative. */
+.sc-gear { position: absolute !important; top: 14px; right: 14px; z-index: 2; }
+.sc-card.sc-inactive { border-left-color: #e0124f; border-top-color: #e0124f; box-shadow: -3px 0 14px -3px rgba(224,18,79,.75), 0 -3px 14px -3px rgba(224,18,79,.75); }
+.sc-card.sc-starting { border-left-color: #ff9d0a; border-top-color: #ff9d0a; box-shadow: -3px 0 14px -3px rgba(255,157,10,.75), 0 -3px 14px -3px rgba(255,157,10,.75); }
+.sc-card.sc-active { border-left-color: #0fa968; border-top-color: #0fa968; box-shadow: -3px 0 14px -3px rgba(15,169,104,.75), 0 -3px 14px -3px rgba(15,169,104,.75); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* "Your Leadership" card - same rules as the Shotcaller card: full-card art scaled by width only and
+   anchored to the top (not "cover") so the wordmark never drifts regardless of how much overview text
+   is inside, a dark overlay for readability, and a percentage top padding so content clears the
+   wordmark at any card width. This source image is portrait (1024x1536, taller than it is wide) rather
+   than square, so once scaled to the card's width its rendered height is 1.5x the width - the
+   wordmark+ornament occupy roughly the top 34% of the image's own height, which comes out to about
+   51% of the card's width; rounded up to 54% for clearance. No lightbar here - this card doesn't have
+   states to signal, unlike Shotcaller. */
+.lead-card {
+  position: relative; overflow: hidden; text-align: center; padding: 0;
+  background-image: url('/img/leadership-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.lead-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.lead-card-body { position: relative; z-index: 1; padding: 54% 20px 26px; text-align: left; }
+
+/* "Daily schedule" card - same wordmark-clearance rules as the other art cards, but this one's
+   height is pinned instead of content-driven: aspect-ratio locks the card to the exact same
+   proportions the source image renders at (background-size: 100% auto already scales the image's
+   height to match), so the artwork is always shown in full - never clipped short, never trailing
+   off into bare gradient below it either. The event list lives in an absolutely-positioned body
+   that fills that fixed box: the top padding-% clearance zone is left alone, and only .sched-list -
+   everything below that zone - scrolls once there are more events than fit, so the background and
+   the wordmark never move and are never scrolled over. Source image is portrait (1122x1402, ratio
+   1:1.25); the "DAILY SCHEDULE" wordmark + ornament occupy roughly the top 28% of the image's own
+   height, which at this ratio comes out to about 35% of the card's width once scaled; rounded up to
+   35% for clearance (already has a small buffer built in). */
+.sched-card {
+  position: relative; overflow: hidden; padding: 0; aspect-ratio: 1122 / 1402;
+  background-image: url('/img/schedule-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.sched-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.sched-card-body { position: absolute; inset: 0; z-index: 1; padding-top: 35%; display: flex; flex-direction: column; }
+.sched-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 0 16px 20px; text-align: center; }
+.sched-item { border-top: 1px solid var(--line); padding-top: 12px; width: 100%; max-width: 320px; }
+.sched-item:first-child { border-top: 0; padding-top: 0; }
+.sched-title { display: block; font-weight: 600; font-size: 16px; color: var(--text); text-decoration: none; }
+.sched-title:hover { text-decoration: underline; }
+.sched-countdown { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.sched-status { margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.sched-yes { color: #4fe3a0; font-weight: 600; }
+.sched-no { color: #ff6b8a; font-weight: 600; }
+.sched-attend { background: #0fa968; border-color: #0fa968; color: #06130d; }
+.sched-attend:hover { filter: brightness(1.1); }
+.sched-decline { background: #e0124f; border-color: #e0124f; color: #fff; }
+.sched-decline:hover { filter: brightness(1.1); }
+.sched-going { margin-top: 8px; font-size: 13px; }
+
+/* "Guild info" card - same technique again: square source image (1254x1254, same proportions as
+   the Shotcaller banner), scaled by width only and anchored to the top so the "GUILD INFO" wordmark
+   never drifts regardless of how many categories/buttons are listed below it. Wordmark + ornament
+   occupy roughly the top 28% of the image's own height, which at a 1:1 ratio is also 28% of the
+   card's width; rounded up to 30% for clearance. */
+.info-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/guildinfo-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.info-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.info-card-body { position: relative; z-index: 1; padding: 30% 20px 26px; }
+
+/* "Tasks" card - same technique, now with a taller portrait source image (1024x1536, ratio 1:1.5),
+   scaled by width only and anchored to the top so the "TASKS" wordmark never drifts regardless of
+   how many leaders/duties are listed below it. Wordmark + ornament occupy roughly the top 24% of
+   the image's own height, which at this ratio comes out to about 36% of the card's width once
+   scaled; rounded up to 36% for clearance (already has a small buffer built in). */
+.tasks-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/tasks-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.tasks-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.tasks-card-body { position: relative; z-index: 1; padding: 36% 20px 26px; }
+
+/* "Qualified for loot" card - same technique: square source image (1254x1254), scaled by width
+   only and anchored to the top so the "QUALIFIED FOR LOOT" wordmark never drifts regardless of how
+   long the member list below it gets (search bar, loot rules, however many rows are shown).
+   Wordmark + ornament occupy roughly the top 34% of the image's own height, which at a 1:1 ratio is
+   also 34% of the card's width; rounded up to 35% for clearance. */
+.loot-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/loot-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.loot-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.loot-card-body { position: relative; z-index: 1; padding: 35% 20px 26px; }
+.sc-start-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700; border-radius: 8px;
+  background: #0fa968; color: #06130d; border: 1px solid #0fa968;
+  box-shadow: 0 0 16px rgba(15,169,104,.55);
+}
+.sc-start-btn:hover { background: #14c47c; border-color: #14c47c; }
+/* Stage 2 reuses the same button slot as Stage 1's "Start", but as an icon-only, orange, disabled
+   control - sc-btn-morph plays once on mount so it reads as that green "Start" pill turning into
+   this orange spinner, even though a full re-render actually swapped in a new element. */
+.sc-starting-btn {
+  width: 48px; height: 48px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; cursor: default;
+  animation: sc-btn-morph .5s ease forwards;
+}
+.sc-spinner {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 3px solid rgba(10,7,9,.3); border-top-color: #2a1400;
+  animation: sc-spin .8s linear infinite, sc-icon-pop .4s ease;
+}
+@keyframes sc-btn-morph {
+  0% { width: 112px; border-radius: 8px; background: #0fa968; border-color: #0fa968; box-shadow: 0 0 16px rgba(15,169,104,.55); }
+  100% { width: 48px; border-radius: 50%; background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); }
+}
+@keyframes sc-spin { to { transform: rotate(360deg); } }
+@keyframes sc-icon-pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
+/* Stage 3: the icon morphs again - orange spinner circle -> red "Stop" pill - same move in reverse. */
+.sc-stop-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700;
+  color: #fff; animation: sc-btn-morph-stop .5s ease forwards;
+}
+.sc-stop-btn:hover { background: #ff2066 !important; border-color: #ff2066 !important; }
+@keyframes sc-btn-morph-stop {
+  0% { width: 48px; border-radius: 50%; background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); color: transparent; }
+  100% { width: 112px; border-radius: 8px; background: #e0124f; border-color: #e0124f; box-shadow: 0 0 16px rgba(224,18,79,.55); color: #fff; }
+}
+/* The three data panels that land once a session is active - label fades in on its own (slow,
+   opacity-only), its value box pops up a beat later, and each panel is staggered left-to-right via
+   the --d custom property set inline per item, so they cascade in rather than all appearing at once. */
+.sc-data-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 22px; text-align: center; }
+.sc-data-label { font-size: 13px; color: var(--muted); margin-bottom: 7px; opacity: 0; animation: sc-label-fade 1.1s ease forwards; animation-delay: var(--d, 0s); }
+.sc-data-box {
+  background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 14px 12px;
+  font-family: var(--display); font-size: 21px; font-weight: 600;
+  opacity: 0; transform: translateY(14px) scale(.95);
+  animation: sc-box-in .5s ease forwards; animation-delay: calc(var(--d, 0s) + .15s);
+}
+@keyframes sc-label-fade { from { opacity: 0; } to { opacity: .85; } }
+@keyframes sc-box-in { to { opacity: 1; transform: translateY(0) scale(1); } }
 .dash-grid .panel + .panel { margin-top: 0; }
 .dash-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .leader { padding: 14px 0; border-top: 1px solid var(--line); }
@@ -442,13 +700,33 @@ a.plain:hover { color: var(--accent-text); text-decoration: underline; }
 .rate { font-weight: 700; font-variant-numeric: tabular-nums; }
 .rate.red { color: #e2685c; } .rate.orange { color: #eba23c; } .rate.green { color: #6fcf8b; } .rate.none { color: var(--muted); }
 
-.dash-panels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.dash-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
 .dash-panels > * { min-width: 0; }                    /* grid items default to min-width:auto, letting their content push them wider than their column at narrow widths */
 .dash-panels > .full { grid-column: 1 / -1; }
-.dash-panels > .wide { grid-column: span 2; }
+.dash-panels > .wide { grid-column: span 2; }          /* unused now that Leadership gives up its own span (kept in case something needs a 2-of-2 span later - same as .full at this column count) */
 .dash-panels > .panel { margin-top: 0 !important; }
 .announce { border: 1px solid var(--accent); border-left-width: 5px; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border-radius: 8px; padding: 14px 18px; white-space: pre-wrap; }
 .announce b { display: block; margin-bottom: 2px; color: var(--accent-text); }
+
+/* Reworked announcement panel: one banner image (crest + "ANNOUNCEMENT" + castle art,
+   nothing baked into it beyond that), with the actual announcement text (or the guild's
+   fallback line when nothing is posted) floating on top in a fully transparent box - no
+   fill, no border, just the glyphs with a soft glow. container-type lets the text scale
+   with the banner's own rendered width instead of the viewport, and the small script in
+   features.js shrinks it further if a long announcement would otherwise overflow the box. */
+.announce2 { position: relative; width: 100%; aspect-ratio: 1467 / 283; border-radius: 10px; overflow: hidden; container-type: inline-size; }
+.announce2 img.announce2-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.announce2 .announce2-box { position: absolute; left: 20.8%; top: 38.5%; width: 74.4%; height: 52.7%; display: flex; align-items: center; background: transparent; }
+.announce2 .announce2-text {
+  font-family: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 400;
+  font-size: clamp(11px, 2.6cqw, 34px);
+  line-height: 1.5;
+  color: #f5eef1;
+  text-shadow: 0 0 10px rgba(230,170,200,.55), 0 1px 3px rgba(0,0,0,.85);
+  white-space: pre-wrap;
+  overflow: hidden;
+}
 .dash-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
 .dash-item:first-child { border-top: 0; }
 .dash-item label { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 0; }
@@ -799,3 +1077,61 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 .vod-review-entry { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .vod-review-entry-head { margin-bottom: 3px; }
 .vod-review-entry-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ================= Attendance Tracking (dashboard panel for the voice/PIN attendance engine) =================
+   A direct, one-event-at-a-time front end for the voice-attendance engine that already runs in the background
+   (server-shotcaller.js's pollVoiceAttendance) - pick an event, flip automatic/manual, start the watch, and
+   watch it live, right on the Dashboard instead of having to find the right event first.
+   Built exactly like the Shotcaller dashboard card (.sc-card/.sc-card-body above): the attendance-banner.png
+   art is the background for the WHOLE card - mode row, event picker, auto-toggle, button, stats - not just a
+   strip up top, scaled by WIDTH only (background-size: 100% auto) so the wordmark's vertical position stays
+   fixed no matter which of the three states (inactive/running/awaiting-save) is showing, since those states
+   aren't the same height. Image is 1672x941; the "ATTENDANCE TRACKING" wordmark + ornamental frame sit in the
+   top ~260px of that, i.e. ~15.5% of the image's own WIDTH once scaled - padding-top below is a percentage
+   specifically because percentage padding resolves against the containing block's width per the CSS spec,
+   matching how the image itself is scaled. */
+.att-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/attendance-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.att-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.4), rgba(10,7,9,.82) 55%, rgba(10,7,9,.93)); pointer-events: none; }
+.att-card-body { position: relative; z-index: 1; padding: 18% 20px 26px; }
+.att-wrap { margin-bottom: 22px; }
+.att-sect + .att-sect { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.14); }
+.att-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.att-mode-label { font-family: var(--display); font-size: 19px; }
+/* The channel picker + "Save channels" form slides open/closed rather than just appearing - a plain toggle
+   felt like something had broken (the whole lower half of the card jumping) when "Automatic tracking" was
+   unticked, so this tweens max-height + opacity instead. The one-time step is a tall-enough value to always
+   clear real content without needing to measure it in JS; the box is clipped (overflow:hidden) throughout. */
+.att-reveal { max-height: 0; opacity: 0; overflow: hidden; transition: max-height .35s ease, opacity .3s ease; }
+.att-reveal.att-reveal-open { max-height: 420px; opacity: 1; }
+.att-action { text-align: center; }
+/* Stage 1 (reuses .sc-start-btn's green pill look exactly, see above) -> Stage 2: a persistent "Running" pill,
+   spinner + text rather than the Shotcaller panel's icon-only circle, since this stays up for the whole length
+   of an event rather than a few seconds while a session connects. */
+.att-running-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700; border-radius: 8px;
+  background: #ff9d0a; color: #2a1400; border: 1px solid #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55);
+  display: inline-flex; align-items: center; gap: 10px; cursor: default;
+  animation: att-btn-morph-run .5s ease forwards;
+}
+@keyframes att-btn-morph-run {
+  0% { background: #0fa968; border-color: #0fa968; box-shadow: 0 0 16px rgba(15,169,104,.55); }
+  100% { background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); }
+}
+/* Stage 3: once the track actually stops (Shotcaller session ended), the same pill morphs again into a gold
+   "Save track" button - positive/finishing, not the Shotcaller panel's red Stop, since nothing is being
+   cancelled here: the attendance is already recorded, this just closes the bookkeeping out (or waits 15
+   minutes and closes itself). */
+.att-save-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700; border-radius: 8px;
+  background: #e8b84b; color: #2a1d00; border: 1px solid #e8b84b; box-shadow: 0 0 16px rgba(232,184,75,.55);
+  animation: att-btn-morph-save .5s ease forwards;
+}
+.att-save-btn:hover { background: #f5c768; border-color: #f5c768; }
+@keyframes att-btn-morph-save {
+  0% { background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); }
+  100% { background: #e8b84b; border-color: #e8b84b; box-shadow: 0 0 16px rgba(232,184,75,.55); }
+}
+.att-save-hint { margin-top: 8px; }
