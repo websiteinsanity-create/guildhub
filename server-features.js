@@ -29,7 +29,7 @@ module.exports = function install(ctx) {
 
   // ============================================================ who sees what
   const HIDEABLE = new Set((config.sections || []).map((s) => s.key));
-  const PANEL_KEYS = ['announcement', 'stats', 'loot', 'leadership', 'next', 'info'];
+  const PANEL_KEYS = ['announcement', 'stats', 'loot', 'attendance', 'leadership', 'next', 'info'];
 
   // Login notices: everybody gets the active ones with "have I accepted it"; the leadership also sees who accepted.
   function noticesFor(user) {

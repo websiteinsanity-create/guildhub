@@ -25,7 +25,12 @@ const pngDataUrl = () => 'data:image/png;base64,' + FAKE_PNG.toString('base64');
 // Same shape as test/shotcaller-postparties.test.js's fake bot, plus mutable "who is actually connected right
 // now" per channel (including bot v4.3.0's connectedStates mute/deaf info) and the channel-agnostic
 // /voice-presence endpoint "other channels always tracked" reads through.
-function startFakeBot() {
+// legacyNoPresence mimics an older/self-hosted Shotcaller bot build that only ever reports a per-party
+// headcount (parties[].connected), never who specifically is connected (no connectedUserIds/connectedStates
+// on /session or /session/start at all) and has no /voice-presence endpoint either - see
+// "an older bot build that only reports headcounts" below for what Guild Hall is expected to do about it.
+function startFakeBot(opts) {
+  const legacy = !!(opts && opts.legacyNoPresence);
   const calls = [];
   let session = null;
   let connected = {}; // channelId -> [{id, mute, deaf}, ...]
@@ -40,6 +45,7 @@ function startFakeBot() {
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: 'Unauthorized' });
       if (u.pathname === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: VOICE_CHANNEL, name: 'Command' }, { id: EXTRA_CHANNEL, name: 'Main' }] });
       if (u.pathname === `/api/guilds/${GUILD}/voice-presence`) {
+        if (legacy) return send(404, { error: 'Not found' }); // this endpoint doesn't exist on the older build at all
         const ids = (u.searchParams.get('channels') || '').split(',').filter(Boolean);
         return send(200, { channels: ids.map((id) => { const states = connected[id] || []; return { channelId: id, found: true, connected: states.length, connectedUserIds: states.map((s) => s.id), connectedStates: states }; }) });
       }
@@ -53,7 +59,12 @@ function startFakeBot() {
     });
   });
   function withConnected(s) {
-    return { ...s, parties: s.parties.map((p) => { const states = connected[p.channelId] || []; return { ...p, connected: states.length, connectedUserIds: states.map((x) => x.id), connectedStates: states }; }) };
+    return { ...s, parties: s.parties.map((p) => {
+      const states = connected[p.channelId] || [];
+      // The legacy shape only ever hands back how many are connected, never who - that's the whole point
+      // of this fake: no connectedUserIds/connectedStates keys at all, not even empty arrays.
+      return legacy ? { ...p, connected: states.length } : { ...p, connected: states.length, connectedUserIds: states.map((x) => x.id), connectedStates: states };
+    }) };
   }
   return new Promise((resolve) => server.listen(0, () => resolve({
     server, url: `http://localhost:${server.address().port}`, calls,
@@ -63,9 +74,9 @@ function startFakeBot() {
   })));
 }
 
-async function startServer(extraEnv) {
+async function startServer(extraEnv, botOpts) {
   const fake = await startFakeDiscord();
-  const bot = await startFakeBot();
+  const bot = await startFakeBot(botOpts);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-voiceattn-'));
   const port = 40000 + Math.floor(Math.random() * 20000);
   const base = `http://localhost:${port}`;
@@ -136,7 +147,7 @@ const poll = async (s, fn, tries = 30, gapMs = 150) => {
 };
 const attendedOf = async (s, evId) => { const after = (await s.call('/api/state', 'GET', null, s.officer)).body; return after.events.find((e) => e.id === evId); };
 
-const withServer = (name, fn, extraEnv) => test(name, { timeout: 30000 }, async () => { const s = await startServer(extraEnv); try { await fn(s); } finally { await s.stop(); } });
+const withServer = (name, fn, extraEnv, botOpts) => test(name, { timeout: 30000 }, async () => { const s = await startServer(extraEnv, botOpts); try { await fn(s); } finally { await s.stop(); } });
 
 withServer("in 'pin' mode (the default), voice presence is never looked at - no voiceTracking even starts", async (s) => {
   const { ev, anchorMembers } = await makeTrackedEvent(s);
@@ -346,3 +357,33 @@ withServer('per-event attendanceModeOverride is accepted and round-trips', async
   const cleared = (await s.call(`/api/events/${ev.id}`, 'PUT', { type: ev.type, start: ev.start, attendanceModeOverride: 'default' }, s.officer)).body;
   assert.equal(cleared.attendanceModeOverride, 'default');
 });
+
+// An older/self-hosted Shotcaller bot build (the one shipped in an early "step 2" checkpoint, before per-user
+// voice presence was added) only ever reports a per-party headcount, not who is actually in each channel -
+// see beginVoiceTracking's presenceUnsupported check in server-shotcaller.js. Running voice-attendance against
+// a bot like that would otherwise look like a silent, permanent 0-attendees bug with no explanation anywhere;
+// this confirms Guild Hall notices and says so instead, while everything else (starting/stopping a session,
+// party management) keeps working fine.
+withServer('an older Shotcaller bot build that only reports headcounts (no per-user ids) is detected, flagged, and audited - instead of silently crediting nobody forever', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+
+  const started = await attendedOf(s, ev.id);
+  assert.equal(started.voiceTracking.presenceUnsupported, true, 'Guild Hall should recognize this bot build has no per-user presence data at all');
+
+  const live = await s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer);
+  assert.equal(live.status, 200, JSON.stringify(live.body));
+  assert.equal(live.body.presenceUnsupported, true, 'the dashboard card reads this flag to show its warning banner');
+
+  // Even with people "connected" (headcount only, no ids for Guild Hall to match against), nobody can be
+  // credited - there is nothing to compare a member's Discord id against.
+  s.bot.setConnected('c0', anchorMembers.map((m) => m.owner));
+  await new Promise((res) => setTimeout(res, 600));
+  const finalEv = await attendedOf(s, ev.id);
+  assert.equal(finalEv.attended.length, 0, 'with no per-user ids at all from the bot, nobody can be matched to a member - this is the gap the warning exists to explain');
+
+  const audit = (await s.call('/api/admin/audit', 'GET', null, s.officer)).body;
+  assert.ok(audit.entries.some((row) => row.action === 'event.voicetrack.unsupported'), 'an audit log entry should explain why attendance is not being credited');
+}, {}, { legacyNoPresence: true });

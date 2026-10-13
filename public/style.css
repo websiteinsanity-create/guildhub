@@ -1135,3 +1135,4 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
   100% { background: #e8b84b; border-color: #e8b84b; box-shadow: 0 0 16px rgba(232,184,75,.55); }
 }
 .att-save-hint { margin-top: 8px; }
+.att-warn { background: rgba(224,18,79,.12); border: 1px solid rgba(224,18,79,.4); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
