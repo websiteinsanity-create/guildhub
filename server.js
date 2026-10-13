@@ -146,6 +146,11 @@ const SETTING_DEFAULTS = {
   },
   approvals: Object.fromEntries((config.approvalGroups || []).map((g) => [g.key, !!g.default])),   // which player changes need leadership approval
   hiddenSections: [],                                     // sections normal members do not see
+  // Order the dashboard's class columns list each column's members in, grouped by their weapon-pair
+  // "class" (subclass) rather than one flat alphabetical list - e.g. in Tanks, every Crusader listed
+  // before every Warden, or the other way round, admin's choice. [] means "use config.json's own
+  // class order", same as the names simply being declared in that order with no override.
+  classOrder: [],
   branding: { name: '', tagline: '', accent: '', bgDim: 82, announcement: '', iconFile: '', bgFile: '' },
 };
 let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], auditLog: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };

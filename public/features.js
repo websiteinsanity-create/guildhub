@@ -518,9 +518,12 @@ ACTIONS['att-detail'] = (el, d) => {
 };
 
 /* ================= dashboard you can personalise ================= */
+// Shown in the Announcement banner whenever no admin has posted anything.
+const GUILD_MOTTO = 'Different by nature. Dangerous by choice. We are Insanity.';
 const DASH_PANELS = [
-  { key: 'announcement', label: 'Announcement' }, { key: 'stats', label: 'Guild name and numbers' }, { key: 'loot', label: 'Qualified for loot' },
-  { key: 'leadership', label: 'Leadership' }, { key: 'next', label: 'Next event' },
+  { key: 'announcement', label: 'Announcement' }, { key: 'stats', label: 'Guild name and numbers' },
+  { key: 'leadership', label: 'Leadership' }, { key: 'next', label: 'Daily schedule' },
+  { key: 'loot', label: 'Qualified for loot' }, { key: 'attendance', label: 'Attendance Tracking' },
   { key: 'info', label: 'Info section (stays under Next event)', fixed: true },
 ];
 function dashPrefs() {
@@ -533,20 +536,147 @@ function heroHtml() {
   const b = brand();
   return `<div class="guild-hero">${b.icon ? `<img class="hero-icon" src="${esc(b.icon)}" alt="">` : ''}<div><div class="hero-name">${esc(guildName())}</div>${guildTag() ? `<div class="hero-tag">${esc(guildTag())}</div>` : ''}</div></div>`;
 }
+// Only Tank/Healer/DPS have matching artwork - a guild that renamed or added roles in Admin still
+// gets the plain colored tile for anything outside this set, rather than a missing/broken image.
+const ROLE_ART = { Tank: 'stat-tank', Healer: 'stat-healer', DPS: 'stat-dps' };
 function statsHtml() {
   const active = S.members.filter((m) => m.active), players = new Set(active.map((m) => m.owner)).size, cap = S.cfg.guildCap || 0;
   const tiles = S.cfg.roles.map((r) => { const n = active.filter((m) => m.role === r).length; return { r, n, pct: active.length ? Math.round(100 * n / active.length) : 0 }; });
   return `<div class="stats" style="margin:0">
-    <div class="stat"><div class="k">Members</div><div class="v">${active.length}${cap ? `<small> / ${cap}</small>` : ''}</div>${cap ? `<div class="bar"><i style="width:${Math.min(100, 100 * active.length / cap)}%"></i></div>` : ''}<div class="s">${players} ${players === 1 ? 'player' : 'players'}</div></div>
-    ${tiles.map((t) => `<div class="stat" style="--c:${roleColor(t.r)}"><div class="k">${esc(t.r)}</div><div class="v">${t.n}</div><div class="bar"><i style="width:${t.pct}%"></i></div><div class="s">${t.pct}% of the guild</div></div>`).join('')}</div>`;
+    <div class="stat stat-art stat-members"><h3 class="sr-only">Members</h3><div class="stat-art-body"><div class="v">${active.length}${cap ? `<small> / ${cap}</small>` : ''}</div>${cap ? `<div class="bar"><i style="width:${Math.min(100, 100 * active.length / cap)}%"></i></div>` : ''}<div class="s">${players} ${players === 1 ? 'player' : 'players'}</div></div></div>
+    ${tiles.map((t) => ROLE_ART[t.r]
+      ? `<div class="stat stat-art ${ROLE_ART[t.r]}"><h3 class="sr-only">${esc(t.r)}</h3><div class="stat-art-body"><div class="v">${t.n}</div><div class="bar"><i style="width:${t.pct}%"></i></div><div class="s">${t.pct}% of the guild</div></div></div>`
+      : `<div class="stat" style="--c:${roleColor(t.r)}"><div class="k">${esc(t.r)}</div><div class="v">${t.n}</div><div class="bar"><i style="width:${t.pct}%"></i></div><div class="s">${t.pct}% of the guild</div></div>`).join('')}</div>`;
 }
+
+// Reworked "Guild name and numbers" panel, officers only (see statsOrHeroHtml below) - a slim
+// Member bar plus five role columns, each listing active members alphabetically instead of just
+// a count. Which subclass falls into which column will eventually be a manual pick on Admin >
+// Appearance; until that exists this is a sensible default built from the class each character's
+// weapon pair already resolves to (classOf), falling back to their plain role for anything the
+// weapon pairing doesn't resolve. Tanks and Healers map 1:1 - DPS splits into Caster / Melee /
+// Ranged by weapon type, and every healer currently in the game is an Oracle or a Seeker, so the
+// healer column is labelled for both.
+const DASH_COLUMNS = [
+  { key: 'tanks', label: 'Tanks', color: 'var(--role0)' },
+  { key: 'caster', label: 'Caster', color: 'var(--role3)' },
+  { key: 'melee', label: 'Melee', color: 'var(--role2)' },
+  { key: 'ranged', label: 'Ranged', color: 'var(--role4)' },
+  { key: 'oracleSeeker', label: 'Oracle and Seeker', color: 'var(--role1)' },
+];
+const CASTER_WEAPONS = new Set(['Staff', 'Wand & Tome', 'Orb']);
+const RANGED_WEAPONS = new Set(['Longbow', 'Crossbow']);
+function dashColumnFor(m) {
+  if (m.role === 'Tank') return 'tanks';
+  if (m.role === 'Healer') return 'oracleSeeker';
+  if (CASTER_WEAPONS.has(m.primaryWeapon) || CASTER_WEAPONS.has(m.secondaryWeapon)) return 'caster';
+  if (RANGED_WEAPONS.has(m.primaryWeapon) || RANGED_WEAPONS.has(m.secondaryWeapon)) return 'ranged';
+  return 'melee';
+}
+// Groups a column's members by their weapon-pair "class" (classOf, e.g. "Crusader", "Warden" -
+// see app.js), in the guild's admin-chosen order (settings.classOrder; falls back to config.json's
+// own class order for anything not yet placed in that list), with names sorted alphabetically
+// inside each group. A member whose weapon pair doesn't resolve to a named class (classOf returns
+// '') is grouped under "Other", always last regardless of the chosen order.
+function groupBySubclass(members) {
+  const order = (S.settings.classOrder && S.settings.classOrder.length) ? S.settings.classOrder : (S.cfg.classes || []).map((c) => c.name);
+  const groups = new Map();
+  for (const m of members) {
+    const k = classOf(m) || 'Other';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  for (const arr of groups.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+  const keys = [...groups.keys()].sort((a, b) => {
+    if (a === 'Other' || b === 'Other') return a === 'Other' ? 1 : -1;
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  return keys.map((k) => ({ name: k, members: groups.get(k) }));
+}
+function memberBarHtml() {
+  const active = S.members.filter((m) => m.active), cap = S.cfg.guildCap || 0;
+  const byColumn = DASH_COLUMNS.map((c) => ({ ...c, members: active.filter((m) => dashColumnFor(m) === c.key) }));
+  return `<div class="member-bar">
+    <div class="member-bar-head"><h3 class="sr-only">Member</h3>${isOfficer() ? '<button class="btn sm sc-gear" data-act="classorder-edit" aria-label="Edit class order">⚙</button>' : ''}
+      <div class="member-bar-stats">
+        <div class="member-bar-count">${active.length}${cap ? `<small> / ${cap}</small>` : ''}</div>
+        ${cap ? `<div class="member-bar-bar"><i style="width:${Math.min(100, Math.round(100 * active.length / cap))}%"></i></div>` : ''}
+      </div>
+    </div>
+    <div class="member-bar-cols">${byColumn.map((c) => `<div class="member-col member-col-${c.key}">
+      <div class="member-col-list">
+        <div class="member-col-count">${c.members.length} ${c.members.length === 1 ? 'member' : 'members'}</div>
+        ${c.members.length ? groupBySubclass(c.members).map((g) => `<div class="member-col-group"><div class="member-col-sub">${esc(g.name)}</div><div class="member-col-names">${g.members.map((m) => `<div>${esc(m.name)}</div>`).join('')}</div></div>`).join('') : '<div class="muted small" style="text-align:center">None yet</div>'}
+      </div>
+    </div>`).join('')}</div>
+    <div class="member-bar-note">Each column is grouped by class (admin-ordered), names sorted alphabetically within each.</div></div>`;
+}
+// Lets an officer choose which class (subclass) is listed first, second, and so on, within each
+// dashboard class column - e.g. Crusader before Warden in the Tanks column, or the other way
+// round. One single order applies across every column, since a class only ever shows up in the
+// one column its role maps to anyway. Reuses the same checkbox-less up/down-button reorder pattern
+// as "Customize your dashboard" (dash-item/dash-move), just against a different list and a
+// guild-wide setting instead of a per-player preference - opened from the same kind of gear icon
+// as "Your Leadership" and "Info", right on the panel it affects, rather than tucked away in Admin.
+ACTIONS['classorder-edit'] = () => {
+  const all = (S.cfg.classes || []).map((c) => c.name);
+  const saved = (S.settings.classOrder || []).filter((n) => all.includes(n));
+  const order = [...saved, ...all.filter((n) => !saved.includes(n))];
+  openDialog(`<form data-form="classorder"><h2>Class order</h2>
+    <div class="muted small" style="margin:-8px 0 12px">Inside each class column below, members are grouped by class (e.g. Crusader, Warden) in this order, alphabetically by name within each group.</div>
+    <div id="class-order-list" class="scrollbox" style="max-height:50vh">${order.map((n) => `<div class="dash-item" data-k="${esc(n)}"><label>${esc(n)}</label><span class="seg"><button type="button" class="btn sm" data-act="classorder-move" data-dir="-1" aria-label="Move up">Up</button><button type="button" class="btn sm" data-act="classorder-move" data-dir="1" aria-label="Move down">Down</button></span></div>`).join('')}</div>
+    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div></form>`, true);
+};
+ACTIONS['classorder-move'] = (el, d) => {
+  const item = el.closest('.dash-item'), dir = Number(d.dir);
+  if (dir < 0 && item.previousElementSibling) item.parentNode.insertBefore(item, item.previousElementSibling);
+  if (dir > 0 && item.nextElementSibling) item.parentNode.insertBefore(item.nextElementSibling, item);
+};
+FORMS.classorder = (f) => act(async () => { await api('/api/admin/options', 'PUT', { classOrder: [...f.querySelectorAll('.dash-item')].map((i) => i.dataset.k) }); closeDialog(); }, 'Class order saved');
+// Officers get the new Member bar + columns under the guild hero (useful for management - it
+// names names); everybody else keeps the original compact tile row, which is all a regular
+// member needs to see.
+function statsOrHeroHtml() { return `${heroHtml()}${isOfficer() ? memberBarHtml() : statsHtml()}`; }
 
 // Small section under "Next event": categories with buttons; each button opens a popup with text the leadership wrote.
 function infoPanel() {
   const cats = (S.infoBoard && S.infoBoard.categories) || [];
-  return `<div class="panel info"><div class="ev-title"><h3>${esc((S.infoBoard && S.infoBoard.title) || 'Info')}</h3>${isOfficer() ? '<button class="btn sm" data-act="info-edit">Edit</button>' : ''}</div>
-    ${cats.length ? cats.map((c, ci) => `<div class="info-cat"><div class="info-title">${esc(c.title)}</div><div class="info-btns">${c.buttons.map((b, bi) => `<button class="btn sm" data-act="info-open" data-c="${ci}" data-b="${bi}">${esc(b.label)}</button>`).join('')}</div></div>`).join('')
-      : '<div class="muted small">Add categories and buttons with "Edit". Every button opens a popup with your own text.</div>'}</div>`;
+  const title = (S.infoBoard && S.infoBoard.title) || 'Info';
+  return `<div class="panel info-card"><h3 class="sr-only">${esc(title)}</h3>${isOfficer() ? `<button class="btn sm sc-gear" data-act="info-edit" aria-label="Edit ${esc(title)}">⚙</button>` : ''}
+    <div class="info-card-body">${cats.length ? cats.map((c, ci) => `<div class="info-cat"><div class="info-title">${esc(c.title)}</div><div class="info-btns">${c.buttons.map((b, bi) => `<button class="btn sm" data-act="info-open" data-c="${ci}" data-b="${bi}">${esc(b.label)}</button>`).join('')}</div></div>`).join('')
+      : '<div class="muted small">Add categories and buttons with "Edit". Every button opens a popup with your own text.</div>'}</div></div>`;
+}
+// Each upcoming event gets its own little card inside the "Daily schedule" panel: title, a live
+// countdown, your own sign-up state (or two Sign up / Sign off buttons when you haven't answered
+// yet), and the attending count. Closed sign-ups (same signupClosesAt rule the day view uses) drop
+// the buttons for anyone but an officer, same as elsewhere.
+function scheduleItem(ev) {
+  const going = Object.values(ev.rsvps).filter((s) => s === 'yes').length;
+  const closed = Date.now() >= Date.parse(ev.signupClosesAt);
+  const locked = closed && !isOfficer();
+  const my = mine();
+  const rsvpHtml = my.length ? my.map((m) => {
+    const s = ev.rsvps[m.id] || 'none';
+    const name = my.length > 1 ? `<span class="muted small">${esc(m.name)}: </span>` : '';
+    if (s === 'yes') return `<div class="sched-status">${name}<span class="sched-yes">Signed up</span></div>`;
+    if (s === 'no') return `<div class="sched-status">${name}<span class="sched-no">Signed off</span></div>`;
+    if (locked) return `<div class="sched-status">${name}<span class="muted small">Sign-ups closed</span></div>`;
+    return `<div class="sched-status">${name}<button class="btn sm sched-attend" data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="yes">Sign up</button><button class="btn sm sched-decline" data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="no">Sign off</button></div>`;
+  }).join('') : '';
+  return `<div class="sched-item">
+    <a class="sched-title" href="#/events/${ev.id}">${esc(ev.title)}</a>
+    <div class="sched-countdown">${until(ev.start)}</div>
+    ${rsvpHtml}
+    <div class="sched-going"><b>${going}</b> going${ev.maxSignups ? ` of ${ev.maxSignups}` : ''}</div>
+  </div>`;
+}
+function schedulePanel(events) {
+  return `<div class="panel sched-card"><h3 class="sr-only">Daily schedule</h3>
+    <div class="sched-card-body"><div class="sched-list">${events.length ? events.map(scheduleItem).join('') : '<div class="muted">Nothing scheduled.</div>'}</div></div></div>`;
 }
 ACTIONS['info-open'] = (el, d) => {
   const b = S.infoBoard.categories[d.c].buttons[d.b];
@@ -570,38 +700,377 @@ FORMS.infoboard = (f) => {
   act(async () => { await api('/api/info-board', 'PUT', { title: f.elements.title.value.trim() || 'Info', categories }); closeDialog(); }, 'Saved');
 };
 
+// Compact Shotcaller summary for the dashboard's side column - officers only, shown even when
+// Shotcaller isn't configured yet (mirrors viewShotcaller()'s own not-set-up message) so officers
+// always know where to find it. Deliberately a one-shot load (UI.dashShotcaller), not the 5s poll
+// the full Shotcaller page runs - this is a glance, not a control surface.
+UI.dashShotcaller = null;
+async function loadDashShotcaller() {
+  try { UI.dashShotcaller = await api('/api/shotcaller/status'); } catch { UI.dashShotcaller = { active: false }; }
+  render();
+}
+AFTER_RENDER.push((page) => {
+  if (page === 'dashboard' && isOfficer() && S.cfg.shotcallerOn && UI.dashShotcaller === null) loadDashShotcaller();
+});
+// Left+top "lightbar" border - red while inactive, orange while a session is starting, green once
+// live - so an officer can read the state at a glance without opening the panel. scStarting is the
+// same flag the full Shotcaller page sets the instant its Start form submits (shotcaller.js); reusing
+// it here means this card lights up orange immediately for a start kicked off from this page or there.
+// The gear in the corner is separate from this panel's own state - it just edits the per-officer
+// quickstart defaults (S.prefs.quickShotcaller) that the Start button below uses, so it's shown
+// whenever Shotcaller is configured at all, regardless of whether a session is currently running.
+const scGearBtn = () => `<button class="btn sm sc-gear" data-act="sc-dash-settings" aria-label="Quickstart Shotcaller settings">⚙</button>`;
+// The artwork (with "SHOTCALLER" already lettered into it) is the full card background now, behind
+// everything - status text, the Start/Stop button, the data panels - not just a strip up top. A
+// visually-hidden heading is kept so the card still announces itself to screen readers.
+const scBanner = () => `<h3 class="sr-only">Shotcaller</h3>`;
+function shotcallerDashPanel() {
+  if (!isOfficer()) return '';
+  if (!S.cfg.shotcallerOn) {
+    return `<div class="panel"><h3>Shotcaller</h3><div class="muted small">Not set up on this server yet. Set <code>SHOTCALLER_URL</code> and <code>SHOTCALLER_API_KEY</code> to turn this on.</div></div>`;
+  }
+  const d = UI.dashShotcaller;
+  if (!d) return `<div class="panel"><h3>Shotcaller</h3><div class="muted small">Loading…</div></div>`;
+  const starting = typeof scStarting !== 'undefined' && scStarting;
+  const state = starting ? 'starting' : d.active ? 'active' : 'inactive';
+  const label = { inactive: 'Inactive', starting: 'Starting…', active: 'Active' }[state];
+  if (starting) {
+    // Same button, now an icon instead of the word "Start" - same circle-ish slot, orange like the
+    // lightbar instead of green. The CSS keyframe on .sc-starting-btn plays once on mount (green pill
+    // -> orange circle) to read as the Start button morphing into this, since a full re-render swaps
+    // the actual DOM node rather than animating it in place.
+    return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
+      <div class="muted small">${label}</div>
+      <button class="btn sc-start-btn sc-starting-btn" disabled aria-label="Starting session"><span class="sc-spinner"></span></button></div></div>`;
+  }
+  if (!d.active) {
+    // The fast path: one click here starts a session straight away using this officer's own
+    // quickstart defaults (gear icon above) instead of opening the full Start dialog - "nothing much
+    // to set up" because the setup already happened, once, in that dialog. The full Shotcaller page's
+    // own Start dialog (and the guild-wide Admin > Shotcaller defaults it uses) are untouched by this.
+    return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
+      <div class="muted small">${label} · No session running.</div>
+      <button class="btn sc-start-btn" data-act="sc-dash-start">▶ Start</button>
+      <div class="muted small" style="margin-top:10px"><a href="#/shotcaller">Open Shotcaller</a></div></div></div>`;
+  }
+  const connected = (d.parties || []).reduce((n, p) => n + (p.connected || 0), 0);
+  const dedicated = (d.dedicated || []).map((id) => scName(id)).join(', ');
+  // Stage 3: the icon morphs again (sc-stop-btn's keyframe), orange circle -> red "Stop" pill, same
+  // trick as stage 1->2. Three small data panels then cascade in underneath - each one's label fades
+  // in on its own (slow opacity-only animation) while its value box pops up a beat later, staggered
+  // per panel via the --d custom property so they arrive left-to-right rather than all at once.
+  const dataItem = (i, label, value) => `<div class="sc-data-item" style="--d:${i * .15}s">
+    <div class="sc-data-label">${esc(label)}</div>
+    <div class="sc-data-box">${value}</div></div>`;
+  return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
+    <div class="muted small">${label}${d.muted ? ' · 🔇 Muted' : ''}</div>
+    <button class="btn sc-stop-btn" data-act="sc-dash-stop">■ Stop</button>
+    <div class="muted small" style="margin-top:10px"><a href="#/shotcaller">Open Shotcaller</a></div>
+    <div class="sc-data-grid">
+      ${dataItem(0, 'Shotcaller in charge', esc(dedicated || '—'))}
+      ${dataItem(1, 'Voice channels', (d.parties || []).length)}
+      ${dataItem(2, 'Players connected', connected)}
+    </div></div></div>`;
+}
+ACTIONS['sc-dash-stop'] = () => {
+  if (!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.')) return;
+  act(async () => { await api('/api/shotcaller/stop', 'POST'); await loadDashShotcaller(); }, 'Shotcaller session stopped');
+};
+// Starts a session right away from the officer's own saved quickstart defaults - no dialog. Falls
+// back to the first available voice channel if none is saved yet (or the saved one no longer
+// exists), and to GvG - 8 parties / no dedicated caller if those were never set either.
+ACTIONS['sc-dash-start'] = () => {
+  (async () => {
+    try {
+      const q = (S.prefs && S.prefs.quickShotcaller) || {};
+      let channelId = q.channelId;
+      if (channelId) {
+        const { channels } = await api('/api/shotcaller/voice-channels');
+        if (!(channels || []).some((c) => c.id === channelId)) channelId = '';
+      }
+      if (!channelId) {
+        const { channels } = await api('/api/shotcaller/voice-channels');
+        if (!channels || !channels.length) return toast('No voice channels found in that Discord server.', true);
+        channelId = channels[0].id;
+      }
+      const count = q.mode === 'custom' ? Math.round(Number(q.customCount)) : Number(q.mode || 8);
+      if (!Number.isInteger(count) || count < 1 || count > 12) return toast('Your quickstart party count looks off - fix it in the gear settings.', true);
+      scStarting = true; render();
+      try {
+        await api('/api/shotcaller/start', 'POST', { channelId, count, partyNames: [], dedicatedCallerId: q.dedicatedCallerId || null });
+        toast('Shotcaller session started');
+      } finally {
+        scStarting = false;
+        await loadDashShotcaller();
+      }
+    } catch (e) { toast(e.message, true); }
+  })();
+};
+// Gear popup: only the defaults this dashboard card's own Start button uses - saved per officer on
+// /api/prefs under quickShotcaller, entirely separate from Admin > Shotcaller's guild-wide defaults
+// (S.settings.shotcaller) and from the full Shotcaller page's own Start dialog.
+ACTIONS['sc-dash-settings'] = () => {
+  (async () => {
+    const q = (S.prefs && S.prefs.quickShotcaller) || {};
+    let channels = [], channelError = '';
+    try { channels = (await api('/api/shotcaller/voice-channels')).channels || []; }
+    catch (e) { channelError = e.message; }
+    const st = S.settings.shotcaller || {};
+    const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
+    openDialog(`<form data-form="sc-quickstart-prefs"><h2>Quickstart Shotcaller settings</h2>
+      <div class="muted small" style="margin:-8px 0 12px">Only for the fast Start button on your dashboard - Admin &gt; Shotcaller's own defaults aren't changed by this.</div>
+      <div class="field"><label>Voice channel</label>
+        ${channels.length
+          ? `<select name="channelId"><option value="">First available channel</option>${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === q.channelId ? 'selected' : ''}>🔊 ${esc(c.name)}</option>`).join('')}</select>`
+          : `<div class="muted small">${channelError ? esc(channelError) : 'No voice channels found.'} The first available channel will be used when you start.</div>`}
+      </div>
+      <div class="row">
+        <div class="field"><label>Mode</label>
+          <select name="mode" data-act="sc-dash-mode" id="sc-dash-mode">
+            <option value="8" ${q.mode !== '12' && q.mode !== 'custom' ? 'selected' : ''}>GvG - 8 parties</option>
+            <option value="12" ${q.mode === '12' ? 'selected' : ''}>Full Guild - 12 parties</option>
+            <option value="custom" ${q.mode === 'custom' ? 'selected' : ''}>Custom - 1 to 12</option>
+          </select></div>
+        <div class="field ${q.mode === 'custom' ? '' : 'hidden'}" id="sc-dash-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" value="${q.customCount || 8}"></div>
+      </div>
+      <div class="field"><label>Dedicated caller</label>
+        <select name="dedicatedCallerId">
+          <option value="">No dedicated caller - anyone can call out</option>
+          ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === q.dedicatedCallerId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select></div>
+      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
+    </form>`, true);
+  })();
+};
+CHANGES['sc-dash-mode'] = (el) => { $('#sc-dash-custom').classList.toggle('hidden', el.value !== 'custom'); };
+FORMS['sc-quickstart-prefs'] = (f, fd) => act(async () => {
+  await api('/api/prefs', 'PUT', {
+    quickShotcaller: {
+      channelId: fd.channelId || '',
+      mode: fd.mode,
+      customCount: fd.mode === 'custom' ? Math.round(Number(fd.customCount)) || 8 : 8,
+      dedicatedCallerId: fd.dedicatedCallerId || '',
+    },
+  });
+  closeDialog();
+}, 'Saved');
+
+/* ================= Attendance Tracking (dashboard panel, officer only) =================
+   A direct, one-event-at-a-time front end for the voice-attendance engine that already runs continuously in
+   the background (server-shotcaller.js's pollVoiceAttendance, started the moment Shotcaller runs for an
+   event) - pick which event to watch, flip it between automatic and manual tracking (the very same toggle as
+   "Voice channel tracking and Reminders" on that event's own page - this is the same field, just reachable
+   from here too), start the watch, and see live numbers while it runs, all without first having to find the
+   right event. Nothing here invents a second attendance system: every sighting is already permanent (saved to
+   ev.attended) the instant it's confirmed - "Save track" and its 15-minute auto-save are a bookkeeping
+   close-out once the watch itself has ended, never where the data lives, so a refresh mid-track never loses
+   anything. */
+let AT = { eventId: null, live: null };
+let atTimer = null, atTimerFor = null;
+// "Happening now" has no real end time in this app's event model (events are a single start instant, no
+// duration field) - a reasonable stand-in is "started within the last 3 hours and hasn't been superseded by a
+// later pick", long enough to cover a typical raid/siege without still calling something from yesterday
+// "ongoing".
+const ATT_ONGOING_MS = 3 * 3600000;
+function attGroups() {
+  const now = Date.now();
+  const sorted = [...S.events].sort((a, b) => new Date(a.start) - new Date(b.start));
+  const ongoing = sorted.filter((e) => { const t = new Date(e.start).getTime(); return t <= now && now - t < ATT_ONGOING_MS; });
+  const upcoming = sorted.filter((e) => new Date(e.start).getTime() > now);
+  const past = sorted.filter((e) => new Date(e.start).getTime() <= now && !ongoing.includes(e)).reverse();
+  return { ongoing, upcoming, past };
+}
+// Default pick, only when nothing has been chosen yet (or the chosen event disappeared) - an officer's own
+// pick always sticks across re-renders instead of snapping back every time S.events refreshes.
+function attDefaultEvent() {
+  if (AT.eventId && S.events.some((e) => e.id === AT.eventId)) return;
+  const { ongoing, upcoming, past } = attGroups();
+  const pick = ongoing[0] || upcoming[0] || past[0];
+  AT.eventId = pick ? pick.id : null;
+}
+function attStopPoll() { if (atTimer) { clearInterval(atTimer); atTimer = null; atTimerFor = null; } }
+async function attPollOnce() {
+  if (!AT.eventId) return;
+  try { AT.live = await api(`/api/events/${AT.eventId}/voice-track/live`); } catch { AT.live = null; }
+  if (route().page === 'dashboard' && !$('#dlg').open) render();
+}
+// Polls every 5s while this event's track is either running or finished-but-not-yet-saved (the two states
+// that actually change on their own without an officer doing anything) - stops the moment neither is true, or
+// the officer leaves the page, same lifecycle AFTER_RENDER already uses for Shotcaller's own 5s poll.
+AFTER_RENDER.push((page) => {
+  if (page !== 'dashboard' || !isOfficer()) { attStopPoll(); return; }
+  attDefaultEvent();
+  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  const vt = ev && ev.voiceTracking;
+  const shouldPoll = !!(vt && (vt.active || (vt.startedAt && !vt.finishedAt)));
+  if (!shouldPoll) { attStopPoll(); AT.live = null; return; }
+  if (atTimerFor === AT.eventId && atTimer) return;
+  attStopPoll();
+  atTimerFor = AT.eventId;
+  attPollOnce();
+  atTimer = setInterval(attPollOnce, 5000);
+});
+function attendanceTrackPanel() {
+  if (!isOfficer()) return '';
+  attDefaultEvent();
+  const mode = S.settings.attendanceMode === 'voice' ? 'voice' : 'pin';
+  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  const { ongoing, upcoming, past } = attGroups();
+  const group = (label, list) => (list.length ? `<optgroup label="${esc(label)}">${list.map((e) => `<option value="${e.id}" ${AT.eventId === e.id ? 'selected' : ''}>${esc(e.title)} - ${fmtShort(e.start)}</option>`).join('')}</optgroup>` : '');
+  return `<div class="att-wrap">
+    <div class="panel att-card">
+      <h3 class="sr-only">Attendance Tracking</h3>
+      <div class="att-card-body">
+        <div class="att-sect">
+          <div class="att-mode-row">
+            <div><div class="muted small">Tracking method (guild default)</div><div class="att-mode-label">${mode === 'voice' ? 'Voice Attendance Track' : 'PIN Attendance Track'}</div></div>
+            <button class="btn sm" data-act="att-mode-toggle">Switch to ${mode === 'voice' ? 'PIN' : 'Voice'}</button>
+          </div>
+        </div>
+        <div class="att-sect">
+          <div class="field" style="margin:0"><label for="att-event-select">Event to track</label>
+            <select id="att-event-select" data-act="att-event-pick" aria-label="Event to track">${S.events.length ? `${group('Happening now', ongoing)}${group('Upcoming', upcoming)}${group('Past', past)}` : '<option>No events yet</option>'}</select>
+          </div>
+        </div>
+        ${mode === 'voice' && ev ? attVoiceControls(ev) : mode === 'voice' ? '<div class="att-sect muted small">No events to track yet - create one on the Events page.</div>' : '<div class="att-sect muted small">PIN attendance is in use - the attendance PIN for this event lives on the event\'s own page.</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+function attVoiceControls(ev) {
+  const vt = ev.voiceTracking;
+  const running = !!(vt && vt.active);
+  const awaitingSave = !!(vt && !vt.active && vt.startedAt && !vt.finishedAt);
+  const auto = ev.voiceTrackAuto !== false;
+  const live = AT.live || { trackedCount: 0, deafenedCount: 0, noShowCount: 0 };
+  const dataItem = (i, label, value) => `<div class="sc-data-item" style="--d:${i * .15}s">
+    <div class="sc-data-label">${esc(label)}</div>
+    <div class="sc-data-box">${value}</div></div>`;
+  return `<div class="att-sect">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text)">
+        <input type="checkbox" data-act="att-auto-toggle" data-id="${ev.id}" ${auto ? 'checked' : ''}> Automatic tracking
+      </label>
+      <div class="muted small" style="margin:4px 0 0">${auto
+        ? 'Starts on its own the moment Shotcaller is started for this event. Switching this off also switches it off on the event\'s own page, and the other way round.'
+        : 'Off - start tracking by hand below, and add any extra channels to watch first if you need to.'}</div>
+      <div class="att-reveal ${auto ? '' : 'att-reveal-open'}">
+        <div class="field" style="margin-top:12px"><label>Extra channels tracked for this event</label>
+          <form data-form="att-extra" data-id="${ev.id}">
+            ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(ev.voiceTrackExtraChannelIds || []) : ''}
+            <button class="btn sm" style="margin-top:8px">Save channels</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="att-sect att-action">
+      ${running
+        ? `<button class="btn att-running-btn" disabled><span class="sc-spinner"></span> Running</button>`
+        : awaitingSave
+          ? `<button class="btn att-save-btn" data-act="att-save" data-id="${ev.id}">Save track</button>
+             <div class="muted small att-save-hint">Click "Save track" to save all the collected attendance for this event. If you don't, it saves itself automatically after 15 minutes - nothing is lost either way, even on a refresh.</div>`
+          : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>`}
+    </div>
+    ${running || awaitingSave ? `<div class="att-sect"><div class="sc-data-grid">
+        ${dataItem(0, 'Players tracked', live.trackedCount)}
+        ${dataItem(1, 'Deafened', live.deafenedCount)}
+        ${dataItem(2, 'Did not show up', live.noShowCount)}
+      </div></div>` : ''}`;
+}
+ACTIONS['att-mode-toggle'] = () => act(() => api('/api/settings', 'PUT', { attendanceMode: S.settings.attendanceMode === 'voice' ? 'pin' : 'voice' }), 'Tracking method changed');
+CHANGES['att-event-pick'] = (el) => { AT.eventId = Number(el.value); AT.live = null; render(); };
+CHANGES['att-auto-toggle'] = (el) => {
+  const evn = byId(S.events, Number(el.dataset.id));
+  if (!evn) return;
+  act(() => patchEvent(evn, { voiceTrackAuto: el.checked }), el.checked ? 'Automatic tracking is on' : 'Automatic tracking is off');
+};
+FORMS['att-extra'] = (f, fd, id) => {
+  const evn = byId(S.events, Number(id));
+  if (!evn) return;
+  const ids = [...f.querySelectorAll('input[name=vtxc]:checked')].map((i) => i.value);
+  act(() => patchEvent(evn, { voiceTrackExtraChannelIds: ids }), 'Channels saved');
+};
+ACTIONS['att-start'] = (el, d) => act(() => api(`/api/events/${d.id}/voice-track/start`, 'POST', {}), 'Tracking started');
+ACTIONS['att-save'] = (el, d) => act(async () => { await api(`/api/events/${d.id}/voice-track/finish`, 'POST', {}); attStopPoll(); AT.live = null; }, 'Track saved');
+
 VIEWS.dashboard = () => {
   const { order, hidden } = dashPrefs(), off = isOfficer();
   const active = S.members.filter((m) => m.active);
   const leaders = active.filter((m) => LEAD().includes(m.rank)).sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank) || a.name.localeCompare(b.name));
-  const next = S.events.filter((e) => new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start))[0];
+  const upcoming = S.events.filter((e) => new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start));
   const ann = brand().announcement;
   const showLeadership = !hidden.has('leadership') && (off || !hiddenFromMembers('leadership'));
   const showNext = !hidden.has('next');
   const showInfo = !hidden.has('info') && (off || ((S.infoBoard.categories || []).length > 0));
-  const side = showNext || showInfo;
+  const showShotcaller = off;
+  // A member (not an officer) gets Guild info stacked under Your Leadership instead of over in the
+  // side column - only when Leadership is actually showing here to stack it under.
+  const infoInLeadership = showInfo && !off && showLeadership;
+  const sideHasInfo = showInfo && !infoInLeadership;
+  const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: ann && !hidden.has('announcement') ? `<div class="announce full" role="note"><b>Announcement</b><div>${esc(ann)}</div></div>` : '',
-    stats: hidden.has('stats') ? '' : `<div class="full">${heroHtml()}${statsHtml()}</div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
+    stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
-    leadership: showLeadership ? leadershipPanel(leaders, side) : '',
-    next: side ? `<div class="side ${showLeadership ? '' : 'full'}">${showNext ? `<div class="panel"><h3>Next event</h3>${next ? nextEventCard(next) : '<div class="muted">Nothing scheduled.</div>'}</div>` : ''}${showInfo ? infoPanel() : ''}</div>` : '',
+    attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
+    leadership: showLeadership ? leadershipPanel(leaders, side, infoInLeadership) : '',
+    next: side ? `<div class="side ${showLeadership ? '' : 'full'}">${showShotcaller ? shotcallerDashPanel() : ''}${showNext ? schedulePanel(upcoming) : ''}${sideHasInfo ? infoPanel() : ''}</div>` : '',
   };
   return `
   <div class="page-head"><div><h1>Dashboard</h1><div class="muted">Welcome, ${esc(S.user.name)}.</div></div>${off ? '<button class="btn" data-act="dash-customize">Customize</button>' : ''}</div>
   <div class="dash-panels">${myStatusBanner()}${order.map((k, i) => (panels[k] ? panels[k].replace('class="', `style="order:${i}" class="`) : '')).join('')}</div>`;
 };
-// Two sections: the tasks (only the leadership sees them) and a short "who is who" that everybody sees.
-function leadershipPanel(leaders, side) {
+// The banner's text box has a fixed height (a % of the banner), so a long announcement
+// needs a smaller font to still fit without spilling out. clamp(...cqw) in style.css
+// already scales the font with the banner's own width; this only steps it down further
+// when the actual text is tall enough to overflow the box, then restores the CSS size
+// for anything that already fits. Runs after every dashboard render and on resize.
+function fitAnnounceText() {
+  const el = $('[data-announce-text]');
+  if (!el) return;
+  el.style.fontSize = '';
+  const box = el.parentElement;
+  const max = parseFloat(getComputedStyle(el).fontSize);
+  let size = max;
+  while (el.scrollHeight > box.clientHeight && size > 9) {
+    size -= 0.5;
+    el.style.fontSize = size + 'px';
+  }
+}
+AFTER_RENDER.push((page) => { if (page === 'dashboard') fitAnnounceText(); });
+window.addEventListener('resize', () => { if (route().page === 'dashboard') fitAnnounceText(); });
+// Two separate panels, stacked in one column: "Tasks" (leadership only - their open/done duties)
+// and "Your Leadership" (everyone - who holds which rank, plus a one-line blurb per leader that
+// only an officer can set, via the gear icon, rather than the inline per-card input this used to be).
+// showInfoHere: a member (not an officer) gets "Guild info" stacked right below "Your Leadership"
+// in this same column, rather than over in the side column with Shotcaller/Daily schedule - an
+// officer's layout is unchanged (Guild info stays in the side column, since this column is already
+// busy with Tasks). Only passed as true when the caller has decided Guild info belongs here.
+function leadershipPanel(leaders, side, showInfoHere) {
   const off = isOfficer();
   const overview = leaders.length
     ? leaders.map((m) => `<div class="ov-row"><b>${esc(m.name)}</b>: ${esc(m.rank)}. <span class="muted">Jobs:</span> ${m.jobs ? esc(m.jobs) : '<span class="muted">-</span>'}</div>`).join('')
     : `<div class="muted">Nobody holds a leadership rank yet.${off ? ` Give a character the rank ${LEAD().map((r) => `"${esc(r)}"`).join(' or ')} on the Member page.` : ''}</div>`;
-  return `<div class="panel ${side ? 'wide' : 'full'}"><h3>Leadership</h3>
-    ${off ? `<div class="sub-head">Tasks <span class="muted small">(only the leadership sees this)</span></div>${leaders.length ? leaders.map(leaderCard).join('') : '<div class="muted small">No leaders yet.</div>'}<div class="sub-sep"></div>` : ''}
-    <div class="sub-head">Who is who</div>${overview}</div>`;
+  return `<div class="${side ? '' : 'full'}">
+    ${off ? `<div class="panel tasks-card"><h3 class="sr-only">Tasks</h3><div class="tasks-card-body">${leaders.length ? leaders.map(leaderCard).join('') : '<div class="muted small">No leaders yet.</div>'}</div></div>` : ''}
+    <div class="panel lead-card"><h3 class="sr-only">Your Leadership</h3>${off ? '<button class="btn sm sc-gear" data-act="leadership-text-edit" aria-label="Edit leadership text">⚙</button>' : ''}<div class="lead-card-body">${overview}</div></div>
+    ${showInfoHere ? infoPanel() : ''}
+  </div>`;
 }
-FORMS.jobs = (f, fd, id) => act(() => api(`/api/members/${id}/jobs`, 'PUT', { jobs: fd.jobs }), 'Saved');
+ACTIONS['leadership-text-edit'] = () => {
+  const leaders = S.members.filter((m) => m.active && LEAD().includes(m.rank)).sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank) || a.name.localeCompare(b.name));
+  openDialog(`<form data-form="leadershipJobs"><h2>Your Leadership text</h2>
+    <div class="muted small" style="margin:-8px 0 12px">Shown next to each leader's name under "Your Leadership". Visible to everyone.</div>
+    ${leaders.length ? leaders.map((m) => `<div class="field"><label>${esc(m.name)} <span class="muted small">(${esc(m.rank)})</span></label><input name="jobs-${m.id}" value="${esc(m.jobs || '')}" maxlength="120" placeholder="For example: Managing the Wargames"></div>`).join('') : '<div class="muted small">No leaders yet.</div>'}
+    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div></form>`, true);
+};
+FORMS.leadershipJobs = (f) => act(async () => {
+  const leaders = S.members.filter((m) => m.active && LEAD().includes(m.rank));
+  await Promise.all(leaders.map((m) => {
+    const el = f.elements[`jobs-${m.id}`];
+    return el ? api(`/api/members/${m.id}/jobs`, 'PUT', { jobs: el.value }) : null;
+  }));
+  closeDialog();
+}, 'Saved');
 
 // A player's own warnings, disqualification and leave, always on top of their dashboard while they exist.
 function myStatusBanner() {

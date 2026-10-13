@@ -475,8 +475,10 @@ function lootPanel() {
       </div></details>`;
   };
 
-  return `<div class="panel" style="margin-bottom:20px">
-    <div class="ev-title"><div><h3>Qualified for loot</h3>
+  return `<div class="panel loot-card" style="margin-bottom:20px">
+    <h3 class="sr-only">Qualified for loot</h3>
+    <div class="loot-card-body">
+    <div class="ev-title"><div>
       <div class="muted small">Needs at least ${ls.need}% attendance on mandatory events, ${fmtDay(start)} to ${fmtDay(end)} (${ls.days} days).${off ? '' : ' You only see your own characters here.'}</div></div>
       ${off
         ? `<div class="loot-ctrl"><label for="loot-date">Count back ${ls.days} days from</label><input id="loot-date" type="date" value="${ymd(ref)}" data-act="loot-date">${S.settings.lootFrom ? '<button class="btn sm" data-act="loot-today">Use today</button>' : ''}</div>`
@@ -509,6 +511,7 @@ function lootPanel() {
     ${rows.length ? (counted.length ? '' : '<div class="muted" style="margin-top:12px">No mandatory events with recorded attendance in this period, so there are no percentages yet. Mark events as mandatory when you create them.</div>')
       : `<div class="muted" style="margin-top:12px">${off ? 'No active characters yet.' : 'You have no active characters. Add one on the Member page to see your attendance.'}</div>`}
     ${shown.length ? `<div class="loot-grid">${shown.map(row).join('')}</div>` : (rows.length ? '<div class="muted" style="margin-top:12px">Nobody is above the threshold yet.</div>' : '')}
+    </div>
   </div>`;
 }
 
@@ -516,19 +519,15 @@ function leaderCard(m) {
   const duties = S.duties.filter((d) => d.memberId === m.id)
     .sort((a, b) => ['doing', 'todo', 'done'].indexOf(a.status) - ['doing', 'todo', 'done'].indexOf(b.status) || new Date(a.at) - new Date(b.at));
   const open = duties.filter((d) => d.status !== 'done').length;
-  const hosting = S.events.filter((e) => e.createdBy === m.owner && new Date(e.start) >= Date.now())
-    .sort((a, b) => new Date(a.start) - new Date(b.start));
   const editable = canEdit(m);
   return `<div class="leader">
     <div class="leader-head"><b>${esc(m.name)}</b><span class="rank-tag">${esc(m.rank)}</span>${roleChip(m.role)}
       <span class="open">${open} open · ${duties.length - open} done</span></div>
-    ${isOfficer() ? `<form class="jobs-form" data-form="jobs" data-id="${m.id}"><label>Jobs (everybody sees this)</label><div style="display:flex;gap:6px"><input name="jobs" value="${esc(m.jobs || '')}" maxlength="120" placeholder="For example: Managing the Wargames"><button class="btn sm">Save</button></div></form>` : ''}
     ${duties.length ? `<ul class="duties">${duties.map((d) => `<li class="duty ${d.status}">
       ${editable ? `<button class="st" data-act="duty-cycle" data-id="${d.id}" data-s="${NEXT_STATUS[d.status]}" title="Click to change status">${STATUS[d.status]}</button>` : `<span class="st">${STATUS[d.status]}</span>`}
       <span class="txt">${esc(d.text)}</span>
       ${editable ? `<button class="x" data-act="duty-del" data-id="${d.id}" aria-label="Remove task">×</button>` : ''}</li>`).join('')}</ul>`
       : '<div class="muted small">No tasks listed yet.</div>'}
-    ${hosting.length ? `<p class="hosting">Hosting: ${hosting.slice(0, 3).map((e) => `<a href="#/events/${e.id}">${esc(e.title)}</a> (${fmtShort(e.start)})`).join(', ')}${hosting.length > 3 ? ` and ${hosting.length - 3} more` : ''}</p>` : ''}
     ${editable ? `<form class="add-duty" data-form="duty" data-id="${m.id}"><input name="text" maxlength="140" required placeholder="Add a task or responsibility" aria-label="New task for ${esc(m.name)}"><button class="btn sm">Add</button></form>` : ''}
   </div>`;
 }
@@ -568,8 +567,9 @@ function viewRoster() {
     return { r, n };
   });
   return `
-  <div class="page-head">
-    <div><h1>Member</h1><div class="muted">${active.length} active characters · average gear score ${avgGs}</div></div>
+  <div class="members-banner"><h1 class="sr-only">Member</h1></div>
+  <div class="page-head" style="margin-top:12px">
+    <div class="muted">${active.length} active characters · average gear score ${avgGs}</div>
     ${S.members.some((m) => m.owner === S.user.key) ? '' : '<button class="btn primary" data-act="member-new">Add character</button>'}
   </div>
   <div class="comp">

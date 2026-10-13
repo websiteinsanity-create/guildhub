@@ -97,6 +97,31 @@ module.exports = function install(ctx) {
   // already built to name those channels in the first place - reusing it here instead of recomputing it is what
   // keeps this lined up with the real channel ids even when some of ev.parties are placeholders skipped
   // entirely from the session.
+  // The dashboard's "Attendance Tracking" card (public/features.js attendanceTrackPanel) shows a track as
+  // "running" while voiceTracking.active is true, and as "finished, not yet saved" for the 15 minutes after -
+  // the window in which an officer can hit "Save track" by hand before it saves itself. One in-memory timer
+  // per event is all that needs tracking (an event can only ever be mid-track once at a time) - lost on a
+  // server restart, same as any other setTimeout, but that only ever widens the window to "whenever the
+  // server next notices it's overdue", never loses the attendance itself (ev.attended already persisted the
+  // moment each sighting was confirmed - "saving" a track is a bookkeeping close-out, not where the data lives).
+  const autoFinishTimers = new Map();
+  const AUTO_FINISH_MS = 15 * 60000;
+  function clearAutoFinishTimer(evId) {
+    const t = autoFinishTimers.get(evId);
+    if (t) { clearTimeout(t); autoFinishTimers.delete(evId); }
+  }
+  function finishVoiceTracking(ev, user) {
+    if (!ev.voiceTracking || ev.voiceTracking.finishedAt) return;
+    ev.voiceTracking.finishedAt = Date.now();
+    clearAutoFinishTimer(ev.id);
+    save();
+    audit(user || { name: 'Guild Hall' }, 'event.voicetrack.finish', { type: 'event', id: ev.id, name: ev.title },
+      `${user ? user.name : 'The system'} saved the voice-attendance track for "${ev.title}".`);
+  }
+  function scheduleAutoFinish(ev) {
+    clearAutoFinishTimer(ev.id);
+    autoFinishTimers.set(ev.id, setTimeout(() => { const fresh = findEvent(ev.id); if (fresh) finishVoiceTracking(fresh, null); }, AUTO_FINISH_MS));
+  }
   function beginVoiceTracking(ev, started, realRest) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
     if (!started || !Array.isArray(started.parties)) return;
@@ -105,11 +130,17 @@ module.exports = function install(ctx) {
     // tracked" right now is stale the moment this one starts. Stop watching it rather than risk crediting the
     // wrong event later from a channel id the new session happens to reuse (the anchor channel, especially,
     // is very often the same existing voice channel every time).
-    for (const other of db().events) if (other.id !== ev.id && other.voiceTracking) other.voiceTracking.active = false;
+    for (const other of db().events) {
+      if (other.id !== ev.id && other.voiceTracking && other.voiceTracking.active) {
+        other.voiceTracking.active = false;
+        if (!other.voiceTracking.finishedAt) scheduleAutoFinish(other);
+      }
+    }
     const partyChannels = [{ channelId: started.parties[0] && started.parties[0].channelId, members: [...ev.parties[0].members] }]
       .concat(realRest.map((p, i) => ({ channelId: started.parties[i + 1] && started.parties[i + 1].channelId, members: [...p.members] })))
       .filter((pc) => pc.channelId);
-    ev.voiceTracking = { active: true, partyChannels, seenAt: {} };
+    ev.voiceTracking = { active: true, partyChannels, seenAt: {}, startedAt: Date.now(), finishedAt: null };
+    clearAutoFinishTimer(ev.id);
     save();
   }
 
@@ -131,6 +162,58 @@ module.exports = function install(ctx) {
     beginVoiceTracking(ev, status, realRest);
     audit(user, 'event.voicetrack.start', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually started voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
+  }, { officer: true });
+
+  // The dashboard's "Save track" button (and its 15-minute auto-save fallback above) - a bookkeeping close-out,
+  // not where the attendance itself lives (every sighting was already committed to ev.attended the moment
+  // pollVoiceAttendance confirmed it). Safe to call more than once or after the auto-save already fired;
+  // finishVoiceTracking itself is a no-op once finishedAt is already set.
+  route('POST', '/api/events/:id/voice-track/finish', ({ user, params }) => {
+    const ev = findEvent(params.id);
+    need(ev, 404, 'Event not found.');
+    need(ev.voiceTracking, 400, 'Tracking was never started for this event.');
+    finishVoiceTracking(ev, user);
+    return eventFor(ev, user);
+  }, { officer: true });
+
+  // Live numbers for the dashboard's "Attendance Tracking" card while a track is running: how many of this
+  // event's tracked players have been confirmed so far, how many of them answered Going but have not been
+  // seen at all yet, and - a live read, not from the confirmed-sightings record - how many are sitting in
+  // voice deafened right now, regardless of the ignoreDeafened setting (that setting only governs whether a
+  // deafened player still gets CREDITED; showing the raw count here is what lets an officer actually see its
+  // effect rather than hiding the very thing it ignores).
+  route('GET', '/api/events/:id/voice-track/live', async ({ params }) => {
+    const ev = findEvent(params.id);
+    need(ev, 404, 'Event not found.');
+    const vt = ev.voiceTracking;
+    const trackedCount = (ev.attended || []).length;
+    const expectedIds = new Set(ev.parties.filter((p) => !partyIsPlaceholder(p)).flatMap((p) => p.members));
+    const noShowCount = [...expectedIds].filter((mid) => (ev.rsvps[mid] === 'yes') && !ev.attended.includes(mid)).length;
+    let deafenedCount = 0;
+    if (vt && vt.active) {
+      try {
+        const settings = db().settings;
+        const status = await callSession('');
+        if (status && status.active) {
+          const byChannel = new Map();
+          for (const p of status.parties || []) byChannel.set(p.channelId, p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id })));
+          const evExtraIds = new Set([...(settings.voiceTrackExtraChannelIds || []), ...(ev.voiceTrackExtraChannelIds || [])].filter(Boolean));
+          let extraStates = [];
+          if (evExtraIds.size) {
+            try {
+              const r = await callBot(`/voice-presence?channels=${[...evExtraIds].map(encodeURIComponent).join(',')}`);
+              extraStates = (r.channels || []).filter((c) => c.found).flatMap((c) => c.connectedStates || []);
+            } catch { /* extra channels are a bonus for this readout too */ }
+          }
+          const memberIds = new Set(vt.partyChannels.flatMap((p) => p.members));
+          const ownerIsDeaf = new Map();
+          for (const pc of vt.partyChannels) for (const s of byChannel.get(pc.channelId) || []) if (s.deaf) ownerIsDeaf.set(s.id, true);
+          for (const s of extraStates) if (s.deaf) ownerIsDeaf.set(s.id, true);
+          for (const mid of memberIds) { const m = findMember(mid); if (m && ownerIsDeaf.get(m.owner)) deafenedCount++; }
+        }
+      } catch { /* bot unreachable right now just reads back as 0 - not worth failing the whole panel over */ }
+    }
+    return { active: !!(vt && vt.active), startedAt: (vt && vt.startedAt) || null, finishedAt: (vt && vt.finishedAt) || null, trackedCount, deafenedCount, noShowCount };
   }, { officer: true });
 
   // Two independent checks - mic-muted and deafened don't have to come together to be excluded any more.
@@ -156,7 +239,12 @@ module.exports = function install(ctx) {
       // The session ended (an officer stopped it, or it was auto-replaced by a new one for another event) -
       // nothing more to learn. Whoever was already marked attended during the session stays marked; this only
       // ends the watch so the next poll doesn't keep calling the bot about a session that is no longer there.
-      for (const ev of tracked) ev.voiceTracking.active = false;
+      // The dashboard's "Save track" window (and its 15-minute auto-save) starts counting from exactly this
+      // moment, not from when tracking began.
+      for (const ev of tracked) {
+        ev.voiceTracking.active = false;
+        if (!ev.voiceTracking.finishedAt) scheduleAutoFinish(ev);
+      }
       save();
       return;
     }
