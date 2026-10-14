@@ -203,6 +203,17 @@ function createDiscord(env = process.env) {
     const r = await api(`/channels/${channelId}/messages/${messageId}`, { method: 'DELETE', bot: true });
     return r.ok || r.status === 404 ? { ok: true } : { ok: false, error: explain(r) };
   }
+  // Rewrites a message the bot itself posted earlier, in place - used to refresh the shared daily schedule
+  // post's live per-event counts after someone answers one of its buttons, without reposting (which would
+  // bump it to the bottom of the channel and lose everyone's place) or losing the still-live buttons on every
+  // OTHER event in that same message. A message that no longer exists (deleted by hand) is reported back as
+  // a plain error, not treated as success like deleteMessage above - the caller needs to know its tracked
+  // "current" message is gone so it can post a fresh one instead of silently going stale forever.
+  async function editMessage(channelId, messageId, { content, components }) {
+    if (!botEnabled || !isSnowflake(channelId) || !isSnowflake(messageId)) return { ok: false, error: 'Nothing to edit.' };
+    const r = await api(`/channels/${channelId}/messages/${messageId}`, { method: 'PATCH', bot: true, body: { content, allowed_mentions: { parse: [] }, ...(components !== undefined ? { components } : {}) } });
+    return r.ok ? { ok: true } : { ok: false, error: r.status === 404 ? 'That message no longer exists (deleted?).' : explain(r) };
+  }
   async function listChannels() {
     if (!botEnabled) return { ok: false, error: 'No bot token set.' };
     const r = await api(`/guilds/${cfg.guildId}/channels`, { bot: true });
@@ -249,7 +260,7 @@ function createDiscord(env = process.env) {
 
   const avatarUrl = (u) => (u && u.avatar && isSnowflake(u.id) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '');
 
-  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons, rsvpButtons, actionButtons, verifyInteraction };
+  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, editMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons, rsvpButtons, actionButtons, verifyInteraction };
 }
 
 module.exports = { createDiscord, isSnowflake };
