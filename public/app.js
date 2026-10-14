@@ -5,7 +5,7 @@ const S = { cfg: null, user: null, members: [], events: [], points: [], duties: 
 // scrolling - this only picks the starting view; "Week"/"Month" stay one tap away and stick for the rest of
 // the session once chosen.
 const isMobileViewport = () => window.matchMedia('(max-width: 860px)').matches;
-const UI = { vodJump: null, vodRestore: null, lootCompare: [], lootCompareOpen: false, lootCompareQ: '', rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: isMobileViewport() ? 'day' : 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
+const UI = { vodJump: null, vodRestore: null, lootCompare: [], lootCompareOpen: false, lootCompareQ: '', rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: isMobileViewport() ? 'day' : 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '', forceRoster: null };
 // Pages, click actions, change handlers and form handlers can be added from features.js.
 const AFTER_RENDER = [];  // functions run after a page was drawn (page name as argument)
 // Textareas marked data-autogrow (the coaching-point note and the VOD review note, both places you write a
@@ -878,7 +878,13 @@ function eventDetail(ev) {
   const admin = isOfficer();
   const roster = eventRoster(ev);
   const goingN = roster.filter((m) => ev.rsvps[m.id] === 'yes').length;
-  const tracked = rolled(ev);          // attendance has actually been recorded - the roster control becomes the 6-state version
+  // attendance has actually been recorded - the roster control becomes the 6-state version. rolled(ev) alone
+  // leaves no way to even START a manual roll call for an event where automatic tracking recorded nobody at
+  // all (attended.length === 0 reads identically to "never tracked") - an officer who clicks "Take attendance
+  // by hand" below forces the 6-state editor open for this one event regardless, entirely client-side: the
+  // first "Save attendance" naturally makes attended.length > 0 (unless every single row is left as a no-show,
+  // which is fine too - the button is right there to reopen it).
+  const tracked = rolled(ev) || UI.forceRoster === ev.id;
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
   const locked = closed && !isOfficer();                                  // officers can still change answers
   const myRows = mine().map((m) => rsvpRow(ev, m, locked)).join('');
@@ -896,6 +902,8 @@ function eventDetail(ev) {
     }).join('')}</div>` : '<div class="muted">Nobody on the roster yet.</div>'}
     ${admin && tracked && roster.length ? `<div style="margin-top:14px"><button class="btn primary sm" data-act="roster-save" data-id="${ev.id}">Save attendance</button>
       <span class="muted small">Change anyone's status above, then save - points (if on) are recalculated too.</span></div>` : ''}
+    ${admin && !tracked && roster.length ? `<div style="margin-top:14px"><button class="btn sm" data-act="roster-force-edit" data-id="${ev.id}">Take attendance by hand</button>
+      <span class="muted small">Nothing has been recorded for this event yet (no PIN entries, nobody confirmed by voice) - use this to mark who actually showed up yourself.</span></div>` : ''}
   </div>
 
   ${(() => {
@@ -1807,6 +1815,7 @@ document.addEventListener('click', async (e) => {
     if (!confirm('Sure to start tracking now?')) return;
     act(() => api(`/api/events/${d.id}/voice-track/start`, 'POST', {}), 'Tracking started');
   }
+  else if (a === 'roster-force-edit') { UI.forceRoster = Number(d.id); render(); }
   else if (a === 'roster-save') {
     const evn = byId(S.events, d.id);
     if (!evn) return;

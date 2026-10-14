@@ -506,15 +506,41 @@ VIEWS.points = () => {
       return `<tr><td class="muted small" style="white-space:nowrap">${fmtShort(p.at)}</td><td>${esc(m ? m.name : '?')}</td><td>${esc(p.reason)}</td><td class="num ${p.delta > 0 ? 'pos' : 'neg'}">${p.delta > 0 ? '+' : ''}${p.delta}</td>
         <td>${off && !p.eventId ? `<button class="btn sm" data-act="points-del" data-id="${p.id}" aria-label="Delete entry">×</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted">No entries yet.</div>'}</div>` : ''}`;
 };
+// The four results an officer can correct a past event to from the Attendance page's event-by-event list
+// (ACTIONS['att-detail'] below) - "On leave" is not offered here, since it comes from a separate
+// leave-of-absence record, not something settable through a player's rsvp/attended on one event.
+const ATT_EDIT_OPTIONS = [['attended', 'Came'], ['noshow', 'No-show'], ['declined', "Said can't"], ['noreply', 'No reply']];
 ACTIONS['att-detail'] = (el, d) => {
   const r = attRows(attEvents()).find((x) => x.owner === d.key);
   if (!r) return;
+  const off = isOfficer();
   openDialog(`<h2>${esc(r.name)}</h2>
     <div class="muted small" style="margin:-8px 0 12px">${r.chars.map((c) => esc(c.name)).join(', ')} · came to ${r.n} of ${r.total} events (${r.pct ?? 0}%) · ${r.noshow} no-show · ${r.noreply} without an answer · ${r.declined} said they can't</div>
     ${r.list.length ? `<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Event</th><th>Answered</th><th>Result</th></tr></thead><tbody>${r.list.slice().sort((a, b) => b.e.start.localeCompare(a.e.start)).map((x) => `<tr>
       <td class="muted small nowrap">${fmtShort(x.e.start)}</td><td>${esc(x.e.title)}${x.e.mandatory ? ' <span class="pill-m">Mandatory</span>' : ''}</td><td>${esc(x.answer)}</td>
-      <td><span class="st-pill ${ATT_STATUS[x.status][1]}">${ATT_STATUS[x.status][0]}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">No events with recorded attendance in this period.</div>'}
-    <div class="dlg-actions"><button class="btn primary" data-act="dlg-close">Close</button></div>`, true);
+      <td>${off && x.status !== 'leave' ? `<select class="status-pick" data-act="attdetail-stage" data-ev="${x.e.id}" data-rst="${x.status}" data-orig="${x.status}" aria-label="Result for ${esc(x.e.title)}">
+          ${ATT_EDIT_OPTIONS.map(([k, label]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>` : `<span class="st-pill ${ATT_STATUS[x.status][1]}">${ATT_STATUS[x.status][0]}</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">No events with recorded attendance in this period.</div>'}
+    <div class="dlg-actions">
+      ${off ? `<button class="btn primary hidden" id="attdetail-save" data-act="attdetail-save" data-owner="${esc(r.owner)}">Save</button>` : ''}
+      <button class="btn" data-act="dlg-close">Close</button>
+    </div>`, true);
+};
+// The select only stages locally (same pattern as the roster editor's CHANGES['roster-stage']) - nothing is
+// sent to the server, and no other row re-renders, until "Save" is actually clicked. The Save button itself
+// only appears once at least one row's staged value has actually changed from what it started as.
+CHANGES['attdetail-stage'] = (el) => {
+  el.dataset.rst = el.value;
+  const dirty = [...document.querySelectorAll('select[data-act="attdetail-stage"]')].some((s) => s.dataset.rst !== s.dataset.orig);
+  document.getElementById('attdetail-save')?.classList.toggle('hidden', !dirty);
+};
+ACTIONS['attdetail-save'] = (el, d) => {
+  const owner = d.owner;
+  const rows = [...document.querySelectorAll('select[data-act="attdetail-stage"]')].filter((s) => s.dataset.rst !== s.dataset.orig);
+  if (!rows.length) return;
+  act(async () => {
+    for (const sel of rows) await api(`/api/events/${sel.dataset.ev}/attendance-status`, 'POST', { owner, status: sel.dataset.rst });
+  }, rows.length === 1 ? 'Attendance updated' : `Attendance updated for ${rows.length} events`).then((ok) => { if (ok) ACTIONS['att-detail'](null, { key: owner }); });
 };
 
 /* ================= dashboard you can personalise ================= */

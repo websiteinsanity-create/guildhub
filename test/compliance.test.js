@@ -470,3 +470,48 @@ withServer('the attendance-% warning is suspended for as long as a starting base
   await run(s);
   assert.ok((await state(s, 'bob')).alert, 'a real poor record still triggers normally once the baseline has fully decayed out');
 });
+
+// ---------------------------------------------------------------- correcting one player's result by hand (Attendance page's event-by-event popup)
+withServer('an officer can correct one player\'s recorded result for a past event (Came / No-show / Said can\'t / No reply), and a no-longer-earned auto warning is withdrawn automatically', async (s) => {
+  const c = await cast(s);
+  assert.equal((await rules(s, { noShowLimit: 2, noReplyLimit: 50, minAttendance: 0, minEvents: 1, windowDays: 30, expiryDays: 10 })).status, 200);
+  // Ann says Going to two mandatory events and is recorded as a no-show both times (Bob attends both, so
+  // each event is "rolled" - attendance was actually taken - and is not simply unrecorded).
+  const e1 = await pastEvent(s, 5, { came: [c.bob], yes: [c.ann, c.bob] });
+  await pastEvent(s, 3, { came: [c.bob], yes: [c.ann, c.bob] });
+  await run(s);
+  let ann = await state(s, 'ann');
+  const warn = ann.warnings.find((w) => w.kind === 'noshow' && w.status === 'active');
+  assert.ok(warn, 'two no-shows reach the configured limit of 2 and hand out a warning');
+
+  assert.equal((await s.call(`/api/events/${e1.id}/attendance-status`, 'POST', { owner: 'Ann', status: 'attended' }, s.ann)).status, 403, 'members cannot correct attendance');
+  assert.equal((await s.call(`/api/events/${e1.id}/attendance-status`, 'POST', { owner: 'Ann', status: 'bogus' }, s.officer)).status, 400);
+  assert.equal((await s.call(`/api/events/999999/attendance-status`, 'POST', { owner: 'Ann', status: 'attended' }, s.officer)).status, 404);
+
+  // The correction: Ann actually came to the first event after all - that drops her real no-show count to 1,
+  // under the limit of 2, so the warning that was given for the old, wrong record should be withdrawn, not
+  // left standing against a record that no longer exists.
+  const r = await s.call(`/api/events/${e1.id}/attendance-status`, 'POST', { owner: 'Ann', status: 'attended' }, s.officer);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.withdrawnWarnings, 1);
+  assert.ok(r.body.event.attended.includes(c.ann), 'Ann is now recorded as attended');
+  assert.ok(r.body.event.attended.includes(c.bob), 'Bob\'s own already-recorded attendance is untouched');
+
+  ann = await state(s, 'ann');
+  const same = ann.warnings.find((w) => w.id === warn.id);
+  assert.equal(same.status, 'removed', 'the warning no longer reaches the limit and is withdrawn automatically');
+  assert.equal(same.endedBy, 'system');
+  assert.match(same.note, /no longer reaches/);
+
+  // Turning a "no reply" into "said can't" only ever touches rsvps, never the attended list.
+  const e3 = await pastEvent(s, 1, { came: [c.bob], yes: [c.bob] });   // Ann never answered this one
+  const r3 = await s.call(`/api/events/${e3.id}/attendance-status`, 'POST', { owner: 'Ann', status: 'declined' }, s.officer);
+  assert.equal(r3.status, 200);
+  assert.equal(r3.body.event.rsvps[c.ann], 'no');
+  assert.equal(r3.body.event.attended.includes(c.ann), false);
+
+  // A manual warning (not auto) is never touched by this, even if it happens to share a "kind".
+  const man = (await s.call('/api/warnings', 'POST', { ownerKey: 'Bob', reason: 'Left the siege early' }, s.officer)).body;
+  await s.call(`/api/events/${e3.id}/attendance-status`, 'POST', { owner: 'Bob', status: 'attended' }, s.officer);
+  assert.equal((await state(s, 'bob')).warnings.find((w) => w.id === man.id).status, 'active', 'a manual warning is left alone');
+});
