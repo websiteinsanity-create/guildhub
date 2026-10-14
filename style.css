@@ -1,0 +1,1138 @@
+/* ---------- Theme: edit these to re-skin ---------- */
+:root {
+  /* Brand colour: RAL 470-5 (RAL Effect). Screen values differ slightly by source
+     (#AC2D4C / #B1435B); change --accent to fine-tune. */
+  --accent: #ac2d4c;
+  --accent-ink: #fff4f6;   /* text on top of --accent */
+  --accent-text: #ee92a8;  /* lighter tint used for text/links on dark backgrounds */
+  --bg: #130e11;
+  --panel: #1b1418;
+  --panel-2: #251b20;
+  --line: #3a2a31;
+  --text: #ebe5e3;
+  --muted: #a39499;
+  --gold: #d8c48a;         /* officer badge and points */
+  --danger: #ff8a7a;
+  --role0: #6a9be0;        /* first role in config.json (Tank) */
+  --role1: #7fcf8f;        /* second role (Healer) */
+  --role2: #e2a24a;        /* third role (DPS) */
+  --role3: #c59be0;
+  --role4: #e0c86a;
+  --display: 'Marcellus', 'Palatino Linotype', Georgia, serif;
+  --body: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 16px/1.5 var(--body); }
+h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; letter-spacing: .01em; }
+h1 { font-size: 30px; }
+h2 { font-size: 22px; }
+h3 { font-size: 17px; }
+a { color: var(--accent-text); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.hidden { display: none !important; }
+
+/* buttons & fields */
+.btn { background: var(--panel-2); border: 1px solid var(--line); padding: 7px 14px; border-radius: 6px; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--danger); }
+.btn.sm { padding: 3px 10px; font-size: 14px; }
+.btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; width: 100%; }
+input[type=checkbox] { width: auto; accent-color: var(--accent); }
+textarea { resize: vertical; min-height: 70px; }
+textarea[data-autogrow] { resize: none; overflow-y: hidden; max-height: 400px; }
+label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.field { margin-bottom: 12px; }
+.row { display: flex; gap: 12px; }
+.row > * { flex: 1; min-width: 0; }
+.err { color: var(--danger); min-height: 1.4em; font-size: 14px; }
+
+/* login */
+#login { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+.login-card { width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--line); border-top: 4px solid var(--accent); border-radius: 10px; padding: 32px; }
+.login-card h1 { margin-bottom: 4px; }
+.login-card p { margin: 0 0 24px; }
+
+/* shell */
+#app { display: grid; grid-template-columns: 228px 1fr; min-height: 100%; }
+nav.rail { background: var(--panel); border-right: 1px solid var(--line); padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; }
+.brand { padding: 0 8px 20px; margin-bottom: 8px; border-bottom: 2px solid var(--accent); }
+.brand h2 { font-size: 24px; line-height: 1.15; }
+.brand span { color: var(--muted); font-size: 14px; }
+.rail a.nav { display: block; padding: 8px 12px; border-radius: 6px; color: var(--text); text-decoration: none; border-left: 3px solid transparent; }
+.rail a.nav:hover { background: var(--panel-2); }
+.rail a.nav.active { background: var(--panel-2); border-left-color: var(--accent); }
+.rail .who { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.badge-officer { color: var(--gold); border: 1px solid var(--gold); border-radius: 20px; padding: 0 8px; font-size: 12px; margin-left: 6px; }
+main { padding: 32px 40px 64px; max-width: 1800px; width: 100%; min-width: 0; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+
+/* role chips */
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.chip::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--muted)); }
+
+/* composition strip */
+.comp { margin-bottom: 20px; }
+.comp .bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--panel-2); gap: 2px; }
+.comp .bar i { display: block; background: var(--c); }
+.comp .legend { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 10px; }
+
+/* toolbar */
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.toolbar input[type=search] { max-width: 290px; }
+.toolbar select { width: auto; }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-weight: 600; color: var(--muted); font-size: 14px; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+tr.dim td { opacity: .5; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--panel-2); }
+.you { color: var(--accent-text); font-size: 13px; margin-left: 6px; }
+
+/* panels */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
+.panel + .panel { margin-top: 16px; }
+.panel > h3 { margin-bottom: 12px; }
+
+/* events */
+.events-layout { display: grid; grid-template-columns: 300px 1fr; gap: 24px; align-items: start; }
+.ev-list { display: flex; flex-direction: column; gap: 6px; }
+.ev-list h3 { margin: 14px 0 4px; font-size: 15px; color: var(--muted); font-family: var(--body); font-weight: 600; }
+.ev-item { display: block; text-decoration: none; color: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.ev-item:hover { border-color: var(--muted); }
+.ev-item.active { border-color: var(--accent); background: var(--panel-2); }
+.ev-item .t { font-weight: 600; }
+.ev-item .s { font-size: 14px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.ev-title { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.ev-title > div:first-child { flex: 1; min-width: 200px; }
+.ev-meta { color: var(--muted); margin: 4px 0 12px; }
+.ev-desc { white-space: pre-wrap; margin: 0 0 4px; }
+.rsvp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.rsvp-row:first-of-type { border-top: 0; }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+.col h3 { display: flex; justify-content: space-between; border-bottom: 2px solid var(--c); padding-bottom: 6px; margin-bottom: 8px; font-family: var(--body); font-weight: 600; font-size: 15px; }
+.mini { padding: 4px 0; display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
+.mini small { color: var(--muted); }
+/* The merged roster row in the Going section: name/subclass/gearscore on the left, attendance status on the
+   right - either a plain read-only chip, or (officers only) a live dropdown that replaces the old separate
+   "change someone else's sign-up" picker entirely. --sc follows the same colour convention used for a
+   player's own event status elsewhere (STATUS_TEXT/[data-st]). */
+/* flex-wrap, not a fixed min-width squeeze: these party-size columns are often too narrow to fit a name and a
+   dropdown ("Not attending" is the long one) on one line - wrapping the status control onto its own line below
+   the name when needed keeps the name fully readable instead of the two fighting over width and the name losing. */
+.roster-row { flex-wrap: wrap; row-gap: 2px; }
+.roster-row > span:first-child { flex: 1 1 100px; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-row > span:first-child small { display: block; }
+.status-chip, .status-pick { flex: 0 0 auto; border: 1px solid var(--sc); color: var(--sc); border-radius: 20px; font-size: 12px; }
+.status-chip { padding: 2px 10px; white-space: nowrap; }
+.status-pick { padding: 2px 6px; background: var(--panel-2); cursor: pointer; max-width: 100%; }
+.status-chip[data-rst="yes"], .status-pick[data-rst="yes"] { --sc: #6fcf8b; }
+.status-chip[data-rst="no"], .status-pick[data-rst="no"] { --sc: #eba23c; }
+.status-chip[data-rst="none"], .status-pick[data-rst="none"] { --sc: #8a8a95; }
+/* The 6-state version (once attendance is tracked - see ROSTER6 in app.js): participated/no-show are the two
+   that matter most, so they get the clearest colours (green/red); the rest are muted variations on them. */
+.status-chip[data-rst="participated"], .status-pick[data-rst="participated"] { --sc: #6fcf8b; }
+.status-chip[data-rst="noshow"], .status-pick[data-rst="noshow"] { --sc: #e0617a; }
+.status-chip[data-rst="noreply"], .status-pick[data-rst="noreply"] { --sc: #8a8a95; }
+.status-chip[data-rst="noreply-att"], .status-pick[data-rst="noreply-att"] { --sc: #5fb8ba; }
+.status-chip[data-rst="notattending"], .status-pick[data-rst="notattending"] { --sc: #eba23c; }
+.status-chip[data-rst="signedoff-att"], .status-pick[data-rst="signedoff-att"] { --sc: #b08ae0; }
+.parties { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.party { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.party h4 { margin: 0 0 8px; font-family: var(--display); font-weight: 400; font-size: 16px; display: flex; justify-content: space-between; }
+.party .m { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 0; font-size: 15px; }
+.party select { width: 74px; padding: 1px 4px; font-size: 13px; }
+
+/* points */
+.pos { color: var(--gold); }
+.neg { color: var(--danger); }
+
+/* dashboard */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; border-top: 3px solid var(--c, var(--accent)); }
+.stat .k { color: var(--muted); font-size: 15px; }
+.stat .v { font-family: var(--display); font-size: 46px; line-height: 1.1; margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 20px; color: var(--muted); font-family: var(--body); }
+.stat .s { color: var(--muted); font-size: 14px; }
+.stat .bar { height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
+.stat .bar i { display: block; height: 100%; background: var(--c, var(--accent)); }
+
+/* The stats row (members always see this; leadership can pick it as an alternative to the
+   Member-bar layout) now has all four tiles done as art cards instead of plain colored tiles -
+   Members, Tank, Healer, DPS, each with its own matching banner (all 1672x941, same wordmark
+   layout, just a different color scheme per role). The full image fills the whole tile, zoomed in
+   (background-size 160%, not the native 100%) so the wordmark reads at a reasonable size even
+   though these tiles are much narrower than the full-width cards elsewhere - 100% was tried first
+   and made the word a barely-readable sliver, so this crops in on the center via
+   background-position: center top, same idea as the dashboard's Member-bar-head strip but carried
+   through the whole tile instead of just a header band. padding-top on the body scales with the
+   zoom (30% at 100% scale, so 30% * 1.6 = 48% at this 160% scale) to keep clearing the wordmark at
+   any tile width. The count/bar/subtitle sit on top of a dark gradient, same as the big cards. */
+.stat-art { position: relative; overflow: hidden; padding: 0;
+  background-size: 160% auto; background-position: center top; background-repeat: no-repeat;
+}
+.stat-art::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.25), rgba(10,7,9,.85) 65%, rgba(10,7,9,.95)); pointer-events: none; }
+.stat-art-body { position: relative; z-index: 1; padding: 48% 18px 16px; }
+.stat-members { background-image: url('/img/members-banner.jpg'); }
+.stat-tank { background-image: url('/img/tank-tile.jpg'); }
+.stat-healer { background-image: url('/img/healer-tile.jpg'); }
+.stat-dps { background-image: url('/img/dps-tile.jpg'); }
+
+/* Officer-only reworked "Guild name and numbers" panel: a slim Member bar, then five
+   role columns naming who's in each instead of just a count (see statsOrHeroHtml). */
+.member-bar { display: flex; flex-direction: column; gap: 14px; margin-bottom: 4px; }
+/* "Members" banner - unlike the other wordmark art, this one is a self-contained decorative
+   strip rather than a card body growing underneath it: nothing overlaps the image, so it just
+   shows the whole picture at its own native proportions (1672x941) and the count sits in a plain
+   line right below it, the same way a muted subtitle sits under a plain page <h1> elsewhere. */
+.members-banner {
+  position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 941;
+  background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+/* The dashboard's compact "Member" header bar (above the class columns) uses the same artwork as
+   a background, but cropped tight to just its top ~40% - the "MEMBERS" wordmark, its ornamental
+   border and a little of the castle scene below - rather than the whole scene, since this is a
+   slim header strip, not a full banner. aspect-ratio 1672:380 locks that crop in at any column
+   width (background-size: 100% auto scales the full image to the box's width, and
+   overflow:hidden on a shorter box just crops off the rest below, which never moves since the
+   image is still anchored to the top). The extra room versus the plain wordmark-only crop is
+   there on purpose: it gives the member count and its growth bar a proper patch of background to
+   sit on, over a dark gradient fade for legibility, instead of being squeezed right under the title. */
+.member-bar-head {
+  position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 380; min-height: 150px;
+  background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  display: flex; align-items: flex-end; justify-content: flex-end; padding: 16px 22px;
+}
+.member-bar-head::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,0) 40%, rgba(10,7,9,.88) 75%, rgba(10,7,9,.94)); pointer-events: none; }
+/* min-height keeps this readable at narrow widths: aspect-ratio alone would make the box short
+   enough there that the bottom-right count/bar would collide with the gear icon's own corner
+   (top right, see .sc-gear) - a fixed floor keeps the two corners apart at any width, and never
+   shows blank space below the art since the image itself (scaled to the box's width) always
+   renders taller than this floor at any width this box actually reaches. */
+.member-bar-stats { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 9px; min-width: 190px; }
+.member-bar-count { font-family: var(--display); font-size: 42px; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+.member-bar-count small { color: var(--muted); font-family: var(--body); font-size: 20px; }
+.member-bar-bar { width: 100%; height: 9px; border-radius: 5px; overflow: hidden; background: rgba(255,255,255,.14); }
+.member-bar-bar i { display: block; height: 100%; background: var(--accent); }
+.member-bar-cols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-items: start; }
+/* Each class column is a baked bordered-card illustration (title + crest art on top, a plain
+   bordered panel below) rather than a plain CSS box. Drawn with no runtime border math needed:
+   three background-image layers share the exact same `background-size: 100% auto` horizontal
+   scale, so their border lines land on identical x-positions at any column width and the "seam"
+   between layers is invisible. Listed first-to-last: [top-cap, bottom-cap, middle] - in CSS,
+   earlier layers paint IN FRONT of later ones, so the two caps sit on top of (visually cover)
+   the repeat-y middle tile at the exact places they overlap it, letting the middle show through
+   only in the gap between them.
+   The box's own height is never set explicitly - instead `padding-top`/`padding-bottom`
+   percentages (computed from each card's own top-cap/bottom-cap pixel height over its own pixel
+   width, since padding resolves against the *width* of its containing block, a CSS quirk used
+   throughout this file) guarantee a minimum total height equal to both caps combined when the
+   member list is empty or short (so the caps never collide or overlap each other), while letting
+   the box grow freely - and the middle tile keep tiling into the newly exposed space - for a
+   column with many members. */
+.member-col {
+  position: relative; min-width: 0; border-radius: 10px; overflow: hidden;
+  background-repeat: no-repeat, no-repeat, repeat-y;
+  background-position: top center, bottom center, top center;
+  background-size: 100% auto, 100% auto, 100% auto;
+}
+.member-col-tanks { background-image: url('/img/colcard-tanks-top.png'), url('/img/colcard-tanks-bot.png'), url('/img/colcard-tanks-mid.png'); padding-top: 88.16%; padding-bottom: 16.91%; }
+.member-col-caster { background-image: url('/img/colcard-caster-top.png'), url('/img/colcard-caster-bot.png'), url('/img/colcard-caster-mid.png'); padding-top: 88.16%; padding-bottom: 16.91%; }
+.member-col-melee { background-image: url('/img/colcard-melee-top.png'), url('/img/colcard-melee-bot.png'), url('/img/colcard-melee-mid.png'); padding-top: 88.16%; padding-bottom: 16.91%; }
+.member-col-ranged { background-image: url('/img/colcard-ranged-top.png'), url('/img/colcard-ranged-bot.png'), url('/img/colcard-ranged-mid.png'); padding-top: 87.95%; padding-bottom: 16.87%; }
+.member-col-oracleSeeker { background-image: url('/img/colcard-oracle_seeker-top.png'), url('/img/colcard-oracle_seeker-bot.png'), url('/img/colcard-oracle_seeker-mid.png'); padding-top: 88.59%; padding-bottom: 16.99%; }
+.member-col-list { padding: 0 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.member-col-count { color: var(--muted); font-size: 12px; text-align: center; }
+.member-col-group:not(:first-child) { border-top: 1px solid rgba(255,255,255,.12); padding-top: 9px; }
+.member-col-sub { font-family: var(--display); font-size: 13px; letter-spacing: .02em; color: var(--text); opacity: .9; margin-bottom: 5px; }
+.member-col-names { display: flex; flex-direction: column; gap: 4px; }
+.member-bar-note { color: var(--muted); font-size: 13px; }
+@media (max-width: 900px) { .member-bar-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Shotcaller dashboard card: a corner "lightbar" (left + top edge) instead of the usual single
+   top accent, so the session's state reads at a glance - a saturated neon edge with a soft glow,
+   not the muted palette used for the loot-qualification rates elsewhere. Wine red while inactive,
+   neon orange while starting, a darker (not mint) neon green once live. */
+.sc-card {
+  border-left-width: 3px !important; border-top-width: 3px !important;
+  position: relative; overflow: hidden; text-align: center; padding: 0;
+  /* The art covers the whole card now - button and data panels included - not just a strip up top.
+     Scaled by WIDTH only (background-size: 100% auto), not "cover", and anchored to the top - a
+     plain "cover" would scale against whichever of width/height is more constraining, which changes
+     per state since the three states aren't the same height (the active state is taller, with its
+     data panels), making the "SHOTCALLER" wordmark drift to a different vertical spot each time.
+     Scaling by width alone means the image is always the same scale for a given card width regardless
+     of its height, so the wordmark sits at the same spot from the top in every state. Below the
+     image's own height, the card's plain dark background shows through (no-repeat) rather than the
+     art stretching or tiling - which reads fine since the overlay below is already going dark there. */
+  background-image: url('/img/shotcaller-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+/* Dark overlay so the status text, button and data panels stay readable over the art. */
+.sc-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+/* Top padding is a PERCENTAGE, not a fixed px value, on purpose: percentage padding-top/bottom is
+   defined by the CSS spec to resolve against the containing block's WIDTH, which is exactly how the
+   background image above is scaled (background-size: 100% auto) - so this clears the "SHOTCALLER"
+   wordmark by the same margin at any card size, instead of a fixed px gap that would be too small on
+   a wide card or too large on a narrow one. The art is now a square (1254x1254) rather than the old
+   2.5:1 banner, so its rendered height equals the card's width - the wordmark+ornament sit in about
+   the top 31% of that square, hence ~35% of the card's width here, not the old banner's 20%. */
+.sc-card-body { position: relative; z-index: 1; padding: 35% 20px 26px; }
+/* Not scoped to .sc-card any more - any art-backed card (.sc-card, .lead-card, more later) puts its
+   gear in the same corner the same way, as long as the card itself is position:relative. */
+.sc-gear { position: absolute !important; top: 14px; right: 14px; z-index: 2; }
+.sc-card.sc-inactive { border-left-color: #e0124f; border-top-color: #e0124f; box-shadow: -3px 0 14px -3px rgba(224,18,79,.75), 0 -3px 14px -3px rgba(224,18,79,.75); }
+.sc-card.sc-starting { border-left-color: #ff9d0a; border-top-color: #ff9d0a; box-shadow: -3px 0 14px -3px rgba(255,157,10,.75), 0 -3px 14px -3px rgba(255,157,10,.75); }
+.sc-card.sc-active { border-left-color: #0fa968; border-top-color: #0fa968; box-shadow: -3px 0 14px -3px rgba(15,169,104,.75), 0 -3px 14px -3px rgba(15,169,104,.75); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* "Your Leadership" card - same rules as the Shotcaller card: full-card art scaled by width only and
+   anchored to the top (not "cover") so the wordmark never drifts regardless of how much overview text
+   is inside, a dark overlay for readability, and a percentage top padding so content clears the
+   wordmark at any card width. This source image is portrait (1024x1536, taller than it is wide) rather
+   than square, so once scaled to the card's width its rendered height is 1.5x the width - the
+   wordmark+ornament occupy roughly the top 34% of the image's own height, which comes out to about
+   51% of the card's width; rounded up to 54% for clearance. No lightbar here - this card doesn't have
+   states to signal, unlike Shotcaller. */
+.lead-card {
+  position: relative; overflow: hidden; text-align: center; padding: 0;
+  background-image: url('/img/leadership-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.lead-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.lead-card-body { position: relative; z-index: 1; padding: 54% 20px 26px; text-align: left; }
+
+/* "Daily schedule" card - same wordmark-clearance rules as the other art cards, but this one's
+   height is pinned instead of content-driven: aspect-ratio locks the card to the exact same
+   proportions the source image renders at (background-size: 100% auto already scales the image's
+   height to match), so the artwork is always shown in full - never clipped short, never trailing
+   off into bare gradient below it either. The event list lives in an absolutely-positioned body
+   that fills that fixed box: the top padding-% clearance zone is left alone, and only .sched-list -
+   everything below that zone - scrolls once there are more events than fit, so the background and
+   the wordmark never move and are never scrolled over. Source image is portrait (1122x1402, ratio
+   1:1.25); the "DAILY SCHEDULE" wordmark + ornament occupy roughly the top 28% of the image's own
+   height, which at this ratio comes out to about 35% of the card's width once scaled; rounded up to
+   35% for clearance (already has a small buffer built in). */
+.sched-card {
+  position: relative; overflow: hidden; padding: 0; aspect-ratio: 1122 / 1402;
+  background-image: url('/img/schedule-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.sched-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.sched-card-body { position: absolute; inset: 0; z-index: 1; padding-top: 35%; display: flex; flex-direction: column; }
+.sched-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 0 16px 20px; text-align: center; }
+.sched-item { border-top: 1px solid var(--line); padding-top: 12px; width: 100%; max-width: 320px; }
+.sched-item:first-child { border-top: 0; padding-top: 0; }
+.sched-title { display: block; font-weight: 600; font-size: 16px; color: var(--text); text-decoration: none; }
+.sched-title:hover { text-decoration: underline; }
+.sched-countdown { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.sched-status { margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.sched-yes { color: #4fe3a0; font-weight: 600; }
+.sched-no { color: #ff6b8a; font-weight: 600; }
+.sched-attend { background: #0fa968; border-color: #0fa968; color: #06130d; }
+.sched-attend:hover { filter: brightness(1.1); }
+.sched-decline { background: #e0124f; border-color: #e0124f; color: #fff; }
+.sched-decline:hover { filter: brightness(1.1); }
+.sched-going { margin-top: 8px; font-size: 13px; }
+
+/* "Guild info" card - same technique again: square source image (1254x1254, same proportions as
+   the Shotcaller banner), scaled by width only and anchored to the top so the "GUILD INFO" wordmark
+   never drifts regardless of how many categories/buttons are listed below it. Wordmark + ornament
+   occupy roughly the top 28% of the image's own height, which at a 1:1 ratio is also 28% of the
+   card's width; rounded up to 30% for clearance. */
+.info-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/guildinfo-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.info-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.info-card-body { position: relative; z-index: 1; padding: 30% 20px 26px; }
+
+/* "Tasks" card - same technique, now with a taller portrait source image (1024x1536, ratio 1:1.5),
+   scaled by width only and anchored to the top so the "TASKS" wordmark never drifts regardless of
+   how many leaders/duties are listed below it. Wordmark + ornament occupy roughly the top 24% of
+   the image's own height, which at this ratio comes out to about 36% of the card's width once
+   scaled; rounded up to 36% for clearance (already has a small buffer built in). */
+.tasks-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/tasks-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.tasks-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.tasks-card-body { position: relative; z-index: 1; padding: 36% 20px 26px; }
+
+/* "Qualified for loot" card - same technique: square source image (1254x1254), scaled by width
+   only and anchored to the top so the "QUALIFIED FOR LOOT" wordmark never drifts regardless of how
+   long the member list below it gets (search bar, loot rules, however many rows are shown).
+   Wordmark + ornament occupy roughly the top 34% of the image's own height, which at a 1:1 ratio is
+   also 34% of the card's width; rounded up to 35% for clearance. */
+.loot-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/loot-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.loot-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
+.loot-card-body { position: relative; z-index: 1; padding: 35% 20px 26px; }
+.sc-start-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700; border-radius: 8px;
+  background: #0fa968; color: #06130d; border: 1px solid #0fa968;
+  box-shadow: 0 0 16px rgba(15,169,104,.55);
+}
+.sc-start-btn:hover { background: #14c47c; border-color: #14c47c; }
+/* Stage 2 reuses the same button slot as Stage 1's "Start", but as an icon-only, orange, disabled
+   control - sc-btn-morph plays once on mount so it reads as that green "Start" pill turning into
+   this orange spinner, even though a full re-render actually swapped in a new element. */
+.sc-starting-btn {
+  width: 48px; height: 48px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; cursor: default;
+  animation: sc-btn-morph .5s ease forwards;
+}
+.sc-spinner {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 3px solid rgba(10,7,9,.3); border-top-color: #2a1400;
+  animation: sc-spin .8s linear infinite, sc-icon-pop .4s ease;
+}
+@keyframes sc-btn-morph {
+  0% { width: 112px; border-radius: 8px; background: #0fa968; border-color: #0fa968; box-shadow: 0 0 16px rgba(15,169,104,.55); }
+  100% { width: 48px; border-radius: 50%; background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); }
+}
+@keyframes sc-spin { to { transform: rotate(360deg); } }
+@keyframes sc-icon-pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
+/* Stage 3: the icon morphs again - orange spinner circle -> red "Stop" pill - same move in reverse. */
+.sc-stop-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700;
+  color: #fff; animation: sc-btn-morph-stop .5s ease forwards;
+}
+.sc-stop-btn:hover { background: #ff2066 !important; border-color: #ff2066 !important; }
+@keyframes sc-btn-morph-stop {
+  0% { width: 48px; border-radius: 50%; background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); color: transparent; }
+  100% { width: 112px; border-radius: 8px; background: #e0124f; border-color: #e0124f; box-shadow: 0 0 16px rgba(224,18,79,.55); color: #fff; }
+}
+/* The three data panels that land once a session is active - label fades in on its own (slow,
+   opacity-only), its value box pops up a beat later, and each panel is staggered left-to-right via
+   the --d custom property set inline per item, so they cascade in rather than all appearing at once. */
+.sc-data-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 22px; text-align: center; }
+.sc-data-label { font-size: 13px; color: var(--muted); margin-bottom: 7px; opacity: 0; animation: sc-label-fade 1.1s ease forwards; animation-delay: var(--d, 0s); }
+.sc-data-box {
+  background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 14px 12px;
+  font-family: var(--display); font-size: 21px; font-weight: 600;
+  opacity: 0; transform: translateY(14px) scale(.95);
+  animation: sc-box-in .5s ease forwards; animation-delay: calc(var(--d, 0s) + .15s);
+}
+@keyframes sc-label-fade { from { opacity: 0; } to { opacity: .85; } }
+@keyframes sc-box-in { to { opacity: 1; transform: translateY(0) scale(1); } }
+.dash-grid .panel + .panel { margin-top: 0; }
+.dash-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.leader { padding: 14px 0; border-top: 1px solid var(--line); }
+.leader:first-of-type { border-top: 0; padding-top: 0; }
+.leader-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.leader-head b { font-size: 18px; }
+.rank-tag { border: 1px solid var(--accent); color: var(--accent-text); border-radius: 20px; padding: 0 9px; font-size: 13px; }
+.leader-head .open { margin-left: auto; color: var(--muted); font-size: 14px; }
+.duties { list-style: none; margin: 0; padding: 0; }
+.duty { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.duty .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.duty.done .txt { color: var(--muted); text-decoration: line-through; }
+.st { min-width: 96px; text-align: center; font-size: 13px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+button.st { cursor: pointer; }
+button.st:hover { border-color: var(--muted); }
+.duty.doing .st { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.duty.done .st { border-color: var(--role1); color: var(--role1); }
+.x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+.x:hover { color: var(--danger); }
+.hosting { font-size: 14px; color: var(--muted); margin: 6px 0 0; }
+.hosting a { color: var(--text); }
+.add-duty { display: flex; gap: 8px; margin-top: 8px; }
+.add-duty input { padding: 5px 10px; font-size: 15px; }
+
+/* calendar */
+.cal { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+.cal-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.cal-head h2 { margin-right: auto; }
+.cal-grid, .wk-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-dow { padding: 6px 8px; color: var(--muted); font-size: 14px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
+.cal-dow:nth-child(7n), .cal-cell:nth-child(7n) { border-right: 0; }
+.cal-cell { min-height: 160px; padding: 6px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cal-cell:nth-last-child(-n+7) { border-bottom: 0; }
+.cal-cell.out { background: rgba(0, 0, 0, .2); }
+.cal-cell.out .cal-num { opacity: .45; }
+.cal-cell.can-add, .wk-day.can-add { cursor: pointer; }
+.cal-cell.can-add:hover, .wk-day.can-add:hover { background: var(--panel-2); }
+.cal-num { width: 26px; height: 26px; display: grid; place-items: center; font-size: 14px; color: var(--muted); border-radius: 50%; }
+.cal-cell.today .cal-num { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.cal-ev { display: flex; align-items: flex-start; gap: 5px; text-decoration: none; color: var(--text); background: var(--panel-2); border-left: 3px solid var(--c); border-radius: 4px; padding: 3px 6px; font-size: 13px; line-height: 1.3; min-width: 0; }
+.cal-ev:hover { background: var(--line); }
+.cal-ev.sel { outline: 2px solid var(--c); outline-offset: 1px; }
+.cal-ev.past { opacity: .6; }
+.cal-ev .tm { color: var(--muted); flex: none; }
+.cal-ev .ttl { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; min-width: 0; }
+.mdot { flex: none; margin-top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.cal-more { background: none; border: 0; color: var(--accent-text); text-align: left; padding: 2px 6px; cursor: pointer; font-size: 13px; }
+.wk-day { min-height: 480px; padding: 8px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wk-day:last-child { border-right: 0; }
+.wk-day.today { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.wk-head { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.wk-head .dow { color: var(--muted); font-size: 14px; }
+.wk-head .num { font-family: var(--display); font-size: 22px; }
+.wk-day.today .num { color: var(--accent-text); }
+.wk-ev { display: block; text-decoration: none; color: var(--text); background: var(--panel-2); border-left: 4px solid var(--c); border-radius: 6px; padding: 8px 9px; }
+.wk-ev:hover { background: var(--line); }
+.wk-ev.sel { outline: 2px solid var(--c); outline-offset: 1px; }
+.wk-ev.past { opacity: .6; }
+.wk-ev .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 6px; font-size: 13px; color: var(--muted); }
+.wk-ev .top > span:first-child { white-space: nowrap; }
+.wk-ev .ttl { display: block; font-weight: 600; margin: 2px 0; overflow-wrap: anywhere; }
+.wk-ev .sub { font-size: 13px; color: var(--muted); }
+/* Day view: one column of full-width cards, each with its own quick-RSVP row - built for a phone first. */
+.day-list { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.day-card { background: var(--panel-2); border-left: 4px solid var(--c); border-radius: 8px; overflow: hidden; }
+.day-card.past { opacity: .6; }
+.day-card:not([data-st=""]) { background: color-mix(in srgb, var(--sc) 20%, var(--panel-2)); border-left-color: var(--sc); }
+.day-card[data-st="declined"] { opacity: .85; }
+.day-head { display: block; text-decoration: none; color: var(--text); padding: 12px 14px; }
+.day-head .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 6px; font-size: 14px; color: var(--muted); }
+.day-head .ttl { display: block; font-weight: 600; font-size: 17px; margin: 4px 0; overflow-wrap: anywhere; }
+.day-head .sub { font-size: 13px; color: var(--muted); }
+.day-rsvp { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 12px; }
+.day-rsvp-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pill-m { display: inline-block; background: var(--accent); color: var(--accent-ink); border-radius: 20px; padding: 0 8px; font-size: 12px; font-weight: 600; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 16px; border-top: 1px solid var(--line); align-items: center; }
+#ev-detail { scroll-margin-top: 12px; }
+
+/* loot eligibility */
+.loot-ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.loot-ctrl label { margin: 0; }
+.loot-ctrl input[type=date] { width: auto; }
+.loot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 14px; margin-top: 12px; align-items: start; }
+details.lootd { --b: var(--muted); border-left: 4px solid var(--b); background: color-mix(in srgb, var(--b) 15%, var(--panel)); border-radius: 4px; }
+details.lootd.red { --b: #e2685c; }
+details.lootd.orange { --b: #eba23c; }
+details.lootd.green { --b: #6fcf8b; }
+details.lootd > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+details.lootd > summary::-webkit-details-marker { display: none; }
+details.lootd > summary::after { content: ''; flex: none; width: 7px; height: 7px; margin: 0 2px 3px 4px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); }
+details.lootd[open] > summary::after { transform: rotate(-135deg); margin: 3px 2px 0 4px; }
+.lootd .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lootd .sm { color: var(--muted); font-size: 13px; }
+.lootd .pc { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--b); min-width: 42px; text-align: right; }
+.qtag { font-size: 12px; border: 1px solid var(--b); color: var(--b); border-radius: 20px; padding: 0 7px; }
+.lootd-body { padding: 8px 12px 12px; border-top: 1px solid rgba(255, 255, 255, .08); display: grid; gap: 10px; font-size: 15px; }
+.lootd-body .k { display: block; color: var(--muted); font-size: 13px; }
+.lootd-body ul { margin: 4px 0 0; padding-left: 18px; }
+.lootd-body a { overflow-wrap: anywhere; }
+.band { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.band::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--b); }
+.band.red { --b: #e2685c; } .band.orange { --b: #eba23c; } .band.green { --b: #6fcf8b; }
+details.lootrules { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 0 14px; }
+details.lootrules > summary { cursor: pointer; padding: 9px 0; color: var(--accent-text); }
+.loot-compare-bar { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.loot-compare-bar input[type="search"] { width: 100%; max-width: 320px; }
+.loot-compare-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rules-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; padding-bottom: 14px; }
+.rules-grid .field { margin: 0; }
+.loot-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.loot-form .field { flex: 1; min-width: 160px; margin: 0; }
+.loot-form .field.wide { flex: 2; min-width: 220px; }
+td.nowrap { white-space: nowrap; }
+
+/* class / specialization text */
+.cls { color: var(--accent-text); font-weight: 600; }
+.spec { color: var(--muted); white-space: nowrap; }
+td.wpn { min-width: 340px; }
+
+/* party board (drag and drop) */
+.board { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; }
+.board.ro { grid-template-columns: minmax(0, 1fr); }
+.pools { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; padding: 2px; }
+.pools.over { outline: 2px dashed var(--accent-text); outline-offset: 0; border-radius: 8px; }
+.pool { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.pool-head { display: flex; justify-content: space-between; padding: 7px 10px; background: var(--c); color: #120d10; font-weight: 700; }
+.pool-list { max-height: 260px; overflow: auto; min-height: 44px; }
+.pboard-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.pboard-head h3 { font-family: var(--body); font-weight: 600; font-size: 17px; }
+.board .parties { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; align-items: start; }
+.board .party { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0; }
+.party.drop-before { box-shadow: -4px 0 0 var(--accent-text); }
+.party.drop-after { box-shadow: 4px 0 0 var(--accent-text); }
+.phead { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.party-title { flex: 1; font-family: var(--display); font-size: 16px; }
+.pdrop { min-height: 56px; }
+.pdrop.over { outline: 2px dashed var(--accent-text); outline-offset: -2px; }
+.pdrop.end::after { content: ''; display: block; height: 3px; background: var(--accent-text); }
+.pempty { padding: 14px 10px; color: var(--muted); font-size: 14px; text-align: center; }
+.mrow { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-left: 4px solid var(--c); background: color-mix(in srgb, var(--c) 24%, var(--panel)); border-bottom: 1px solid rgba(0, 0, 0, .3); }
+.mrow[draggable=true] { cursor: grab; }
+.mrow.dragging { opacity: .35; }
+.mrow.before { box-shadow: inset 0 3px 0 var(--accent-text); }
+/* A party loaded from a preset can include people who have not actually confirmed Going for this particular
+   event - shown dimmed and set apart, under their own party, rather than looking identical to someone who is
+   really coming. */
+.mrow.not-attending { opacity: .5; background: var(--panel); border-left-color: var(--line); }
+.mrow.not-attending:hover { opacity: .8; }
+.pnotattending { border-top: 1px dashed var(--line); margin-top: 2px; }
+.pnotattending > .muted.small { padding: 5px 8px 3px; }
+.mtxt { flex: 1; min-width: 0; line-height: 1.25; }
+.mname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mmeta { font-size: 13px; color: color-mix(in srgb, var(--text) 72%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The specialization gets its own line under the class, so a longer one has room to read instead of being
+   crushed into one "Class | Spec..." line and clipped (see memberRow). */
+.mspec { font-size: 12px; margin-top: 1px; white-space: normal; overflow-wrap: anywhere; }
+.tag { font-size: 12px; font-weight: 400; color: var(--role1); margin-left: 4px; }
+.grip { flex: none; display: inline-block; width: 10px; height: 16px; cursor: grab; background: radial-gradient(circle, var(--muted) 1.3px, transparent 1.7px) 0 0 / 5px 5px; opacity: .8; }
+.crown { flex: none; color: var(--gold); }
+.over-cap { color: var(--danger); }
+details.menu { flex: none; }
+details.menu > summary { list-style: none; cursor: pointer; padding: 0 7px; border-radius: 4px; color: var(--muted); line-height: 1.4; user-select: none; }
+details.menu > summary::-webkit-details-marker { display: none; }
+details.menu > summary:hover, details.menu[open] > summary { background: rgba(255, 255, 255, .1); color: var(--text); }
+.menu-list { position: fixed; z-index: 30; min-width: 190px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, .55); }
+.menu-list button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+.menu-list button:hover { background: var(--line); }
+.menu-list button.danger { color: var(--danger); }
+.menu-sep { padding: 6px 10px 2px; font-size: 12px; color: var(--muted); }
+.menu-scroll { max-height: 200px; overflow: auto; }
+.pbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.preset-select { width: auto; min-width: 240px; max-width: 100%; }
+
+/* party names and presets */
+.party h4 { gap: 6px; align-items: center; }
+.party-name, .preset-name, .preset-desc { background: transparent; border: 1px solid transparent; }
+.party-name:hover, .party-name:focus, .preset-name:hover, .preset-name:focus, .preset-desc:hover, .preset-desc:focus { border-color: var(--line); background: var(--bg); }
+.party-name { flex: 1; min-width: 0; width: auto; font-family: var(--display); font-size: 16px; padding: 2px 6px; margin-left: -6px; }
+.preset-name { font-family: var(--display); font-size: 22px; padding: 2px 6px; margin-left: -6px; width: min(420px, 100%); }
+.preset-desc { font-size: 14px; color: var(--muted); padding: 2px 6px; margin: 4px 0 0 -6px; }
+.party select.add-m { width: 100%; margin-top: 6px; font-size: 14px; }
+.seg select { width: auto; max-width: 100%; min-width: 0; padding: 3px 8px; font-size: 14px; }
+.party .m .muted { flex: 1; text-align: right; }
+.ev-title + .parties { margin-top: 14px; }
+.preset .ev-title > div:first-child { flex: 1 1 420px; }
+.preset-desc { width: 100%; max-width: 560px; }
+
+/* discord sign-in, avatars, PIN */
+.btn.discord { display: block; text-align: center; text-decoration: none; background: #5865f2; border-color: #5865f2; color: #fff; padding: 11px 14px; font-weight: 600; }
+.btn.discord:hover { filter: brightness(1.1); }
+.avatar { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
+.rail .who b { font-weight: 600; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.pin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.pin-row:first-of-type { border-top: 0; }
+.pin-row input { width: 110px; text-align: center; letter-spacing: .3em; font-size: 18px; font-variant-numeric: tabular-nums; }
+.pin-row .go { display: flex; gap: 8px; align-items: center; }
+.pin-code { font-family: var(--display); font-size: 44px; letter-spacing: .25em; line-height: 1; color: var(--gold); }
+.sent { list-style: none; margin: 8px 0 0; padding: 0; font-size: 14px; }
+.sent li { padding: 2px 0; }
+.sent .yes { color: #6fcf8b; } .sent .fail { color: var(--danger); }
+.ok-text { color: #6fcf8b; }
+.type-pill { display: inline-block; border: 1px solid var(--line); border-radius: 20px; padding: 0 9px; font-size: 13px; color: var(--muted); }
+.type-pill.t-Skillcore { border-color: #c59be0; color: #c59be0; } .type-pill.t-Item { border-color: #e2a24a; color: #e2a24a; } .type-pill.t-Shard { border-color: #5fb8e8; color: #5fb8e8; }
+.rule-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; flex-wrap: wrap; border-top: 1px solid var(--line); }
+.rule-row:first-of-type { border-top: 0; }
+.link-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 0; }
+.link-row select { width: auto; }
+
+/* dialog */
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 24px; width: min(520px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgba(5, 8, 12, .7); }
+dialog h2 { margin-bottom: 16px; }
+.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.dlg-actions .left { margin-right: auto; }
+
+/* toast */
+#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); padding: 10px 18px; border-radius: 8px; z-index: 10; }
+#toast.bad { border-color: var(--danger); color: var(--danger); }
+.empty { text-align: center; padding: 36px 16px; color: var(--muted); }
+
+@media (max-width: 860px) {
+  .cal-cell { min-height: 70px; padding: 3px; gap: 2px; }
+  .cal-ev { font-size: 11px; padding: 1px 3px; }
+  .cal-ev .tm { display: none; }
+  .cal-dow { padding: 4px; font-size: 12px; }
+  .wk-grid { grid-template-columns: 1fr; }
+  .wk-day { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .board { grid-template-columns: 1fr; }
+  .pools { position: static; max-height: none; flex-direction: row; overflow-x: auto; }
+  .pool { min-width: 220px; }
+  #app { grid-template-columns: 1fr; }
+  nav.rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 12px; }
+  .brand { padding: 0 12px 0 4px; }
+  .rail .who { margin: 0 0 0 auto; border: 0; padding: 0; }
+  main { padding: 20px 16px 48px; }
+  .events-layout { grid-template-columns: 1fr; }
+  .dash-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- round 7: navigation badges, guild icon, tags, profile, requests, dashboard panels, admin uploads ---------- */
+.rail a.nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rail a.nav .count { background: var(--accent); color: var(--accent-ink); border-radius: 20px; padding: 0 8px; font-size: 12px; font-weight: 700; }
+.rail a.nav.gap { margin-top: 10px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; padding-top: 12px; }
+.guild-icon { width: 52px; height: 52px; border-radius: 12px; object-fit: cover; display: block; margin-bottom: 10px; }
+.login-icon { width: 72px; height: 72px; border-radius: 16px; object-fit: cover; display: block; margin: 0 auto 12px; }
+a.plain { color: inherit; text-decoration: none; }
+a.plain:hover { color: var(--accent-text); text-decoration: underline; }
+
+.tagchip { display: inline-block; border: 1px solid var(--tc); color: var(--tc); background: color-mix(in srgb, var(--tc) 14%, transparent); border-radius: 20px; padding: 0 9px; font-size: 13px; margin: 0 4px 2px 0; white-space: nowrap; }
+.tagcell { min-width: 150px; }
+.tagcell .btn { margin-left: 4px; }
+.tagpick { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 0 0 6px; }
+.ql-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.ql-row input:first-child { max-width: 140px; }
+.tag.build { border: 1px solid var(--accent-text); color: var(--accent-text); border-radius: 20px; padding: 0 6px; }
+.tag.merc { border: 1px solid #d9b25c; color: #d9b25c; border-radius: 20px; padding: 0 6px; }
+
+.profile-head { display: flex; align-items: center; gap: 14px; }
+.profile-head .avatar { width: 56px; height: 56px; margin: 0; }
+.char-card.dim { opacity: .65; }
+.builds { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.build-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
+.pending-banner { border-color: var(--gold); }
+.diff { margin-top: 4px; font-size: 15px; }
+.diff .arrow { color: var(--muted); padding: 0 4px; }
+
+.st-pill { display: inline-block; border-radius: 20px; padding: 0 10px; font-size: 13px; border: 1px solid var(--line); }
+.st-open { border-color: #eba23c; color: #eba23c; } .st-approved { border-color: #6fcf8b; color: #6fcf8b; }
+.st-given { border-color: #5fb8e8; color: #5fb8e8; } .st-rejected { border-color: #e2685c; color: #e2685c; }
+.rate { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rate.red { color: #e2685c; } .rate.orange { color: #eba23c; } .rate.green { color: #6fcf8b; } .rate.none { color: var(--muted); }
+
+.dash-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.dash-panels > * { min-width: 0; }                    /* grid items default to min-width:auto, letting their content push them wider than their column at narrow widths */
+.dash-panels > .full { grid-column: 1 / -1; }
+.dash-panels > .wide { grid-column: span 2; }          /* unused now that Leadership gives up its own span (kept in case something needs a 2-of-2 span later - same as .full at this column count) */
+.dash-panels > .panel { margin-top: 0 !important; }
+.announce { border: 1px solid var(--accent); border-left-width: 5px; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border-radius: 8px; padding: 14px 18px; white-space: pre-wrap; }
+.announce b { display: block; margin-bottom: 2px; color: var(--accent-text); }
+
+/* Reworked announcement panel: one banner image (crest + "ANNOUNCEMENT" + castle art,
+   nothing baked into it beyond that), with the actual announcement text (or the guild's
+   fallback line when nothing is posted) floating on top in a fully transparent box - no
+   fill, no border, just the glyphs with a soft glow. container-type lets the text scale
+   with the banner's own rendered width instead of the viewport, and the small script in
+   features.js shrinks it further if a long announcement would otherwise overflow the box. */
+.announce2 { position: relative; width: 100%; aspect-ratio: 1467 / 283; border-radius: 10px; overflow: hidden; container-type: inline-size; }
+.announce2 img.announce2-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.announce2 .announce2-box { position: absolute; left: 20.8%; top: 38.5%; width: 74.4%; height: 52.7%; display: flex; align-items: center; background: transparent; }
+.announce2 .announce2-text {
+  font-family: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 400;
+  font-size: clamp(11px, 2.6cqw, 34px);
+  line-height: 1.5;
+  color: #f5eef1;
+  text-shadow: 0 0 10px rgba(230,170,200,.55), 0 1px 3px rgba(0,0,0,.85);
+  white-space: pre-wrap;
+  overflow: hidden;
+}
+.dash-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.dash-item:first-child { border-top: 0; }
+.dash-item label { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 0; }
+
+.wd { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.wdbox { display: flex; align-items: center; gap: 6px; color: var(--text); margin: 0; }
+.uploads { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.uploads .k { color: var(--muted); font-size: 14px; margin-bottom: 6px; }
+.upload { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.img-prev { width: 96px; height: 64px; border: 1px dashed var(--line); border-radius: 8px; display: grid; place-items: center; overflow: hidden; background: var(--bg); }
+.img-prev.icon { width: 64px; }
+.img-prev img { width: 100%; height: 100%; object-fit: cover; }
+
+@media (max-width: 860px) {
+  .dash-panels { grid-template-columns: 1fr; }
+  .dash-panels > .wide { grid-column: 1 / -1; }
+}
+
+/* ---------- round 8: guild name hero, info section, attendance bars, full-screen notices ---------- */
+.guild-hero { display: flex; align-items: center; gap: 20px; padding: 6px 4px 20px; }
+.hero-icon { width: 84px; height: 84px; border-radius: 18px; object-fit: cover; flex: none; }
+.hero-name { font-family: var(--display); font-size: clamp(36px, 6vw, 64px); line-height: 1.02; letter-spacing: .01em; overflow-wrap: anywhere; }
+.hero-tag { color: var(--muted); font-size: 18px; margin-top: 4px; }
+
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.side > .panel { margin: 0; }
+.info-cat { margin-bottom: 12px; }
+.info-cat:last-child { margin-bottom: 0; }
+.info-title { color: var(--muted); font-size: 14px; margin-bottom: 6px; }
+.info-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.info-text { white-space: pre-wrap; font-size: 16px; line-height: 1.55; max-height: 55vh; overflow: auto; }
+.ie-cat { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+.ie-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.ie-btn { margin: 0 0 10px 14px; padding-left: 10px; border-left: 2px solid var(--line); }
+.ie-text { min-height: 72px; }
+dialog.wide { width: min(820px, calc(100vw - 32px)); }
+
+.attcell { display: flex; align-items: center; gap: 12px; }
+.attcell .rate { font-size: 20px; min-width: 66px; text-align: right; }
+.attbar { flex: 1; height: 9px; background: var(--panel-2); border-radius: 5px; overflow: hidden; min-width: 90px; }
+.attbar i { display: block; height: 100%; background: var(--muted); }
+.attbar i.red { background: #e2685c; } .attbar i.orange { background: #eba23c; } .attbar i.green { background: #6fcf8b; }
+.cnt-bad { color: #e2685c; font-size: 17px; } .cnt-warn { color: #eba23c; font-size: 17px; }
+.chips-sm { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 2px; }
+.chip.small { font-size: 13px; color: var(--muted); }
+
+.use-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 10px 0 12px; }
+.use-cols .k { color: var(--muted); font-size: 14px; margin-bottom: 6px; }
+.scrollbox { max-height: 210px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+
+/* login notice: covers the whole screen and cannot be closed except by accepting it */
+dialog.notice { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--bg); color: var(--text); overflow: auto; }
+dialog.notice::backdrop { background: var(--bg); }
+dialog.notice[open] { display: grid; place-items: center; }
+.notice-card { width: min(760px, calc(100vw - 40px)); padding: 40px; background: var(--panel); border: 1px solid var(--line); border-top: 6px solid var(--accent); border-radius: 14px; }
+.notice-card h1 { font-size: clamp(28px, 4vw, 40px); margin: 6px 0 18px; }
+.notice-count { color: var(--accent-text); font-size: 14px; text-transform: none; }
+.notice-text { white-space: pre-wrap; font-size: 18px; line-height: 1.6; max-height: 48vh; overflow: auto; margin-bottom: 28px; overflow-wrap: anywhere; }
+.btn.big { padding: 14px 26px; font-size: 18px; }
+
+/* ---------- round 9: Lucent loot, leadership sections, going chart, warnings, leave, bigger party board ---------- */
+.loot-form .field.slidefield { flex: 3 1 260px; }
+.slidefield { transition: flex-grow .4s ease, flex-basis .4s ease, min-width .4s ease, max-width .4s ease, opacity .3s ease, margin .4s ease; overflow: hidden; }
+.loot-form .field.slidefield.off, .slidefield.off { flex-grow: 0; flex-basis: 0; min-width: 0; max-width: 0; opacity: 0; margin: 0; padding: 0; pointer-events: none; visibility: hidden; transition: flex-grow .4s ease, flex-basis .4s ease, min-width .4s ease, max-width .4s ease, opacity .3s ease, margin .4s ease, visibility 0s .4s; }
+.type-pill.t-Lucent { border-color: #f0c85a; color: #f0c85a; }
+
+.qtag.warn { border-color: #e2685c; color: #e2685c; }
+.qtag.away { border-color: #5fb8e8; color: #5fb8e8; }
+.warn-line { color: #e2685c; font-size: 14px; }
+.warn-banner { border: 1px solid #e2685c; border-left-width: 5px; background: color-mix(in srgb, #e2685c 10%, var(--panel)); border-radius: 8px; padding: 14px 18px; grid-column: 1 / -1; }
+.warn-banner ul { margin: 6px 0; padding-left: 20px; }
+.alert-list { font-size: 18px; line-height: 1.6; margin: 0 0 16px; padding-left: 22px; }
+h3.sec { font-family: var(--body); font-weight: 600; font-size: 17px; margin: 22px 0 10px; }
+.sub-head { font-weight: 600; margin: 4px 0 10px; }
+.sub-sep { border-top: 1px solid var(--line); margin: 18px 0 14px; }
+.ov-row { padding: 5px 0; font-size: 16px; }
+.jobs-form { margin: 0 0 10px; }
+.jobs-form label { font-size: 13px; margin-bottom: 2px; }
+.jobs-form input { padding: 4px 8px; font-size: 15px; }
+
+/* party page: bigger board, always room for six members of every role */
+:root { --mrow: 52px; }
+.mrow { min-height: var(--mrow); }
+.pools { position: static; max-height: none; }
+.pool-list { height: calc(6 * var(--mrow) + 2px); min-height: 0; max-height: none; overflow: auto; }
+.board .pdrop { min-height: calc(6 * var(--mrow)); }
+details.usepreset ~ .boardwrap { --mrow: 62px; }                 /* dropdown closed: bigger rows, bigger board */
+details.usepreset ~ .boardwrap .mname { font-size: 17px; }
+details.usepreset ~ .boardwrap .mmeta { font-size: 14px; }
+details.usepreset[open] ~ .boardwrap { --mrow: 52px; }
+details.usepreset[open] ~ .boardwrap .mname { font-size: 16px; }
+details.usepreset[open] ~ .boardwrap .mmeta { font-size: 13px; }
+details.usepreset { margin-bottom: 16px; padding: 0 18px; }
+details.usepreset > summary { cursor: pointer; padding: 14px 0; font-family: var(--display); font-size: 18px; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.usepreset > summary::-webkit-details-marker { display: none; }
+details.usepreset > summary::after { content: ''; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin-right: 4px; transition: transform .2s; }
+details.usepreset[open] > summary::after { transform: rotate(-135deg); }
+details.usepreset[open] { padding-bottom: 14px; }
+
+/* ---------- round 10: applications, Discord admin, party picture ---------- */
+.post-preview { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; display: block; background: #130e11; }
+.chk-list { margin: 12px 0 4px; display: grid; gap: 6px; }
+.chk { display: flex; gap: 10px; align-items: flex-start; }
+.chk > span { font-weight: 700; width: 18px; text-align: center; }
+.chk.good > span { color: #6fcf8b; } .chk.bad > span { color: #e2685c; } .chk.info > span { color: var(--muted); }
+.discord-btn { border-color: #7d8cf0; color: #aab4ff; }
+
+
+/* ---------- round 11: event window, calendar status colours, charts, dropdown sections ---------- */
+.events-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; margin-bottom: 20px; }
+.events-layout .cal { margin-bottom: 0; }
+.ev-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+.ev-side .panel { margin: 0; }
+.side-empty { color: var(--muted); }
+.side-card h2 { font-size: 22px; overflow-wrap: anywhere; }
+.side-card .ev-meta { margin-top: 4px; }
+.side-h { font-family: var(--body); font-size: 15px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pin-box { margin-top: 16px; padding-top: 2px; border-top: 1px solid var(--line); }
+.pin-box .side-h { margin-top: 12px; }
+.pin-row .go input { width: 78px; text-align: center; letter-spacing: .2em; }
+.events-layout .wk-day { padding: 6px; min-height: 420px; }
+.events-layout .wk-ev { padding: 6px 7px; }
+.events-layout .wk-ev .sub { font-size: 12px; }
+.events-layout .cal-cell { min-height: 130px; }
+@media (max-width: 1180px) { .events-layout { grid-template-columns: 1fr; } .ev-side { position: static; max-height: none; } }
+
+/* A soft background tint (the corner badge below carries the actual meaning now, so the colour only needs to
+   be a quiet hint, not the whole story) - greyed out (the plain default look) with no answer yet, green once
+   you are going (whether that is just your own RSVP or the leadership's later recorded attendance), orange if
+   you said you are not coming. No-show (said Going, but not recorded once the event passed) keeps its own red -
+   a real problem, not the same thing as plainly declining - rather than being folded into either. */
+[data-st="attended"], [data-st="going"] { --sc: #6fcf8b; } [data-st="noshow"] { --sc: #e2685c; } [data-st="declined"] { --sc: #eba23c; }
+.cal-ev:not([data-st=""]), .wk-ev:not([data-st=""]) { background: color-mix(in srgb, var(--sc) 20%, var(--panel-2)); border-left-color: var(--sc); }
+.cal-ev[data-st="declined"], .wk-ev[data-st="declined"] { opacity: .85; }
+/* The check/cross corner badge - the actual "are you in or out" signal, with the tint behind it now just a
+   quiet backdrop. Positioned inside the card's own corner (not hanging off the edge) so it never gets clipped
+   or overlaps the chip above it in a packed month cell. */
+/* Week view only - the month grid's chips are a single tight row with no room for a badge without either
+   clipping it or crowding out the title (see monthChip's comment in app.js), so the tint alone carries the
+   signal there. */
+.wk-ev { position: relative; }
+.wk-ev:not([data-st=""]) { padding-right: 24px; }
+.stbadge { position: absolute; top: 6px; right: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--sc); color: #1b1418; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
+.tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 5px; }
+.status-legend { border-top: 0; padding-top: 0; align-items: center; }
+.st-key { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.st-key i { width: 16px; height: 14px; border-radius: 4px; background: color-mix(in srgb, var(--sc) 30%, var(--panel-2)); border-left: 4px solid var(--sc); }
+.mystatus { display: flex; align-items: center; gap: 9px; padding: 8px 11px; border-radius: 6px; margin: 10px 0 4px; background: color-mix(in srgb, var(--sc) 16%, transparent); border: 1px solid var(--sc); font-size: 15px; }
+.mystatus i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--sc); }
+
+/* charts */
+.going-chart { margin: 2px 0 20px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.chart-sum { font-size: 17px; }
+.chart-sum b { font-family: var(--display); font-size: 32px; color: var(--accent-text); margin-right: 4px; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.lg { display: inline-flex; align-items: center; gap: 7px; padding: 3px 12px 3px 10px; border-radius: 20px; background: rgba(255, 255, 255, .05); font-size: 14px; }
+.lg i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.lg small { color: var(--muted); }
+.cbars { display: grid; gap: 10px; }
+.cbar { display: grid; grid-template-columns: 112px minmax(0, 1fr) 104px; align-items: center; gap: 14px; }
+.cbar .cl { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.rdot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--rc); }
+.ctrack { height: 32px; border-radius: 16px; background: rgba(255, 255, 255, .05); overflow: hidden; display: flex; align-items: center; }
+.cstack { display: flex; gap: 2px; height: 100%; min-width: 0; transform-origin: left center; animation: cgrow .7s cubic-bezier(.2, .8, .2, 1) both; }
+.cstack span { display: grid; place-items: center; min-width: 28px; background-color: var(--sc); background-image: linear-gradient(rgba(255, 255, 255, .28), rgba(255, 255, 255, 0) 55%); color: #0f1418; }
+.cstack span b { font-size: 14px; }
+.cstack span:first-child { border-radius: 16px 0 0 16px; } .cstack span:last-child { border-radius: 0 16px 16px 0; } .cstack span:only-child { border-radius: 16px; }
+.seg-yes { --sc: #6fcf8b; } .seg-no { --sc: #e2685c; } .seg-none { --sc: #8b95a7; } .seg-leave { --sc: #5fb8e8; }
+.cn { display: flex; align-items: baseline; justify-content: flex-end; gap: 2px; font-variant-numeric: tabular-nums; }
+.cn b { font-size: 19px; } .cn small { color: var(--muted); font-size: 13px; margin-left: 10px; min-width: 34px; text-align: right; }
+.cbar.all { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+.cbar.all .ctrack { height: 38px; border-radius: 19px; }
+@keyframes cgrow { from { transform: scaleX(0); opacity: .35; } }
+.cpies { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 14px; }
+.cpie { margin: 0; padding: 14px 8px 12px; text-align: center; background: rgba(255, 255, 255, .03); border: 1px solid var(--line); border-top: 3px solid var(--rc); border-radius: 12px; }
+.cpie.all { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cpie svg { display: block; margin: 0 auto; }
+.cpie svg .dn { font-family: var(--display); font-size: 30px; fill: var(--text); }
+.cpie svg .dl { font-size: 11px; fill: var(--muted); }
+.cpie svg circle { transition: stroke-width .15s; } .cpie svg circle:hover { stroke-width: 19; }
+.cpie figcaption b { display: block; color: var(--rc); font-size: 16px; margin-top: 6px; }
+.mini-legend { display: flex; justify-content: center; gap: 12px; margin-top: 4px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.mini-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+@media (max-width: 700px) { .cbar { grid-template-columns: 1fr; gap: 4px; } .cn { justify-content: flex-start; } }
+
+/* dropdown sections (recurring events, every Admin section) */
+details.fold { margin-bottom: 12px; padding: 0 18px; }
+.panel.fold + .panel.fold { margin-top: 0; }
+details.fold > summary { cursor: pointer; padding: 14px 0; font-family: var(--display); font-size: 18px; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::after { content: ''; flex: none; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin: -3px 4px 0 auto; transition: transform .2s; }
+details.fold[open] > summary::after { transform: rotate(-135deg); margin-top: 3px; }
+details.fold > summary:hover { color: var(--accent-text); }
+.fold-body { padding: 0 0 16px; }
+/* A player folder nested inside a class folder on the VODs page - smaller and less padded than a top-level
+   fold, so it reads as a sub-level rather than another folder of equal weight. */
+details.vod-player-fold { padding: 0 0 0 4px; border-left: 2px solid var(--line); margin-bottom: 8px; }
+details.vod-player-fold > summary { font-size: 15px; padding: 8px 10px; }
+details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
+.count-pill { font-family: var(--body); font-size: 13px; padding: 1px 9px; border-radius: 20px; background: var(--panel-2); color: var(--muted); margin-left: 8px; }
+
+.ql-drop { margin-top: 4px; font-size: 14px; }
+.ql-drop summary { cursor: pointer; color: var(--accent-text); list-style: none; display: inline-flex; align-items: center; gap: 7px; }
+.ql-drop summary::-webkit-details-marker { display: none; }
+.ql-drop summary::after { content: ''; width: 6px; height: 6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); margin-top: -3px; }
+.ql-drop[open] summary::after { transform: rotate(-135deg); margin-top: 3px; }
+.ql-drop > div { padding: 6px 0 2px; line-height: 1.6; }
+.pp-wrap { margin-top: 8px; } .pp-filter { margin-bottom: 6px; } .pp .scrollbox { max-height: 220px; }
+
+/* week cards in the narrower calendar next to the event window */
+.wk-ev .top { flex-wrap: nowrap; align-items: center; }
+.wk-ev .top .mdot { margin: 0; }
+.wk-ev .ttl { overflow-wrap: break-word; word-break: normal; hyphens: auto; font-size: 14px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wk-ev .sub { display: block; line-height: 1.35; }
+.events-layout { grid-template-columns: minmax(0, 1fr) 320px; }
+/* the narrowest week columns: a little less padding so short words are not split */
+.events-layout .wk-day { padding: 5px; }
+.events-layout .wk-ev { padding: 5px 6px; border-left-width: 3px; }
+.events-layout .wk-ev .ttl { font-size: 13px; }
+/* radio buttons and tick boxes in a list must not take the width of a text input */
+.tagpick input[type="radio"], .tagpick input[type="checkbox"], .wdbox input[type="radio"], .wdbox input[type="checkbox"] { width: auto; flex: none; padding: 0; margin: 0; }
+.tagpick { justify-content: flex-start; }
+
+/* ---------- mobile phones (≈320-640px): the sidebar becomes a horizontal top bar, the calendar becomes touch-usable ---------- */
+@media (max-width: 640px) {
+  #app { grid-template-columns: 1fr; }
+  nav.rail { position: sticky; top: 0; z-index: 20; padding: 0; border-right: 0; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; flex-wrap: nowrap; }
+  .rail .brand { display: none; }          /* logo: kept for the vertical desktop rail, not worth the width here */
+  /* The player's own name is dropped here to save space (it is already shown in the page the person is on),
+     but Sign out itself stays reachable - it sits outside the scrolling nav row below so it is always visible
+     without having to scroll sideways to find it, unlike on the desktop rail where there is room for both. */
+  .rail .who { display: flex; align-items: center; margin: 0; padding: 0 10px; border: 0; flex: none; }
+  .rail .who span, .rail .who br { display: none; }
+  .rail .who a { padding: 8px 10px; border-radius: 6px; color: var(--text); text-decoration: none; white-space: nowrap; }
+  .rail .who a:hover { background: var(--panel-2); }
+  #nav-links { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; padding: 8px 10px; gap: 2px; flex: 1 1 auto; min-width: 0; }
+  .rail a.nav { flex: none; padding: 8px 12px; border-left: 0; border-bottom: 3px solid transparent; border-radius: 6px 6px 0 0; }
+  .rail a.nav.active { border-left: 0; border-bottom-color: var(--accent); }
+  .rail a.nav.gap { margin-top: 0; border-top: 0; padding-top: 8px; }
+  main { padding: 14px 12px 40px; }
+  body { overflow-x: hidden; }
+  .page-head { flex-wrap: wrap; }
+
+  /* Starting attendance panel: no room for five aligned columns, so the header row disappears (each field's
+     own placeholder - "events", "days" - says what it is instead) and each player's row wraps its four inputs
+     onto their own line below the name, rather than squeezing them illegibly narrow. */
+  .att-start-grid .att-start-head { display: none; }
+  .att-start-grid .att-start-row { grid-template-columns: 1fr; gap: 4px; }
+  .att-start-grid .att-start-row > span { white-space: normal; font-weight: 600; }
+  .att-start-grid .att-start-fields { display: flex; gap: 6px; flex-wrap: wrap; }
+  .att-start-grid .att-start-fields input { width: auto; flex: 1 1 70px; }
+  .att-start-grid .att-start-fields input[type="date"] { flex-basis: 140px; }
+
+  /* week view: one full-width day per row instead of 7 cramped side-by-side columns - fully readable, no horizontal scroll */
+  .events-layout { grid-template-columns: 1fr; gap: 14px; }
+  .wk-grid { grid-template-columns: 1fr; }
+  .wk-day { border-right: 0; border-bottom: 1px solid var(--line); min-height: 0; padding: 10px 12px; }
+  .wk-day:last-child { border-bottom: 0; }
+  .wk-head .num { font-size: 18px; }
+
+  /* month view: keeps its 7-day grid (dates still line up under the weekday letters), but each day becomes a
+     small tap target - the day number plus a coloured dot per event - since there is no room for event text at
+     this width. Tap "Week" above (or a day's "+N more") to read the full, fully-readable week list instead. */
+  .cal-dow { padding: 4px 2px; font-size: 11px; text-align: center; }
+  .cal-cell { min-height: 54px; padding: 3px; gap: 3px; }
+  .cal-num { width: 20px; height: 20px; font-size: 12px; }
+  .cal-ev { padding: 0; border-left: 0; border-radius: 50%; width: 7px; height: 7px; min-height: 7px; background: var(--c); overflow: hidden; flex: none; }
+  .cal-ev .tm, .cal-ev .ttl { display: none; }
+  .cal-more { font-size: 11px; padding: 0 2px; }
+  .cal-head { padding: 10px 12px; gap: 6px; }
+  .cal-head h2 { font-size: 17px; width: 100%; margin-right: 0; }
+  .cal-head .btn.sm { padding: 5px 9px; font-size: 13px; }
+  .cal-legend { padding: 8px 12px; gap: 5px 10px; }
+  .cal-legend .chip, .cal-legend .small, .status-legend .st-key { font-size: 12px; }
+}
+
+/* attendance rules form: one field per row, with its own description - a dedicated layout for this one
+   form (not the shared .rules-grid, which several other forms still use as a multi-column grid) */
+.rules-stack { display: flex; flex-direction: column; gap: 16px; padding-bottom: 14px; }
+.rules-stack .rule-field { margin: 0; }
+.rules-stack .rule-field > label:first-child { display: block; margin-bottom: 2px; }
+.rules-stack input[type="number"] { max-width: 160px; }
+.rules-stack .btn { align-self: flex-start; margin-top: 4px; }
+
+/* Member table: a quick "standing" glance per player - active warnings, low attendance - linking to their profile */
+.standing-cell { display: flex; flex-direction: column; gap: 3px; text-decoration: none; }
+.standing-flag { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.standing-flag.warn, .standing-flag.low { color: #e2685c; }
+
+/* VOD review: the YouTube player plus its toolbar (fullscreen now; drawing and screenshot controls join it
+   later) - fullscreen targets the whole wrap, not just the iframe, so the toolbar is still usable there too.
+   The toolbar used to float on top of the video itself (an absolutely-positioned strip, shown on hover) - but
+   that strip sat exactly where YouTube's own top-right controls (its title/settings/share icons, which fade in
+   on hover the same way) live, blocking them the whole time ours was visible. It is now a normal, always-visible
+   row BELOW the video instead, in its own space, so nothing of ours ever sits on top of anything YouTube draws. */
+.vod-player-wrap { position: relative; display: flex; flex-direction: column; background: #000; border-radius: 8px; overflow: hidden; }
+.vod-video-area { position: relative; aspect-ratio: 16/9; }
+.vod-video-area #vod-yt-player, .vod-video-area iframe { width: 100%; height: 100%; display: block; }
+.vod-player-wrap:fullscreen, .vod-player-wrap:-webkit-full-screen { border-radius: 0; width: 100vw; height: 100vh; }
+.vod-player-wrap:fullscreen .vod-video-area, .vod-player-wrap:-webkit-full-screen .vod-video-area { flex: 1; aspect-ratio: auto; }
+.vod-toolbar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding: 10px; background: #1b1418; }
+
+.vod-draw-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; }
+/* Same problem as the toolbar above, one layer further down: turning Draw on makes this canvas catch every
+   pointer event across the whole video so free-hand strokes work anywhere on it - but at full size that also
+   swallows clicks and hover meant for YouTube's own control bar at the bottom (play/pause, the seek bar, and
+   the volume control), which sits exactly behind it the whole time Draw is on. clip-path trims the canvas's
+   hit-test region (not just its paint area) to stop short of that strip, so drawing stays free-hand everywhere
+   above it while the native controls underneath stay reachable. */
+.vod-draw-canvas.active { pointer-events: auto; cursor: crosshair; clip-path: inset(0 0 48px 0); }
+.vod-colors { display: flex; gap: 6px; align-items: center; margin-right: 4px; }
+.vod-color { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.vod-color.active { border-color: #fff; }
+
+
+/* Weapon icons: simple inline glyphs, grouped together right before whatever text follows them (the class
+   name once it is known, or the weapon names themselves when it is not) */
+.wicons { display: inline-flex; align-items: center; gap: 4px; margin-right: 7px; vertical-align: middle; }
+.wicon { width: 24px; height: 24px; flex: none; object-fit: cover; border-radius: 5px; vertical-align: middle; }
+
+/* One row per player: name, then the four baseline fields (%, events, days, start date), aligned into columns
+   wide enough to allow it; narrower than that (see the mobile breakpoint below) each row wraps its own fields
+   instead, relying on their placeholders rather than the column header row to say what each one is. */
+.att-start-grid { display: flex; flex-direction: column; gap: 6px; }
+.att-start-head, .att-start-row { display: grid; grid-template-columns: minmax(90px, 1.4fr) auto; gap: 8px; align-items: center; }
+.att-start-head, .att-start-fields { font-size: 12px; color: var(--muted); font-weight: 600; }
+.att-start-head { padding: 0 2px 2px; }
+.att-start-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-start-fields { display: grid; grid-template-columns: 56px 68px 60px 142px; gap: 8px; }
+.att-start-fields input { width: 100%; font: inherit; color: var(--text); font-weight: 400; }
+
+/* VOD coaching points: the player (left/top) plus a running list of timestamped notes (right/below), each
+   optionally with a saved drawing that reappears on its own as playback reaches that moment again. */
+.vod-review-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, .75fr); gap: 16px; align-items: start; }
+.vod-marker-panel { max-height: calc(100vh - 180px); overflow: auto; }
+.vod-marker-list { display: flex; flex-direction: column; gap: 8px; }
+.vod-marker { display: flex; gap: 8px; align-items: stretch; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.vod-marker.active { border-color: var(--accent); }
+.vod-marker-jump { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; text-align: left; padding: 8px; cursor: pointer; border-radius: 6px; }
+.vod-marker-jump:hover { background: var(--panel-2); }
+.vod-marker-time { display: block; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
+.vod-marker-note { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vod-marker .btn { align-self: center; }
+@media (max-width: 900px) { .vod-review-grid { grid-template-columns: 1fr; } .vod-marker-panel { max-height: none; } }
+.vod-reviewed-badge { display: inline-block; margin-left: 6px; width: 18px; height: 18px; border-radius: 50%; background: #6fcf8b; color: #1b1418; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center; }
+.vod-review-list { display: flex; flex-direction: column; gap: 8px; }
+.vod-review-entry { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.vod-review-entry-head { margin-bottom: 3px; }
+.vod-review-entry-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ================= Attendance Tracking (dashboard panel for the voice/PIN attendance engine) =================
+   A direct, one-event-at-a-time front end for the voice-attendance engine that already runs in the background
+   (server-shotcaller.js's pollVoiceAttendance) - pick an event, flip automatic/manual, start the watch, and
+   watch it live, right on the Dashboard instead of having to find the right event first.
+   Built exactly like the Shotcaller dashboard card (.sc-card/.sc-card-body above): the attendance-banner.jpg
+   art is the background for the WHOLE card - mode row, event picker, auto-toggle, button, stats - not just a
+   strip up top, scaled by WIDTH only (background-size: 100% auto) so the wordmark's vertical position stays
+   fixed no matter which of the three states (inactive/running/awaiting-save) is showing, since those states
+   aren't the same height. Image is 1672x941; the "ATTENDANCE TRACKING" wordmark + ornamental frame sit in the
+   top ~260px of that, i.e. ~15.5% of the image's own WIDTH once scaled - padding-top below is a percentage
+   specifically because percentage padding resolves against the containing block's width per the CSS spec,
+   matching how the image itself is scaled. */
+.att-card {
+  position: relative; overflow: hidden; padding: 0;
+  background-image: url('/img/attendance-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+.att-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.4), rgba(10,7,9,.82) 55%, rgba(10,7,9,.93)); pointer-events: none; }
+.att-card-body { position: relative; z-index: 1; padding: 18% 20px 26px; }
+.att-wrap { margin-bottom: 22px; }
+.att-sect + .att-sect { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.14); }
+.att-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.att-mode-label { font-family: var(--display); font-size: 19px; }
+/* The channel picker + "Save channels" form slides open/closed rather than just appearing - a plain toggle
+   felt like something had broken (the whole lower half of the card jumping) when "Automatic tracking" was
+   unticked, so this tweens max-height + opacity instead. The one-time step is a tall-enough value to always
+   clear real content without needing to measure it in JS; the box is clipped (overflow:hidden) throughout. */
+.att-reveal { max-height: 0; opacity: 0; overflow: hidden; transition: max-height .35s ease, opacity .3s ease; }
+.att-reveal.att-reveal-open { max-height: 420px; opacity: 1; }
+.att-action { text-align: center; }
+/* Stage 1 (reuses .sc-start-btn's green pill look exactly, see above) -> Stage 2: a persistent "Running" pill,
+   spinner + text rather than the Shotcaller panel's icon-only circle, since this stays up for the whole length
+   of an event rather than a few seconds while a session connects. */
+.att-running-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700; border-radius: 8px;
+  background: #ff9d0a; color: #2a1400; border: 1px solid #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55);
+  display: inline-flex; align-items: center; gap: 10px; cursor: default;
+  animation: att-btn-morph-run .5s ease forwards;
+}
+@keyframes att-btn-morph-run {
+  0% { background: #0fa968; border-color: #0fa968; box-shadow: 0 0 16px rgba(15,169,104,.55); }
+  100% { background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); }
+}
+/* Stage 3: once the track actually stops (Shotcaller session ended), the same pill morphs again into a gold
+   "Save track" button - positive/finishing, not the Shotcaller panel's red Stop, since nothing is being
+   cancelled here: the attendance is already recorded, this just closes the bookkeeping out (or waits 15
+   minutes and closes itself). */
+.att-save-btn {
+  margin-top: 14px; padding: 10px 28px; font-size: 16px; font-weight: 700; border-radius: 8px;
+  background: #e8b84b; color: #2a1d00; border: 1px solid #e8b84b; box-shadow: 0 0 16px rgba(232,184,75,.55);
+  animation: att-btn-morph-save .5s ease forwards;
+}
+.att-save-btn:hover { background: #f5c768; border-color: #f5c768; }
+@keyframes att-btn-morph-save {
+  0% { background: #ff9d0a; border-color: #ff9d0a; box-shadow: 0 0 16px rgba(255,157,10,.55); }
+  100% { background: #e8b84b; border-color: #e8b84b; box-shadow: 0 0 16px rgba(232,184,75,.55); }
+}
+.att-save-hint { margin-top: 8px; }
+.att-warn { background: rgba(224,18,79,.12); border: 1px solid rgba(224,18,79,.4); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
