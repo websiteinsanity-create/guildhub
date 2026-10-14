@@ -50,6 +50,8 @@ services:
       # on - DISCORD_GUILD_ID above is reused. See .env.example for how to fill these in.
       - SHOTCALLER_URL=${SHOTCALLER_URL:-}
       - SHOTCALLER_API_KEY=${SHOTCALLER_API_KEY:-}
+      - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY}
+
     volumes:
       - /opt/persistent_volume/guildhub/data:/data
     # Lets this container resolve host.docker.internal, needed to reach the Shotcaller bot when it runs with
