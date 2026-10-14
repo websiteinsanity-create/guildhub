@@ -1082,7 +1082,7 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
    A direct, one-event-at-a-time front end for the voice-attendance engine that already runs in the background
    (server-shotcaller.js's pollVoiceAttendance) - pick an event, flip automatic/manual, start the watch, and
    watch it live, right on the Dashboard instead of having to find the right event first.
-   Built exactly like the Shotcaller dashboard card (.sc-card/.sc-card-body above): the attendance-banner.png
+   Built exactly like the Shotcaller dashboard card (.sc-card/.sc-card-body above): the attendance-banner.jpg
    art is the background for the WHOLE card - mode row, event picker, auto-toggle, button, stats - not just a
    strip up top, scaled by WIDTH only (background-size: 100% auto) so the wordmark's vertical position stays
    fixed no matter which of the three states (inactive/running/awaiting-save) is showing, since those states

@@ -387,3 +387,54 @@ withServer('an older Shotcaller bot build that only reports headcounts (no per-u
   const audit = (await s.call('/api/admin/audit', 'GET', null, s.officer)).body;
   assert.ok(audit.entries.some((row) => row.action === 'event.voicetrack.unsupported'), 'an audit log entry should explain why attendance is not being credited');
 }, {}, { legacyNoPresence: true });
+
+// Performance: while an event is being voice-tracked, THREE independent things ask the bot "what is the
+// session doing right now" (GET /session) on their own clock - the background pollVoiceAttendance loop, and,
+// per officer with a tab open, the dashboard's live panel (/voice-track/live) and the Shotcaller page itself
+// (/api/shotcaller/status), both every 5s in the real app. With more than one officer watching the same raid,
+// that is several redundant real network round trips to the separate bot process every few seconds, all
+// asking the exact same question - worst right when the bot is slowest to answer (mid session-start). This is
+// what read back as "the website lags while Shotcaller is starting/tracking" (see cachedSession() in
+// server-shotcaller.js). This test stands in for several officers' tabs all polling at once - some landing at
+// the very same instant, some a little apart but still inside the cache window - and checks that the bot
+// actually only sees a small, bounded number of real /session requests, not one per client call.
+withServer('several officers watching the same tracked event at once does not multiply real requests to the Shotcaller bot - concurrent and near-simultaneous status reads are coalesced', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev } = await makeTrackedEvent(s);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+
+  const sessionCallsSoFar = () => s.bot.calls.filter((c) => c.method === 'GET' && c.url.endsWith('/session')).length;
+  const before = sessionCallsSoFar();
+
+  // Ten "officers" each hitting both polled endpoints at the exact same instant - the classic case (several
+  // dashboard tabs open during the same raid) that used to mean 20 separate bot calls for one real question.
+  const reads = [];
+  for (let i = 0; i < 10; i++) {
+    reads.push(s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer));
+    reads.push(s.call('/api/shotcaller/status', 'GET', null, s.officer));
+  }
+  const results = await Promise.all(reads);
+  for (const res of results) assert.equal(res.status, 200, JSON.stringify(res.body));
+
+  const afterBurst = sessionCallsSoFar();
+  assert.ok(afterBurst - before <= 2, `20 simultaneous reads should collapse into at most 1-2 real bot calls, not one each (saw ${afterBurst - before})`);
+
+  // A few more reads spread out a little, but still comfortably inside the cache window (SHOTCALLER_SESSION_CACHE_MS,
+  // set well below the default for this test) - these should also ride the same cached answer rather than each
+  // starting a fresh one.
+  await new Promise((res) => setTimeout(res, 40));
+  await Promise.all([
+    s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer),
+    s.call('/api/shotcaller/status', 'GET', null, s.officer),
+    s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer),
+  ]);
+  const afterMore = sessionCallsSoFar();
+  assert.ok(afterMore - afterBurst <= 1, `reads still inside the cache window should add at most one more real call (saw ${afterMore - afterBurst})`);
+
+  // Once the cache window has genuinely passed, the next read does go back to the bot for a fresh answer -
+  // this is a short-lived cache for a burst, never a permanently stale one.
+  await new Promise((res) => setTimeout(res, 300));
+  await s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer);
+  assert.ok(sessionCallsSoFar() > afterMore, 'after the cache window passes, a read gets a fresh answer from the bot again');
+}, { SHOTCALLER_SESSION_CACHE_MS: '200' });
