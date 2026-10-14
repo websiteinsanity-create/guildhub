@@ -1038,7 +1038,7 @@ VIEWS.dashboard = () => {
   const sideHasInfo = showInfo && !infoInLeadership;
   const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.png" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
     stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
