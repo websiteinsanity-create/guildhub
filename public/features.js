@@ -1038,7 +1038,7 @@ VIEWS.dashboard = () => {
   const sideHasInfo = showInfo && !infoInLeadership;
   const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.png" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
     stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
@@ -1591,6 +1591,43 @@ function discordAdmin() {
       <button class="btn primary">Save</button></form>
   </div>`;
 }
+// The daily schedule post's own settings - its own top-level panel (not nested inside the Discord panel above),
+// so the "every admin section is a dropdown" pass near the bottom of this file turns it into its own separate
+// collapsible entry. Reuses the same channel/role data "Check the connection" (in the Discord panel) already
+// loaded (UI.dcheck), same as mercenariesAdmin below does for its own, separate settings.
+function dailyScheduleAdmin() {
+  const dp = S.settings.dailySchedulePost || {}, c = UI.dcheck;
+  const chans = c ? c.channels : [];
+  const selected = dp.channelId;
+  const options = [...(selected && !chans.some((x) => x.id === selected) ? [{ id: selected, name: dp.channelName || selected }] : []), ...chans];
+  const mentioned = dp.mentionRoleIds || [];
+  const roleOptions = !c ? mentioned.map((id) => ({ id, name: id + ' (checking...)' }))
+    : [...c.roles, ...mentioned.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+  return `<div class="panel"><h3>Daily schedule post</h3>
+    <div class="muted small" style="margin:-6px 0 10px">A banner message, then one message per event for that game day, each with its own ✅/❌ buttons directly below it. Everyone sees the same live going/can't/no-reply counts on each event's message, updated the moment anyone answers; each click also gets a private confirmation only that person sees. "Today" flips over at 4am (the game's own daily reset), same as the Daily Schedule dashboard panel. Press "Check the connection" in the Discord panel above to load your channels and roles here.</div>
+    <form data-form="dschedpost"><div class="row"><div class="field"><label for="ds-ch">Channel</label><select id="ds-ch" name="channelId"><option value="">${chans.length || selected ? 'No channel chosen' : 'Press "Check the connection" above to load your channels'}</option>${options.map((x) => `<option value="${esc(x.id)}" ${x.id === selected ? 'selected' : ''}>#${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"><label for="ds-hr">Post automatically at</label><select id="ds-hr" name="postHour">${hours.map((h) => `<option value="${h}" ${h === (dp.postHour ?? 8) ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></div></div>
+    <div class="field"><label>@-mention these roles on the banner message (optional)</label>
+      ${roleOptions.length ? roleOptions.map((r) => `<label class="tagpick"><input type="checkbox" name="dsrole" value="${esc(r.id)}" ${mentioned.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')
+        : '<div class="muted small">Press "Check the connection" above to see your server\'s roles.</div>'}
+      <div class="muted small" style="margin-top:2px">Up to 10. None ticked = no mention.</div></div>
+    <label class="tagpick"><input type="checkbox" name="enabled" ${dp.enabled ? 'checked' : ''}> Post automatically every day</label>
+    <div class="muted small" style="margin:4px 0 10px">${dp.lastPostedDay ? `Last posted/refreshed for game day ${esc(dp.lastPostedDay)}.` : 'Never posted yet.'}</div>
+    <div class="link-row"><button class="btn primary">Save</button><button type="button" class="btn" data-act="dschedpost-now">Post today's schedule now</button></div></form>
+  </div>`;
+}
+FORMS.dschedpost = (f, fd) => act(() => api('/api/admin/discord', 'PUT', {
+  dailySchedulePost: {
+    channelId: fd.channelId, channelName: f.elements.channelId.selectedOptions[0] ? f.elements.channelId.selectedOptions[0].textContent.replace(/^#/, '') : '',
+    mentionRoleIds: [...f.querySelectorAll('input[name=dsrole]:checked')].map((i) => i.value),
+    enabled: f.elements.enabled.checked, postHour: Number(fd.postHour),
+  },
+}), 'Saved');
+ACTIONS['dschedpost-now'] = () => act(async () => {
+  const r = await api('/api/admin/discord/daily-schedule/post-now', 'POST');
+  if (!r.ok) throw new Error(r.error || 'The post was not sent.');
+}, 'Posted. Look in that channel.');
 // Mercenaries: outside players who help fill a roster for one event. They carry a different Discord role from
 // regular guild members - picking it here is what "Get mercenaries" (on an event) pings when asking for help.
 // Reuses the same channel/role data "Check the connection" above already loaded (UI.dcheck); no separate check.
@@ -2130,6 +2167,7 @@ VIEWS.admin = () => {
   return '<div class="page-head"><h1>Admin</h1></div>'
     + appearanceAdmin()
     + discordAdmin()
+    + dailyScheduleAdmin()
     + officersAdmin()
     + coachesAdmin()
     + shotcallerAdmin()

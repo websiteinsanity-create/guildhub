@@ -164,6 +164,30 @@ module.exports = function install(ctx) {
       }
       if (x.deletePrevious !== undefined) st.partyPost.deletePrevious = yes(x.deletePrevious);
     }
+    if (body.dailySchedulePost && typeof body.dailySchedulePost === 'object') {
+      touched.push('daily schedule post');
+      const x = body.dailySchedulePost, dp = st.dailySchedulePost;
+      // Changing the channel (or switching this off) always clears the tracked "current" message - the old
+      // message, if any, was posted to the OLD channel/settings and must not be edited in place as if it
+      // were still the live post for whatever channel is configured now.
+      if (x.channelId !== undefined) {
+        const id = String(x.channelId || '');
+        need(id === '' || /^\d{15,25}$/.test(id), 400, 'Pick a channel from the list.');
+        if (id !== dp.channelId) dp.current = null;
+        dp.channelId = id;
+        if (!id) dp.channelName = '';
+      }
+      if (x.channelName !== undefined) dp.channelName = clean(x.channelName, 80);
+      if (x.mentionRoleIds !== undefined) {
+        const ids = Array.isArray(x.mentionRoleIds) ? x.mentionRoleIds : [];
+        need(ids.length <= 10, 400, 'Pick up to 10 roles.');
+        const clean_ids = [...new Set(ids.map((id) => String(id)))];
+        need(clean_ids.every((id) => /^\d{15,25}$/.test(id)), 400, 'That does not look like a Discord role.');
+        dp.mentionRoleIds = clean_ids;
+      }
+      if (x.enabled !== undefined) dp.enabled = yes(x.enabled);
+      if (x.postHour !== undefined) { const h = Math.round(Number(x.postHour)); need(Number.isFinite(h) && h >= 0 && h <= 23, 400, 'Pick an hour from 0 to 23.'); dp.postHour = h; }
+    }
     if (touched.length) audit(user, 'discord.settings.update', { type: 'settings' }, `${user.name} changed Discord settings: ${touched.join(', ')}.`);
     save();
     return st;

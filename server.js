@@ -115,6 +115,22 @@ const SETTING_DEFAULTS = {
     deletePrevious: false,        // delete the last party announcement message before posting the new one
     lastMessage: null,            // { channelId, messageId } of the most recent one, so it can be found again to delete
   },
+  // One shared message per guild "day" (the same 4am-cutover game day the Daily Schedule dashboard panel
+  // uses) listing every one of that day's events with its own pair of RSVP buttons - an automatic post each
+  // day plus a manual "post now" button (see dailyScheduleTick/ensureScheduleMessage below). Unlike partyPost,
+  // this channel is dedicated: a guild may well want party-picture announcements and the daily schedule in
+  // two different channels.
+  dailySchedulePost: {
+    channelId: '', channelName: '', mentionRoleIds: [],
+    enabled: false,          // off until an officer picks a channel and switches it on
+    postHour: 8,             // the guild-day hour (0-23, in config.defaultTimezone) the automatic post goes out
+    lastPostedDay: '',       // the game-day (YYYY-MM-DD) last automatically posted/ensured, so a restart or a
+                             // slow tick never posts the same day twice
+    current: null,           // { gameDay, channelId, bannerMessageId, events: { [eventId]: messageId } } for
+                             // the live block of messages being kept up to date - null until the first post.
+                             // The banner message is never edited again once posted; each event's own message
+                             // is the one kept fresh with counts after every button click on that event.
+  },
   // "Get mercenaries": which channel and Discord role to ping when an officer asks for outside help for one event.
   mercenaries: { channelId: '', channelName: '', roleId: '', roleName: '' },
   // Shotcaller: who can be picked as the dedicated or extra caller(s) when running a live voice session - a
@@ -362,6 +378,7 @@ function migrate() {
   db.settings.compliance = { ...SETTING_DEFAULTS.compliance, ...(db.settings.compliance || {}) };
   db.settings.applications = { ...SETTING_DEFAULTS.applications, ...(db.settings.applications || {}) };
   db.settings.partyPost = { ...SETTING_DEFAULTS.partyPost, ...(db.settings.partyPost || {}) };
+  db.settings.dailySchedulePost = { ...SETTING_DEFAULTS.dailySchedulePost, ...(db.settings.dailySchedulePost || {}) };
   db.settings.mercenaries = { ...SETTING_DEFAULTS.mercenaries, ...(db.settings.mercenaries || {}) };
   db.settings.shotcaller = { ...SETTING_DEFAULTS.shotcaller, ...(db.settings.shotcaller || {}) };
   db.settings = { ...SETTING_DEFAULTS, ...(db.settings || {}) };
@@ -1064,6 +1081,14 @@ const unix = (iso) => Math.floor(new Date(iso).getTime() / 1000);
 const appUrl = () => discord.cfg.publicUrl || `http://localhost:${PORT}`;
 const nameOfOwner = (id) => (db.users[id] && db.users[id].name) || id;
 
+// The guild's own calendar day and hour, in its configured reference time zone (not each visitor's/each
+// server's local one) - the exact same rule the client's Daily Schedule panel already uses (guildDate/gameDay
+// in public/app.js): the "day" flips at 4am, not local midnight, matching the game's own daily reset, so
+// everyone sees the same "today" for the shared Discord schedule post regardless of time zone.
+const guildDate = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: config.defaultTimezone || 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+const gameDay = (ms) => guildDate(ms - 4 * 3600000);
+const guildHour = (ms) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: config.defaultTimezone || 'Europe/Berlin', hour: '2-digit', hourCycle: 'h23' }).format(new Date(ms)));
+
 // Who receives the PIN: the leader of every party, everybody with a leadership rank, and Discord officers.
 function pinRecipients(ev) {
   const out = new Map();
@@ -1164,6 +1189,142 @@ async function sendManualReminders(ev, by) {
   console.log(`[reminder manual, by ${by}] ${ev.title}: ${people.length - failed.length}/${people.length} delivered`);
   return { sent: people.length - failed.length, total: people.length, failed };
 }
+
+// ---------- daily schedule post: one shared Discord message per game day, with live RSVP buttons ----------
+// All of a game day's events in one message (own buttons per event), kept up to date as players answer -
+// see discordAdmin's "Daily schedule" panel (public/features.js) for the settings, and the schedrsvp: branch
+// of /discord/interactions below for what happens when someone taps a button.
+// A purely decorative banner (just the "Daily Schedule" title, cropped from the top of the dashboard panel's
+// own full banner - see public/img/schedule-banner-discord.png, a separate file so the dashboard's original
+// full-height image is never touched) attached once, on the first post of the day. It never changes, so later
+// edits (ensureScheduleMessage on refresh, below) only ever PATCH the text/buttons and leave it alone - Discord
+// keeps a message's existing attachments on an edit that doesn't mention "attachments" at all.
+let DAILY_SCHEDULE_BANNER = null;
+try { DAILY_SCHEDULE_BANNER = fs.readFileSync(path.join(PUBLIC_DIR, 'img', 'schedule-banner-discord.png')); } catch { /* fine without it - the post just has no banner */ }
+const scheduleDayEvents = (day) => db.events.filter((e) => gameDay(Date.parse(e.start)) === day).sort((a, b) => new Date(a.start) - new Date(b.start));
+// Same owner-grouping sendReminderDMs/reminderRecipients already use: a player with several characters only
+// ever counts once per event, as whichever of their characters actually has the RSVP recorded.
+function eventRsvpCounts(ev) {
+  const byOwner = new Map();
+  for (const m of db.members) if (m.active) (byOwner.get(m.owner) || byOwner.set(m.owner, []).get(m.owner)).push(m);
+  let yes = 0, no = 0, noreply = 0;
+  for (const [, chars] of byOwner) {
+    if (chars.some((m) => ev.rsvps[m.id] === 'yes')) yes++;
+    else if (chars.some((m) => ev.rsvps[m.id] === 'no')) no++;
+    else noreply++;
+  }
+  return { yes, no, noreply };
+}
+// Discord always renders a message's buttons after ALL of that message's own text (and after any attached
+// picture) - never interleaved partway through a longer message. So "every event has its own buttons directly
+// below its own text, and the banner sits on top of everything" can only be done with SEVERAL messages, not
+// one combined post: a banner message (posted first, so it lands above everything that follows), then one
+// message per event, each carrying just that event's own text and its own button row - which Discord then
+// naturally renders text-then-buttons, same as any other bot message. The trade-off is a guild with several
+// events on the same day gets several bot messages instead of one, not one tidy post.
+const dayLabel = (day) => new Date(day + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+function buildEventMessage(ev) {
+  const c = eventRsvpCounts(ev);
+  const content = [
+    `**${ev.title}**${ev.mandatory ? ' 🔒 Mandatory' : ''} — <t:${unix(ev.start)}:t> (<t:${unix(ev.start)}:R>)`,
+    `✅ ${c.yes} going · ❌ ${c.no} can't · ❔ ${c.noreply} no reply`,
+  ].join('\n').slice(0, 1900);
+  // discord.actionButtons already returns a one-row action-row array, exactly the shape Discord's own
+  // "components" field wants for a single message's one row of buttons - no slicing/plucking needed here,
+  // unlike the old single-combined-message version which had to pick one row out of several per message.
+  const components = discord.actionButtons([
+    { label: `✅ ${ev.title}`.slice(0, 80), style: 3, customId: `schedrsvp:${ev.id}:yes` },
+    { label: "❌ Can't", style: 4, customId: `schedrsvp:${ev.id}:no` },
+  ]);
+  return { content, components };
+}
+// Deletes every message of a previous day's block (the banner plus every event message) before a new day's
+// block replaces it, so the channel only ever shows one day's schedule at a time instead of a new banner and
+// a new set of event messages piling up on top of yesterday's forever. A message already gone by hand (an
+// officer deleted it manually) is not an error - deleteMessage treats "not found" as success, same as the
+// party-picture "delete previous" feature already relies on.
+async function deletePreviousScheduleMessages(old) {
+  const ids = [old.bannerMessageId, ...Object.values(old.events || {})].filter(Boolean);
+  for (const id of ids) {
+    const r = await discord.deleteMessage(old.channelId, id);
+    if (!r.ok) console.error("[daily schedule] could not delete yesterday's message:", r.error);
+  }
+}
+// Creates or catches up the game day's whole block of messages: the banner (once, never edited again - purely
+// decorative) plus one message per event (posted once, then edited in place as RSVPs come in; a newly-added
+// event for a day that has already started posting just gets its own additional message, appended after the
+// ones already there). Used by both the automatic daily tick and the officer's manual "Post now" button, so
+// pressing "Post now" after the automatic post already went out catches up rather than duplicating anything.
+async function ensureScheduleMessage(day) {
+  const st = db.settings.dailySchedulePost;
+  if (!st.channelId) return { ok: false, error: 'Pick a channel first.' };
+  const sameContext = st.current && st.current.gameDay === day && st.current.channelId === st.channelId;
+  // A genuinely new game day starting in the SAME channel (not just a channel change - that already clears
+  // `current` to null itself, in the admin settings route, with nothing left here to delete) - clear out
+  // yesterday's whole block first.
+  if (!sameContext && st.current && st.current.channelId === st.channelId) await deletePreviousScheduleMessages(st.current);
+  const cur = sameContext ? st.current : { gameDay: day, channelId: st.channelId, bannerMessageId: null, events: {} };
+  let error = null;
+
+  if (!cur.bannerMessageId) {
+    const b = await discord.postMessage(st.channelId, {
+      content: `📅 **Today's schedule — ${dayLabel(day)}**`, mentionRoleIds: st.mentionRoleIds,
+      ...(DAILY_SCHEDULE_BANNER ? { file: { name: 'daily-schedule.png', type: 'image/png', buffer: DAILY_SCHEDULE_BANNER } } : {}),
+    });
+    if (b.ok) cur.bannerMessageId = b.id; else error = b.error;   // a failed banner never blocks the event messages below - retried on the next call instead
+  }
+
+  for (const ev of scheduleDayEvents(day)) {
+    const { content, components } = buildEventMessage(ev);
+    const existingId = cur.events[ev.id];
+    if (existingId) {
+      const r = await discord.editMessage(st.channelId, existingId, { content, components });
+      if (r.ok) continue;
+      // The tracked message is gone (deleted by hand?) - fall through and post a fresh one instead of staying stuck.
+    }
+    const r2 = await discord.postMessage(st.channelId, { content, components });
+    if (r2.ok) cur.events[ev.id] = r2.id; else error = r2.error;
+  }
+
+  st.current = cur;
+  st.lastPostedDay = day;
+  save();
+  return error ? { ok: false, error } : { ok: true };
+}
+// After a button click updates ev.rsvps, only THAT event's own message needs to change - every other event
+// already has its own separate message, untouched by this. A click on a stale button from a past day's post
+// (today's post has since replaced it in `current`) is a no-op here: the RSVP itself was already saved by the
+// caller either way, just without a live refresh of that old, no-longer-"current" message.
+async function refreshScheduleMessage(day, eventId) {
+  const st = db.settings.dailySchedulePost;
+  if (!st.channelId || !st.current || st.current.gameDay !== day || st.current.channelId !== st.channelId) return;
+  const messageId = st.current.events[eventId];
+  const ev = findEvent(eventId);
+  if (!messageId || !ev) return;
+  const { content, components } = buildEventMessage(ev);
+  const r = await discord.editMessage(st.channelId, messageId, { content, components });
+  if (!r.ok) console.error('[daily schedule] refresh failed:', r.error);
+}
+async function dailyScheduleTick() {
+  const st = db.settings.dailySchedulePost;
+  if (!st.enabled || !st.channelId) return;
+  const now = Date.now(), day = gameDay(now);
+  if (st.lastPostedDay === day) return;                 // already posted/ensured for today - don't double-post
+  if (guildHour(now) < st.postHour) return;              // not time yet
+  try { await ensureScheduleMessage(day); } catch (e) { console.error('[daily schedule] auto-post failed:', e); }
+}
+tickHooks.push(dailyScheduleTick);
+// The officer's own "Post today's schedule now" button (Admin > Discord) - works whether or not the
+// automatic post already went out today (see ensureScheduleMessage), and ignores the enabled switch and
+// postHour entirely, same as sendManualReminders ignores remindersEnabled/reminderMinutes for its button.
+route('POST', '/api/admin/discord/daily-schedule/post-now', async ({ user }) => {
+  need(db.settings.dailySchedulePost.channelId, 400, 'Pick a channel for the daily schedule post first.');
+  const day = gameDay(Date.now());
+  const r = await ensureScheduleMessage(day);
+  need(r.ok, 502, r.error || 'Discord did not accept the message.');
+  audit.log(user, 'discord.dailyschedule.post', { type: 'guild' }, `${user.name} posted today's schedule to Discord by hand.`);
+  return { ok: true };
+}, { officer: true });
 
 let ticking = false;
 async function tick() {
@@ -1467,6 +1628,32 @@ http.createServer(async (req, res) => {
         ev.rsvps[m.id] = answer === 'yes' ? 'yes' : 'no';
         save();
         return update(answer === 'yes' ? '✅ You have signed up for this event.' : '🚫 You have signed off for this event.');
+      }
+      // A tap on one of the shared daily-schedule post's per-event buttons. Unlike the single-event rsvp:
+      // branch above (which UPDATE_MESSAGEs the clicked DM itself), this message has several events each
+      // with their own still-live buttons, so a click must never replace or clear the whole thing: the reply
+      // here is a private, ephemeral confirmation seen only by the clicker (type 4, flags 64), and the public
+      // message's fresh counts are pushed out separately afterward via refreshScheduleMessage's own PATCH.
+      if (interaction.type === 3 && typeof interaction.data?.custom_id === 'string' && interaction.data.custom_id.startsWith('schedrsvp:')) {
+        const [, eventId, answer] = interaction.data.custom_id.split(':');
+        const ephemeral = (content) => send(res, 200, { type: 4, data: { content, flags: 64 } });
+        const ev = findEvent(eventId);
+        if (!ev) return ephemeral('This event could not be found (it may have been deleted).');
+        const clickerId = (interaction.user || interaction.member?.user || {}).id;
+        const m = db.members.find((x) => x.owner === clickerId && x.active);
+        if (!m) return ephemeral('We could not find your character for this. Please open the site to answer instead.');
+        if (Date.now() >= closeAt(ev)) return ephemeral(`Sign-ups for **${ev.title}** are already closed.`);
+        if (answer === 'yes' && ev.maxSignups) {
+          const going = Object.entries(ev.rsvps).filter(([id, s]) => s === 'yes' && Number(id) !== m.id).length;
+          if (going >= ev.maxSignups) return ephemeral(`**${ev.title}** has no open spots left. Open the site to see where you stand.`);
+        }
+        ev.rsvps[m.id] = answer === 'yes' ? 'yes' : 'no';
+        save();
+        ephemeral(answer === 'yes' ? `✅ You're in for **${ev.title}**.` : `🚫 You're marked as can't come to **${ev.title}**.`);
+        // Fire-and-forget: the player's own RSVP is already saved above regardless of whether this refresh
+        // succeeds, so a Discord hiccup here only means this one event's own message lags until the next one.
+        refreshScheduleMessage(gameDay(Date.parse(ev.start)), ev.id).catch((e) => console.error('[daily schedule] refresh:', e));
+        return;
       }
       if (interaction.type === 3 && typeof interaction.data?.custom_id === 'string' && interaction.data.custom_id.startsWith('dmtest:')) {
         const [, testId, answer] = interaction.data.custom_id.split(':');

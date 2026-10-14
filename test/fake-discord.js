@@ -55,6 +55,19 @@ function startFakeDiscord() {
         if (!post || post.channel !== dm2[1] || post.deleted) return send(404, { code: 10008, message: 'Unknown Message' });
         post.deleted = true; res.writeHead(204); return res.end();
       }
+      // Rewriting a message in place (discord.editMessage) - used by the daily schedule post to refresh its
+      // live counts after a button click. Plain JSON body here (no attachment support needed for this), unlike
+      // the multipart POST above.
+      if (req.method === 'PATCH' && dm2 && isBot) {
+        if (state.denyChannels.has(dm2[1])) return send(403, { code: 50013, message: 'Missing Permissions' });
+        const post = state.posts.find((p) => p.id === dm2[2]);
+        if (!post || post.channel !== dm2[1] || post.deleted) return send(404, { code: 10008, message: 'Unknown Message' });
+        const pl = JSON.parse(body);
+        post.content = pl.content;
+        post.components = pl.components !== undefined ? pl.components : post.components;
+        post.edits = (post.edits || 0) + 1;
+        return send(200, { id: post.id });
+      }
       if (req.method === 'GET' && path === '/users/@me') { const id = state.tokens[bearer]; return id ? send(200, { id, username: 'user' + id.slice(-3), global_name: 'Global ' + id.slice(-3), avatar: 'abc123' }) : send(401, {}); }
       const gm = path.match(/^\/users\/@me\/guilds\/(\d+)\/member$/);
       if (req.method === 'GET' && gm) { const id = state.tokens[bearer]; const m = state.guildMembers[id]; return m ? send(200, m) : send(404, { message: 'Unknown Guild Member' }); }
