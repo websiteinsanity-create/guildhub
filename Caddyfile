@@ -1,0 +1,7 @@
+# Caddy makes the HTTPS certificate by itself. Needs: a (sub)domain that points at this server, ports 80 and 443 open.
+# Put your domain instead of guild.example.com, save as /etc/caddy/Caddyfile, then:  sudo systemctl reload caddy
+# The same address goes into PUBLIC_URL in .env and, plus /auth/discord/callback, into the Discord Developer Portal (OAuth2 > Redirects).
+guild.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:3000
+}

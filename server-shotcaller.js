@@ -50,6 +50,38 @@ module.exports = function install(ctx) {
     return data;
   }
   const callSession = (subpath, method = 'GET', body, timeoutMs) => callBot(`/session${subpath}`, method, body, timeoutMs);
+
+  // A plain "what's the session doing right now" read (GET /session) is hit from FOUR independent places at
+  // once, each on its own clock, every single time an event is being voice-tracked: the background
+  // pollVoiceAttendance loop below (every VOICE_POLL_MS), and - separately, per officer who happens to have a
+  // tab open - the dashboard's "Attendance Tracking" panel (every 5s, see /voice-track/live below), the
+  // Shotcaller page itself (every 5s, see /api/shotcaller/status below), and the admin voice test (every
+  // VT_POLL_MS). With even two or three officers watching the same raid, that is several real network round
+  // trips to the separate bot process every few seconds, all asking the exact same question - and it is
+  // heaviest at exactly the moment the bot is busiest and slowest to answer anything: while a session is
+  // still starting (creating channels and logging relays in one at a time, up to tens of seconds - see
+  // START_TIMEOUT_MS above). Each of those redundant polls then sits waiting out its own timeout before giving
+  // up, piling up pending requests against the same bot host right when things are already slow, which is what
+  // actually read back as "the website lags while Shotcaller is starting/tracking" - Guild Hall's own server
+  // was never blocked, it was just waiting on a bot that itself was swamped with duplicate questions.
+  //
+  // cachedSession() is a short-lived, request-coalescing cache for that one read: the first caller within the
+  // window makes the real call, and anyone else - whether they ask a moment later (TTL) or at the very same
+  // instant (the shared in-flight promise, which is what actually matters when several officers' 5s timers
+  // happen to land close together) - gets that same answer instead of starting a second one. 3 seconds keeps
+  // every reader well within "live" (shorter than any of the pollers above) while still collapsing the
+  // overlapping ones into a single outbound call. A failed call is never cached - the next caller (or the next
+  // tick) tries again fresh rather than being stuck repeating a stale error.
+  const SESSION_CACHE_MS = Number(process.env.SHOTCALLER_SESSION_CACHE_MS || 3000);   // overridable for tests only, same pattern as VOICE_POLL_INTERVAL_MS
+  let sessionCache = null;        // { at, promise } | null
+  function cachedSession() {
+    const now = Date.now();
+    if (sessionCache && now - sessionCache.at < SESSION_CACHE_MS) return sessionCache.promise;
+    const promise = callSession('').catch((e) => { sessionCache = null; throw e; });
+    sessionCache = { at: now, promise };
+    return promise;
+  }
+
   // Starting a session creates channels and logs in relay bots ONE AT A TIME, not in parallel (see the bot's
   // own session.js) - so the time this can take scales with the party count, not just with how "slow" the bot
   // happens to be in general. On the bot's own side, each relay gets up to 3 join attempts at 20s each before
@@ -207,7 +239,7 @@ module.exports = function install(ctx) {
     if (vt && vt.active) {
       try {
         const settings = db().settings;
-        const status = await callSession('');
+        const status = await cachedSession();   // see cachedSession() above - this is polled every 5s per officer watching the dashboard
         if (status && status.active) {
           const byChannel = new Map();
           for (const p of status.parties || []) byChannel.set(p.channelId, p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id })));
@@ -247,7 +279,7 @@ module.exports = function install(ctx) {
     const tracked = db().events.filter((ev) => ev.voiceTracking && ev.voiceTracking.active && ctx.effectiveAttendanceMode(ev) === 'voice');
     if (!tracked.length) return;
     let status;
-    try { status = await callSession(''); }
+    try { status = await cachedSession(); }
     catch { return; } // the bot being briefly unreachable just means this poll learns nothing new - try again next time
     if (!status || !status.active) {
       // The session ended (an officer stopped it, or it was auto-replaced by a new one for another event) -
@@ -378,7 +410,7 @@ module.exports = function install(ctx) {
     if (voiceTest.phase === 'waiting') { if (Date.now() >= voiceTest.trackAt) voiceTest.phase = 'tracking'; return; }
     if (voiceTest.phase !== 'tracking') return;
     let status;
-    try { status = await callSession(''); }
+    try { status = await cachedSession(); }
     catch { return; }                                                   // briefly unreachable - this poll just learns nothing new
     if (!status || !status.active) { voiceTest.phase = 'ended'; return; }   // stopped from elsewhere (Discord command, say)
     const testIds = new Set(voiceTest.channels.map((c) => c.channelId));
@@ -402,7 +434,7 @@ module.exports = function install(ctx) {
   setInterval(() => { pollVoiceTest().catch((e) => console.error('[voice-test] poll failed:', e)); }, VT_POLL_MS);
 
   // ---------------------------------------------------------------- live panel
-  route('GET', '/api/shotcaller/status', () => callSession(''), { officer: true });
+  route('GET', '/api/shotcaller/status', () => cachedSession(), { officer: true });
 
   route('GET', '/api/shotcaller/voice-channels', () => callBot('/voice-channels'), { officer: true });
 

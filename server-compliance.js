@@ -175,6 +175,32 @@ module.exports = function install(ctx) {
   }
   tickHooks.push(async () => { runChecks(); });
 
+  // Called right after an officer corrects a PAST event's recorded attendance for one player (the roster
+  // "take attendance by hand" editor, and the per-player override on the Attendance page's event-by-event
+  // list) - a no-show or no-reply warning that auto-fired off the OLD, wrong record should not keep standing
+  // once the fix means this player no longer actually reaches today's limit for that same kind. This only
+  // ever withdraws (never issues - that stays runChecks()'s job, on its own regular schedule) and only ever
+  // touches an automatic warning, never one the leadership gave by hand (kind: 'manual').
+  function reevaluateWarnings(owner) {
+    const D = db(), c = cfg();
+    if (!rulesActive(c)) return [];
+    const chars = players().get(owner);
+    if (!chars) return [];
+    const s = playerStats(owner, chars);
+    const withdrawn = [];
+    for (const w of D.warnings) {
+      if (w.ownerKey !== owner || w.status !== 'active' || !w.auto) continue;
+      const stillOver = (w.kind === 'noshow' && s.noshow >= c.noShowLimit) || (w.kind === 'noreply' && s.noreply >= c.noReplyLimit);
+      if ((w.kind === 'noshow' || w.kind === 'noreply') && !stillOver) {
+        w.status = 'removed'; w.endedAt = now(); w.endedBy = 'system';
+        w.note = "Automatically withdrawn - a corrected attendance record means this no longer reaches today's limit.";
+        withdrawn.push(w);
+      }
+    }
+    if (withdrawn.length) notify(owner, `✅ ${withdrawn.length === 1 ? 'A warning was' : `${withdrawn.length} warnings were`} automatically withdrawn after an attendance correction.`);
+    return withdrawn;
+  }
+
   // ---------------------------------------------------------------- the chart on every event
   function eventChart(ev, P) {
     const zero = () => ({ yes: 0, no: 0, none: 0, leave: 0 }), roles = {}, total = zero(), start = Date.parse(ev.start);
@@ -323,5 +349,5 @@ module.exports = function install(ctx) {
       alert: off ? null : (() => { const a = alertFor(user.key); if (a) delete a.upTo; return a; })(),
     };
   }
-  return { extraState, eventChart, players, runChecks, isOnLeave };
+  return { extraState, eventChart, players, runChecks, isOnLeave, reevaluateWarnings };
 };

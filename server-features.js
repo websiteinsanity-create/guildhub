@@ -27,6 +27,44 @@ module.exports = function install(ctx) {
   ctx.coaching = coaching;   // server-community.js's applicantState() needs this for guest coaches - set after install so the reference is there by the time anyone actually calls it, even though community itself was installed first
   const compliance = require('./server-compliance')(ctx);                                   // leave of absence, warnings, the event chart
 
+  // Officer correction for one player's recorded result on one PAST event, from the Attendance page's
+  // event-by-event list (public/features.js's att-detail dialog, clicking "Came"/"No-show"/etc. there) -
+  // lets an officer turn a "No show" into "Said can't", a "No reply" into "Came", and so on, not just the
+  // plain attended/not-attended the roster editor offers. Always resets and re-applies across every one of
+  // the player's ACTIVE characters together, never just one alt, so two alts of the same player can't end up
+  // disagreeing with each other afterwards - this mirrors the exact ids.some()/includes() logic attRows() and
+  // playerStats() both already read "came"/"no-show"/"no reply" off of. "On leave" is deliberately not one of
+  // the targets here: that comes from a separate leave-of-absence record, not something to fake through
+  // rsvps/attended.
+  const ATT_EDIT = {
+    attended: { rsvp: 'yes', attended: true },
+    noshow: { rsvp: 'yes', attended: false },
+    declined: { rsvp: 'no', attended: false },
+    noreply: { rsvp: null, attended: false },
+  };
+  const ATT_EDIT_LABEL = { attended: 'Came', noshow: 'No-show', declined: "Said can't", noreply: 'No reply' };
+  route('POST', '/api/events/:id/attendance-status', ({ body, params, user }) => {
+    const D = db(), ev = findEvent(params.id);
+    need(ev, 404, 'Event not found.');
+    const owner = clean(body.owner, 40);
+    need(owner, 400, 'Pick a player.');
+    const pick = ATT_EDIT[body.status];
+    need(pick, 400, 'Bad status.');
+    const ids = D.members.filter((m) => m.owner === owner && m.active).map((m) => m.id);
+    need(ids.length, 404, 'This player has no active characters.');
+    ev.attended = ev.attended.filter((id) => !ids.includes(id));
+    for (const id of ids) delete ev.rsvps[id];
+    const primary = ids[0];                 // one consistent character carries the record - see the note above
+    if (pick.rsvp) ev.rsvps[primary] = pick.rsvp;
+    if (pick.attended) ev.attended.push(primary);
+    ev.autoAttended = true;                 // an officer corrected it by hand - the automatic no-show fill-in must never touch this event again
+    syncAttendancePoints(ev);
+    audit(user, 'attendance.override', { type: 'event', id: ev.id, name: ev.title }, `${user.name} changed ${nameOfOwner(owner)}'s result for "${ev.title}" to "${ATT_EDIT_LABEL[body.status]}".`);
+    const withdrawn = compliance.reevaluateWarnings(owner);
+    save();
+    return { event: eventFor(ev, user), withdrawnWarnings: withdrawn.length };
+  }, { officer: true });
+
   // ============================================================ who sees what
   const HIDEABLE = new Set((config.sections || []).map((s) => s.key));
   const PANEL_KEYS = ['announcement', 'stats', 'loot', 'attendance', 'leadership', 'next', 'info'];

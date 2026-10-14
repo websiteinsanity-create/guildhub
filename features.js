@@ -3,12 +3,29 @@
    approvals, tags, attendance filters, the personalised dashboard and the extra Admin panels.
    They register themselves in VIEWS / ACTIONS / CHANGES / FORMS, which app.js reads. */
 
-Object.assign(UI, { attQ: '', attRole: '', attDays: '30', attMand: false, attBand: '', attSort: 'name', reqStatus: '', reqQ: '' });
+Object.assign(UI, { attQ: '', attRole: '', attDays: '14', attMand: false, attBand: '', attSort: 'name', reqStatus: '', reqQ: '' });
 
 /* ================= recurring events ================= */
 const wdOrder = () => { const ws = S.cfg.weekStartsOn ?? 1; return Array.from({ length: 7 }, (_, i) => (ws + i) % 7); };
 const wdName = (n, long) => new Date(2024, 0, 7 + n).toLocaleDateString('en-US', { weekday: long ? 'long' : 'short' });
 const tzShort = (tz) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName').value; } catch { return tz; } };
+// The full list (config.json's timezones, well over a hundred entries once every Europe/Asia zone is in it) is
+// unusable as one flat, alphabetical dropdown - grouping it by continent (the part of the zone id before the
+// slash) the same way every OS/phone timezone picker does makes picking a real country's zone actually findable.
+// "current" (whatever is already selected, even a since-removed zone) is always included so an existing choice
+// is never silently dropped from its own picker.
+const TZ_GROUP_LABEL = { Europe: 'Europe', Asia: 'Asia', America: 'Americas', Australia: 'Australia', Africa: 'Africa', Pacific: 'Pacific', Atlantic: 'Atlantic', Indian: 'Indian Ocean' };
+const TZ_GROUP_ORDER = ['Other', 'Europe', 'Asia', 'Americas', 'Africa', 'Australia', 'Pacific', 'Atlantic', 'Indian Ocean'];
+function tzOptionsHtml(zones, current) {
+  const list = [...new Set([current, ...zones])].filter(Boolean);
+  const groups = {};
+  for (const z of list) {
+    const label = TZ_GROUP_LABEL[z.includes('/') ? z.split('/')[0] : ''] || 'Other';
+    (groups[label] ??= []).push(z);
+  }
+  const labels = Object.keys(groups).sort((a, b) => { const ai = TZ_GROUP_ORDER.indexOf(a), bi = TZ_GROUP_ORDER.indexOf(b); return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi); });
+  return labels.map((label) => `<optgroup label="${esc(label)}">${groups[label].map((z) => `<option value="${esc(z)}" ${z === current ? 'selected' : ''}>${esc(z)} (${esc(tzShort(z))})</option>`).join('')}</optgroup>`).join('');
+}
 function seriesText(se) {
   const days = se.weekdays.map((n) => wdName(n)).join(', ');
   return `${se.intervalWeeks > 1 ? `Every ${se.intervalWeeks} weeks on` : 'Every'} ${days} at ${se.time} (${tzShort(se.tz)})`;
@@ -28,7 +45,7 @@ function seriesPanel() {
 
 function seriesDialog(se) {
   const isNew = !se, st = S.settings, t0 = S.cfg.eventTypes[0];
-  se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true };
+  se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, pinEnabled: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true, shotcallerAutoStart: false };
   openDialog(`
   <form data-form="series" data-id="${se.id || ''}">
     <h2>${isNew ? 'New recurring event' : 'Edit recurring event'}</h2>
@@ -40,7 +57,7 @@ function seriesDialog(se) {
     <div class="field"><label>On these days</label><div class="wd">${wdOrder().map((n) => `<label class="wdbox"><input type="checkbox" name="wd" value="${n}" ${se.weekdays.includes(n) ? 'checked' : ''}> ${wdName(n)}</label>`).join('')}</div></div>
     <div class="row">
       <div class="field"><label>At (time)</label><input name="time" type="time" value="${esc(se.time)}" required></div>
-      <div class="field"><label>Time zone</label><select name="tz">${[...new Set([se.tz, ...S.cfg.timezones])].map((z) => `<option value="${esc(z)}" ${z === se.tz ? 'selected' : ''}>${esc(z)} (${esc(tzShort(z))})</option>`).join('')}</select></div>
+      <div class="field"><label>Time zone</label><select name="tz">${tzOptionsHtml(S.cfg.timezones, se.tz)}</select></div>
     </div>
     <div class="muted small" style="margin:-4px 0 10px">The time follows the time zone all year, so "21:00 Europe/Berlin" stays 21:00 there when the clocks change.</div>
     <div class="row">
@@ -56,7 +73,9 @@ function seriesDialog(se) {
       <div class="field"><label>PIN window (minutes)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${se.pinWindowMinutes}"></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${se.reminders === false ? '' : 'checked'}> Remind players who have not answered</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="mandatory" id="ev-mand" ${se.mandatory ? 'checked' : ''}> Mandatory (counts toward "Qualified for loot")</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${se.mandatory ? 'checked' : ''}> Mandatory (counts toward "Qualified for loot")</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(se.pinEnabled ?? se.mandatory) ? 'checked' : ''}> Attendance PIN for these events (on by default for a mandatory event, off for an optional one)</label>
+    ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${se.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting these events' parties to Discord (can still be switched either way at post time)</label>` : ''}
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(se.description)}</textarea></div>
     <div class="muted small">Dates are created about ${Math.round((S.cfg.recurrenceHorizonDays || 42) / 7)} weeks ahead. Changing the series changes all upcoming dates (sign-ups are kept). Deleting a single date only skips that date.</div>
     <div class="dlg-actions">
@@ -73,7 +92,8 @@ ACTIONS['series-delete'] = () => {
     act(async () => { await api('/api/series/' + id, 'DELETE'); closeDialog(); }, 'Recurring event deleted');
 };
 FORMS.series = (f, fd, id) => {
-  const body = { ...fd, weekdays: [...f.querySelectorAll('input[name=wd]:checked')].map((i) => Number(i.value)), reminders: f.elements.reminders.checked, mandatory: f.elements.mandatory.checked };
+  const body = { ...fd, weekdays: [...f.querySelectorAll('input[name=wd]:checked')].map((i) => Number(i.value)), reminders: f.elements.reminders.checked, mandatory: f.elements.mandatory.checked, pinEnabled: f.elements.pinEnabled.checked };
+  if (f.elements.shotcallerAutoStart) body.shotcallerAutoStart = f.elements.shotcallerAutoStart.checked;
   delete body.wd;
   let created = 0;
   act(async () => { const r = await api(id ? '/api/series/' + id : '/api/series', id ? 'PUT' : 'POST', body); created = r.created; closeDialog(); })
@@ -137,7 +157,7 @@ function viewProfile(key) {
 
   ${own ? `<div class="panel"><h3>Time zone</h3>
     <div class="muted small" style="margin:-6px 0 10px">All times in the app (calendar, events, PIN windows) are shown in this time zone. Nobody else is affected.</div>
-    <form data-form="tzpref" class="link-row"><select name="timezone" aria-label="Time zone" style="min-width:260px">${[...new Set([TZ(), ...S.cfg.timezones])].map((z) => `<option value="${esc(z)}" ${z === TZ() ? 'selected' : ''}>${esc(z)} (${esc(tzShort(z))})</option>`).join('')}</select>
+    <form data-form="tzpref" class="link-row"><select name="timezone" aria-label="Time zone" style="min-width:260px">${tzOptionsHtml(S.cfg.timezones, TZ())}</select>
       <button class="btn primary">Save</button><span class="muted small">Now: ${esc(fmtTime(new Date().toISOString()))} ${esc(tzAbbr(Date.now()))}${S.prefs && S.prefs.timezone ? '' : ' (default)'}</span></form></div>` : ''}
 
   <div class="panel"><h3>Note</h3>
@@ -270,12 +290,17 @@ VIEWS.requests = () => {
       <td>${r.kind === 'Lucent' ? `<b>${Number(r.amount).toLocaleString()}</b> Lucent` : `${esc(r.item)} <span class="type-pill t-${esc(r.lootType)}">${esc(r.lootType)}</span>`}${r.reason ? `<div class="muted small">${esc(r.reason)}</div>` : ''}</td>
       <td><span class="st-pill st-${r.status}">${REQ_STATUS[r.status]}</span>${r.note ? `<div class="muted small">${esc(r.note)}${r.decidedBy ? ` (${esc(r.decidedBy)})` : ''}</div>` : ''}</td>
       <td class="nowrap">${off && (r.status === 'open' || r.status === 'approved') ? `${r.status === 'open' ? `<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="approved">Approve</button> ` : ''}<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="given">${r.kind === 'Item' ? 'Handed over' : 'Paid out'}</button> <button class="btn sm danger" data-act="req-set" data-id="${r.id}" data-s="rejected">Reject</button>` : ''}
-        ${(r.status === 'open' && (r.byKey === S.user.key || off)) ? `<button class="btn sm" data-act="req-del" data-id="${r.id}">${off ? 'Delete' : 'Withdraw'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+        ${((r.status === 'open' && r.byKey === S.user.key) || off) ? `<button class="btn sm ${off ? 'danger' : ''}" data-act="req-del" data-id="${r.id}">${off ? 'Delete' : 'Withdraw'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">${S.requests.length ? 'Nothing matches.' : 'No requests yet.'}</div>`}
   ${off ? '<p class="muted small">"Handed over" (or "Paid out" for Lucent) adds the entry to the Loot section by itself. Players get a Discord message when you decide.</p>' : ''}`;
 };
 CHANGES['req-char'] = (el) => { const m = byId(S.members, el.value); $('#rq-b').innerHTML = m ? buildOptionsFor(m) : ''; };
 CHANGES['req-kind'] = (el) => { $('#rq-lucent').classList.toggle('hidden', el.value !== 'Lucent'); $('#rq-item').classList.toggle('hidden', el.value === 'Lucent'); };
+// Any number of days the guild wants, not just the fixed presets this used to offer - 14 is just the starting
+// point for a new session. "All time" disables the day box rather than clearing it, so flipping it back off
+// goes back to a sensible number instead of an empty field.
+CHANGES['att-days'] = (el) => { UI.attDays = String(Math.max(1, Math.min(3650, Math.round(Number(el.value)) || 14))); render(); };
+CHANGES['att-alltime'] = (el) => { UI.attDays = el.checked ? 'all' : '14'; render(); };
 FORMS.request = (f, fd) => act(async () => { await api('/api/requests', 'POST', fd); }, 'Request sent');
 ACTIONS['req-set'] = (el, d) => {
   const note = d.s === 'rejected' ? prompt('Reason for the player (optional)', '') : '';
@@ -350,8 +375,16 @@ function attRows(evs) {
   for (const m of S.members.filter((x) => x.active && (off || x.owner === S.user.key))) { if (!byOwner.has(m.owner)) byOwner.set(m.owner, []); byOwner.get(m.owner).push(m); }
   return [...byOwner].map(([owner, chars]) => {
     const ids = chars.map((c) => c.id), list = [];
+    // Same reasoning as playerStats() server-side and eventChart()/eventRoster() elsewhere on the client: a
+    // player cannot have been a no-show or no-reply for an event that happened before they had any character in
+    // the guild at all. Uses the EARLIEST joinedAt across all of a player's characters (an alt added later
+    // should not push "joined" forward), falling back to "always joined" for a character missing joinedAt
+    // entirely (only pre-dates the field, not a real player).
+    const joinTimes = chars.map((c) => Date.parse(c.joinedAt)).filter(Number.isFinite);
+    const joinedAt = joinTimes.length ? Math.min(...joinTimes) : -Infinity;
     let n = 0, noshow = 0, noreply = 0, declined = 0, total = 0;
     for (const e of evs) {
+      if (new Date(e.start).getTime() < joinedAt) continue;        // predates this player entirely - not even "leave", just not theirs
       if (onLeaveAt(owner, new Date(e.start).getTime())) { list.push({ e, status: 'leave', answer: '-' }); continue; }       // away with the leadership's OK: not judged
       total++;
       const answers = ids.map((id) => e.rsvps[id]), going = answers.includes('yes'), no = answers.includes('no');
@@ -361,12 +394,60 @@ function attRows(evs) {
       if (attended) { status = 'attended'; n++; } else if (going) { status = 'noshow'; noshow++; } else if (no) { status = 'declined'; declined++; } else status = 'noreply';
       list.push({ e, status, answer: going ? 'Going' : no ? "Can't" : 'no answer' });
     }
-    const pct = total ? Math.floor(100 * n / total) : null;
+    const virtual = virtualAttendanceFor(owner);
+    const blendedTotal = total + virtual.events, blendedN = n + virtual.came;
+    const pct = blendedTotal > 0 ? Math.floor(100 * blendedN / blendedTotal) : null;
     const last = S.events.filter((e) => ids.some((id) => e.attended.includes(id))).map((e) => e.start).sort().pop();
     return { owner, name: ownerName(owner), chars, n, total, noshow, noreply, declined, pct, band: pct === null ? 'none' : bandOf(pct, ls), last, bal: ids.reduce((a, id) => a + balance(id), 0), list };
   });
 }
 
+// A one-time migration aid: lets the leadership carry over each player's attendance reputation from
+// wherever they tracked it before, instead of everyone starting from a blank "-". Only ever fills in for a
+// player with no real counted events yet - see playerStats() server-side and attendanceStats()/attRows()
+// client-side, all three of which fall back to this the same way.
+function attendanceStartingPanel(active) {
+  const owners = [...new Map(active.map((m) => [m.owner, m])).values()].sort((a, b) => ownerName(a.owner).localeCompare(ownerName(b.owner)));
+  const starting = S.attendanceStarting || {};
+  const field = (owner, name, attrs, val) => `<input ${attrs} name="${name}__${esc(owner)}" value="${val ?? ''}">`;
+  return `<details class="panel fold" style="margin-top:16px" data-fold="att-starting">
+    <summary>Starting attendance % <span class="muted small">(a migration aid)</span></summary>
+    <div class="muted small" style="margin:-4px 0 10px">For a guild moving its whole history onto Guild Hall: give a player a starting baseline instead of
+      everyone showing a blank "-" until real events build up - for example "50% over their last 30 events across 14 days, starting Oct 1". It decays
+      away linearly, day by day, rather than vanishing the moment one real event happens (which would let a single event swing someone from 5% to 100%
+      overnight) - by the start date plus the day count, it is gone entirely and only real attendance counts from then on. It never triggers a
+      compliance warning by itself either, for as long as any of it is still "in effect". Leave the percentage blank to clear a player's baseline.</div>
+    <form data-form="att-starting">
+      <div class="att-start-grid">
+        <div class="att-start-head"><span>Player</span><div class="att-start-fields"><span>%</span><span>Events</span><span>Days</span><span>Start date</span></div></div>
+        ${owners.map((m) => { const c = starting[m.owner] || {}; return `<div class="att-start-row">
+          <span>${esc(ownerName(m.owner))}</span>
+          <div class="att-start-fields">
+            ${field(m.owner, 'pct', 'type="number" min="0" max="100" placeholder="-" aria-label="Starting percentage"', c.pct)}
+            ${field(m.owner, 'events', 'type="number" min="1" max="1000" placeholder="events" aria-label="Based on this many events"', c.events)}
+            ${field(m.owner, 'days', 'type="number" min="1" max="1000" placeholder="days" aria-label="Spread across this many days"', c.days)}
+            ${field(m.owner, 'fromDate', 'type="date" aria-label="Starting from this date"', c.fromDate)}
+          </div>
+        </div>`; }).join('')}
+      </div>
+      <button class="btn primary" style="margin-top:10px">Save all</button>
+    </form>
+  </details>`;
+}
+FORMS['att-starting'] = (f, fd) => {
+  // Reassemble the flat "pct__<owner>" form fields this had to be submitted as into the {owner: {pct, events,
+  // days, fromDate}} shape the API actually wants - a blank percentage clears that player's baseline entirely,
+  // even if the other three fields still have values left over in them from before.
+  const values = {};
+  for (const [key, val] of Object.entries(fd)) {
+    const sep = key.indexOf('__');
+    if (sep < 0) continue;
+    const field = key.slice(0, sep), owner = key.slice(sep + 2);
+    (values[owner] ??= {})[field] = val;
+  }
+  for (const owner of Object.keys(values)) if (values[owner].pct === '') values[owner] = null;
+  return act(() => api('/api/admin/attendance-starting', 'PUT', { values }), 'Saved');
+};
 VIEWS.points = () => {
   const off = isOfficer(), ls = lootSettings(), q = UI.attQ.toLowerCase();
   const evs = attEvents(), days = UI.attDays === 'all' ? null : Number(UI.attDays);
@@ -395,7 +476,8 @@ VIEWS.points = () => {
   <div class="toolbar">
     ${off ? `<input type="search" placeholder="Search player, character or class" value="${esc(UI.attQ)}" data-ui="attQ" aria-label="Search">
     <select data-ui="attRole" aria-label="Role">${opts(S.cfg.roles, UI.attRole, 'All roles')}</select>` : ''}
-    <select data-ui="attDays" aria-label="Period">${[['7', 'Last 7 days'], ['14', 'Last 14 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['all', 'All time']].map(([v, l]) => `<option value="${v}" ${UI.attDays === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <label style="margin:0;display:flex;gap:6px;align-items:center"><span class="muted small">Last</span><input type="number" min="1" max="3650" data-act="att-days" value="${UI.attDays === 'all' ? '' : UI.attDays}" ${UI.attDays === 'all' ? 'disabled' : ''} style="width:76px" aria-label="Number of days"><span class="muted small">days</span></label>
+    <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-act="att-alltime" ${UI.attDays === 'all' ? 'checked' : ''}> All time</label>
     <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ui="attMand" ${UI.attMand ? 'checked' : ''}> Mandatory only</label>
     ${off ? `<select data-ui="attBand" aria-label="Attendance colour"><option value="">Any attendance</option><option value="red" ${UI.attBand === 'red' ? 'selected' : ''}>Red (0-${ls.redMax}%)</option><option value="orange" ${UI.attBand === 'orange' ? 'selected' : ''}>Orange (${ls.redMax + 1}-${ls.orangeMax}%)</option><option value="green" ${UI.attBand === 'green' ? 'selected' : ''}>Green (${ls.orangeMax + 1}-100%)</option></select>
     <select data-ui="attFlag" aria-label="Problems"><option value="">Everybody</option><option value="noshow" ${UI.attFlag === 'noshow' ? 'selected' : ''}>With no-shows</option><option value="noreply" ${UI.attFlag === 'noreply' ? 'selected' : ''}>With unanswered events</option></select>` : ''}
@@ -410,6 +492,7 @@ VIEWS.points = () => {
       <td class="num">${r.total ? `${r.n} / ${r.total}` : '-'}${r.total < evs.length ? `<div class="muted small">${evs.length - r.total} on leave</div>` : ''}</td><td class="num">${bad(r.noshow)}</td><td class="num">${warn(r.noreply)}</td>
       <td class="muted small nowrap">${r.last ? fmtShort(r.last) : '-'}</td>${showPts ? `<td class="num ${r.bal > 0 ? 'pos' : r.bal < 0 ? 'neg' : ''}">${r.bal}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : '<div class="empty">Nobody matches these filters.</div>'}
+  ${off ? attendanceStartingPanel(active) : ''}
   ${showPts && off ? `<div class="panel" style="margin-top:20px"><h3>Adjust points</h3>
     <form data-form="points" class="toolbar" style="margin:0">
       <select name="memberId" required aria-label="Character" style="min-width:180px">${active.map((m) => `<option value="${m.id}" ${focus && focus.id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
@@ -423,21 +506,50 @@ VIEWS.points = () => {
       return `<tr><td class="muted small" style="white-space:nowrap">${fmtShort(p.at)}</td><td>${esc(m ? m.name : '?')}</td><td>${esc(p.reason)}</td><td class="num ${p.delta > 0 ? 'pos' : 'neg'}">${p.delta > 0 ? '+' : ''}${p.delta}</td>
         <td>${off && !p.eventId ? `<button class="btn sm" data-act="points-del" data-id="${p.id}" aria-label="Delete entry">×</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted">No entries yet.</div>'}</div>` : ''}`;
 };
+// The four results an officer can correct a past event to from the Attendance page's event-by-event list
+// (ACTIONS['att-detail'] below) - "On leave" is not offered here, since it comes from a separate
+// leave-of-absence record, not something settable through a player's rsvp/attended on one event.
+const ATT_EDIT_OPTIONS = [['attended', 'Came'], ['noshow', 'No-show'], ['declined', "Said can't"], ['noreply', 'No reply']];
 ACTIONS['att-detail'] = (el, d) => {
   const r = attRows(attEvents()).find((x) => x.owner === d.key);
   if (!r) return;
+  const off = isOfficer();
   openDialog(`<h2>${esc(r.name)}</h2>
     <div class="muted small" style="margin:-8px 0 12px">${r.chars.map((c) => esc(c.name)).join(', ')} · came to ${r.n} of ${r.total} events (${r.pct ?? 0}%) · ${r.noshow} no-show · ${r.noreply} without an answer · ${r.declined} said they can't</div>
     ${r.list.length ? `<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Event</th><th>Answered</th><th>Result</th></tr></thead><tbody>${r.list.slice().sort((a, b) => b.e.start.localeCompare(a.e.start)).map((x) => `<tr>
       <td class="muted small nowrap">${fmtShort(x.e.start)}</td><td>${esc(x.e.title)}${x.e.mandatory ? ' <span class="pill-m">Mandatory</span>' : ''}</td><td>${esc(x.answer)}</td>
-      <td><span class="st-pill ${ATT_STATUS[x.status][1]}">${ATT_STATUS[x.status][0]}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">No events with recorded attendance in this period.</div>'}
-    <div class="dlg-actions"><button class="btn primary" data-act="dlg-close">Close</button></div>`, true);
+      <td>${off && x.status !== 'leave' ? `<select class="status-pick" data-act="attdetail-stage" data-ev="${x.e.id}" data-rst="${x.status}" data-orig="${x.status}" aria-label="Result for ${esc(x.e.title)}">
+          ${ATT_EDIT_OPTIONS.map(([k, label]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>` : `<span class="st-pill ${ATT_STATUS[x.status][1]}">${ATT_STATUS[x.status][0]}</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">No events with recorded attendance in this period.</div>'}
+    <div class="dlg-actions">
+      ${off ? `<button class="btn primary hidden" id="attdetail-save" data-act="attdetail-save" data-owner="${esc(r.owner)}">Save</button>` : ''}
+      <button class="btn" data-act="dlg-close">Close</button>
+    </div>`, true);
+};
+// The select only stages locally (same pattern as the roster editor's CHANGES['roster-stage']) - nothing is
+// sent to the server, and no other row re-renders, until "Save" is actually clicked. The Save button itself
+// only appears once at least one row's staged value has actually changed from what it started as.
+CHANGES['attdetail-stage'] = (el) => {
+  el.dataset.rst = el.value;
+  const dirty = [...document.querySelectorAll('select[data-act="attdetail-stage"]')].some((s) => s.dataset.rst !== s.dataset.orig);
+  document.getElementById('attdetail-save')?.classList.toggle('hidden', !dirty);
+};
+ACTIONS['attdetail-save'] = (el, d) => {
+  const owner = d.owner;
+  const rows = [...document.querySelectorAll('select[data-act="attdetail-stage"]')].filter((s) => s.dataset.rst !== s.dataset.orig);
+  if (!rows.length) return;
+  act(async () => {
+    for (const sel of rows) await api(`/api/events/${sel.dataset.ev}/attendance-status`, 'POST', { owner, status: sel.dataset.rst });
+  }, rows.length === 1 ? 'Attendance updated' : `Attendance updated for ${rows.length} events`).then((ok) => { if (ok) ACTIONS['att-detail'](null, { key: owner }); });
 };
 
 /* ================= dashboard you can personalise ================= */
+// Shown in the Announcement banner whenever no admin has posted anything.
+const GUILD_MOTTO = 'Different by nature. Dangerous by choice. We are Insanity.';
 const DASH_PANELS = [
-  { key: 'announcement', label: 'Announcement' }, { key: 'stats', label: 'Guild name and numbers' }, { key: 'loot', label: 'Qualified for loot' },
-  { key: 'leadership', label: 'Leadership' }, { key: 'next', label: 'Next event' },
+  { key: 'announcement', label: 'Announcement' }, { key: 'stats', label: 'Guild name and numbers' },
+  { key: 'leadership', label: 'Leadership' }, { key: 'next', label: 'Daily schedule' },
+  { key: 'loot', label: 'Qualified for loot' }, { key: 'attendance', label: 'Attendance Tracking' },
   { key: 'info', label: 'Info section (stays under Next event)', fixed: true },
 ];
 function dashPrefs() {
@@ -450,20 +562,147 @@ function heroHtml() {
   const b = brand();
   return `<div class="guild-hero">${b.icon ? `<img class="hero-icon" src="${esc(b.icon)}" alt="">` : ''}<div><div class="hero-name">${esc(guildName())}</div>${guildTag() ? `<div class="hero-tag">${esc(guildTag())}</div>` : ''}</div></div>`;
 }
+// Only Tank/Healer/DPS have matching artwork - a guild that renamed or added roles in Admin still
+// gets the plain colored tile for anything outside this set, rather than a missing/broken image.
+const ROLE_ART = { Tank: 'stat-tank', Healer: 'stat-healer', DPS: 'stat-dps' };
 function statsHtml() {
   const active = S.members.filter((m) => m.active), players = new Set(active.map((m) => m.owner)).size, cap = S.cfg.guildCap || 0;
   const tiles = S.cfg.roles.map((r) => { const n = active.filter((m) => m.role === r).length; return { r, n, pct: active.length ? Math.round(100 * n / active.length) : 0 }; });
   return `<div class="stats" style="margin:0">
-    <div class="stat"><div class="k">Members</div><div class="v">${active.length}${cap ? `<small> / ${cap}</small>` : ''}</div>${cap ? `<div class="bar"><i style="width:${Math.min(100, 100 * active.length / cap)}%"></i></div>` : ''}<div class="s">${players} ${players === 1 ? 'player' : 'players'}</div></div>
-    ${tiles.map((t) => `<div class="stat" style="--c:${roleColor(t.r)}"><div class="k">${esc(t.r)}</div><div class="v">${t.n}</div><div class="bar"><i style="width:${t.pct}%"></i></div><div class="s">${t.pct}% of the guild</div></div>`).join('')}</div>`;
+    <div class="stat stat-art stat-members"><h3 class="sr-only">Members</h3><div class="stat-art-body"><div class="v">${active.length}${cap ? `<small> / ${cap}</small>` : ''}</div>${cap ? `<div class="bar"><i style="width:${Math.min(100, 100 * active.length / cap)}%"></i></div>` : ''}<div class="s">${players} ${players === 1 ? 'player' : 'players'}</div></div></div>
+    ${tiles.map((t) => ROLE_ART[t.r]
+      ? `<div class="stat stat-art ${ROLE_ART[t.r]}"><h3 class="sr-only">${esc(t.r)}</h3><div class="stat-art-body"><div class="v">${t.n}</div><div class="bar"><i style="width:${t.pct}%"></i></div><div class="s">${t.pct}% of the guild</div></div></div>`
+      : `<div class="stat" style="--c:${roleColor(t.r)}"><div class="k">${esc(t.r)}</div><div class="v">${t.n}</div><div class="bar"><i style="width:${t.pct}%"></i></div><div class="s">${t.pct}% of the guild</div></div>`).join('')}</div>`;
 }
+
+// Reworked "Guild name and numbers" panel, officers only (see statsOrHeroHtml below) - a slim
+// Member bar plus five role columns, each listing active members alphabetically instead of just
+// a count. Which subclass falls into which column will eventually be a manual pick on Admin >
+// Appearance; until that exists this is a sensible default built from the class each character's
+// weapon pair already resolves to (classOf), falling back to their plain role for anything the
+// weapon pairing doesn't resolve. Tanks and Healers map 1:1 - DPS splits into Caster / Melee /
+// Ranged by weapon type, and every healer currently in the game is an Oracle or a Seeker, so the
+// healer column is labelled for both.
+const DASH_COLUMNS = [
+  { key: 'tanks', label: 'Tanks', color: 'var(--role0)' },
+  { key: 'caster', label: 'Caster', color: 'var(--role3)' },
+  { key: 'melee', label: 'Melee', color: 'var(--role2)' },
+  { key: 'ranged', label: 'Ranged', color: 'var(--role4)' },
+  { key: 'oracleSeeker', label: 'Oracle and Seeker', color: 'var(--role1)' },
+];
+const CASTER_WEAPONS = new Set(['Staff', 'Wand & Tome', 'Orb']);
+const RANGED_WEAPONS = new Set(['Longbow', 'Crossbow']);
+function dashColumnFor(m) {
+  if (m.role === 'Tank') return 'tanks';
+  if (m.role === 'Healer') return 'oracleSeeker';
+  if (CASTER_WEAPONS.has(m.primaryWeapon) || CASTER_WEAPONS.has(m.secondaryWeapon)) return 'caster';
+  if (RANGED_WEAPONS.has(m.primaryWeapon) || RANGED_WEAPONS.has(m.secondaryWeapon)) return 'ranged';
+  return 'melee';
+}
+// Groups a column's members by their weapon-pair "class" (classOf, e.g. "Crusader", "Warden" -
+// see app.js), in the guild's admin-chosen order (settings.classOrder; falls back to config.json's
+// own class order for anything not yet placed in that list), with names sorted alphabetically
+// inside each group. A member whose weapon pair doesn't resolve to a named class (classOf returns
+// '') is grouped under "Other", always last regardless of the chosen order.
+function groupBySubclass(members) {
+  const order = (S.settings.classOrder && S.settings.classOrder.length) ? S.settings.classOrder : (S.cfg.classes || []).map((c) => c.name);
+  const groups = new Map();
+  for (const m of members) {
+    const k = classOf(m) || 'Other';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  for (const arr of groups.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+  const keys = [...groups.keys()].sort((a, b) => {
+    if (a === 'Other' || b === 'Other') return a === 'Other' ? 1 : -1;
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  return keys.map((k) => ({ name: k, members: groups.get(k) }));
+}
+function memberBarHtml() {
+  const active = S.members.filter((m) => m.active), cap = S.cfg.guildCap || 0;
+  const byColumn = DASH_COLUMNS.map((c) => ({ ...c, members: active.filter((m) => dashColumnFor(m) === c.key) }));
+  return `<div class="member-bar">
+    <div class="member-bar-head"><h3 class="sr-only">Member</h3>${isOfficer() ? '<button class="btn sm sc-gear" data-act="classorder-edit" aria-label="Edit class order">⚙</button>' : ''}
+      <div class="member-bar-stats">
+        <div class="member-bar-count">${active.length}${cap ? `<small> / ${cap}</small>` : ''}</div>
+        ${cap ? `<div class="member-bar-bar"><i style="width:${Math.min(100, Math.round(100 * active.length / cap))}%"></i></div>` : ''}
+      </div>
+    </div>
+    <div class="member-bar-cols">${byColumn.map((c) => `<div class="member-col member-col-${c.key}">
+      <div class="member-col-list">
+        <div class="member-col-count">${c.members.length} ${c.members.length === 1 ? 'member' : 'members'}</div>
+        ${c.members.length ? groupBySubclass(c.members).map((g) => `<div class="member-col-group"><div class="member-col-sub">${esc(g.name)}</div><div class="member-col-names">${g.members.map((m) => `<div>${esc(m.name)}</div>`).join('')}</div></div>`).join('') : '<div class="muted small" style="text-align:center">None yet</div>'}
+      </div>
+    </div>`).join('')}</div>
+    <div class="member-bar-note">Each column is grouped by class (admin-ordered), names sorted alphabetically within each.</div></div>`;
+}
+// Lets an officer choose which class (subclass) is listed first, second, and so on, within each
+// dashboard class column - e.g. Crusader before Warden in the Tanks column, or the other way
+// round. One single order applies across every column, since a class only ever shows up in the
+// one column its role maps to anyway. Reuses the same checkbox-less up/down-button reorder pattern
+// as "Customize your dashboard" (dash-item/dash-move), just against a different list and a
+// guild-wide setting instead of a per-player preference - opened from the same kind of gear icon
+// as "Your Leadership" and "Info", right on the panel it affects, rather than tucked away in Admin.
+ACTIONS['classorder-edit'] = () => {
+  const all = (S.cfg.classes || []).map((c) => c.name);
+  const saved = (S.settings.classOrder || []).filter((n) => all.includes(n));
+  const order = [...saved, ...all.filter((n) => !saved.includes(n))];
+  openDialog(`<form data-form="classorder"><h2>Class order</h2>
+    <div class="muted small" style="margin:-8px 0 12px">Inside each class column below, members are grouped by class (e.g. Crusader, Warden) in this order, alphabetically by name within each group.</div>
+    <div id="class-order-list" class="scrollbox" style="max-height:50vh">${order.map((n) => `<div class="dash-item" data-k="${esc(n)}"><label>${esc(n)}</label><span class="seg"><button type="button" class="btn sm" data-act="classorder-move" data-dir="-1" aria-label="Move up">Up</button><button type="button" class="btn sm" data-act="classorder-move" data-dir="1" aria-label="Move down">Down</button></span></div>`).join('')}</div>
+    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div></form>`, true);
+};
+ACTIONS['classorder-move'] = (el, d) => {
+  const item = el.closest('.dash-item'), dir = Number(d.dir);
+  if (dir < 0 && item.previousElementSibling) item.parentNode.insertBefore(item, item.previousElementSibling);
+  if (dir > 0 && item.nextElementSibling) item.parentNode.insertBefore(item.nextElementSibling, item);
+};
+FORMS.classorder = (f) => act(async () => { await api('/api/admin/options', 'PUT', { classOrder: [...f.querySelectorAll('.dash-item')].map((i) => i.dataset.k) }); closeDialog(); }, 'Class order saved');
+// Officers get the new Member bar + columns under the guild hero (useful for management - it
+// names names); everybody else keeps the original compact tile row, which is all a regular
+// member needs to see.
+function statsOrHeroHtml() { return `${heroHtml()}${isOfficer() ? memberBarHtml() : statsHtml()}`; }
 
 // Small section under "Next event": categories with buttons; each button opens a popup with text the leadership wrote.
 function infoPanel() {
   const cats = (S.infoBoard && S.infoBoard.categories) || [];
-  return `<div class="panel info"><div class="ev-title"><h3>${esc((S.infoBoard && S.infoBoard.title) || 'Info')}</h3>${isOfficer() ? '<button class="btn sm" data-act="info-edit">Edit</button>' : ''}</div>
-    ${cats.length ? cats.map((c, ci) => `<div class="info-cat"><div class="info-title">${esc(c.title)}</div><div class="info-btns">${c.buttons.map((b, bi) => `<button class="btn sm" data-act="info-open" data-c="${ci}" data-b="${bi}">${esc(b.label)}</button>`).join('')}</div></div>`).join('')
-      : '<div class="muted small">Add categories and buttons with "Edit". Every button opens a popup with your own text.</div>'}</div>`;
+  const title = (S.infoBoard && S.infoBoard.title) || 'Info';
+  return `<div class="panel info-card"><h3 class="sr-only">${esc(title)}</h3>${isOfficer() ? `<button class="btn sm sc-gear" data-act="info-edit" aria-label="Edit ${esc(title)}">⚙</button>` : ''}
+    <div class="info-card-body">${cats.length ? cats.map((c, ci) => `<div class="info-cat"><div class="info-title">${esc(c.title)}</div><div class="info-btns">${c.buttons.map((b, bi) => `<button class="btn sm" data-act="info-open" data-c="${ci}" data-b="${bi}">${esc(b.label)}</button>`).join('')}</div></div>`).join('')
+      : '<div class="muted small">Add categories and buttons with "Edit". Every button opens a popup with your own text.</div>'}</div></div>`;
+}
+// Each upcoming event gets its own little card inside the "Daily schedule" panel: title, a live
+// countdown, your own sign-up state (or two Sign up / Sign off buttons when you haven't answered
+// yet), and the attending count. Closed sign-ups (same signupClosesAt rule the day view uses) drop
+// the buttons for anyone but an officer, same as elsewhere.
+function scheduleItem(ev) {
+  const going = Object.values(ev.rsvps).filter((s) => s === 'yes').length;
+  const closed = Date.now() >= Date.parse(ev.signupClosesAt);
+  const locked = closed && !isOfficer();
+  const my = mine();
+  const rsvpHtml = my.length ? my.map((m) => {
+    const s = ev.rsvps[m.id] || 'none';
+    const name = my.length > 1 ? `<span class="muted small">${esc(m.name)}: </span>` : '';
+    if (s === 'yes') return `<div class="sched-status">${name}<span class="sched-yes">Signed up</span></div>`;
+    if (s === 'no') return `<div class="sched-status">${name}<span class="sched-no">Signed off</span></div>`;
+    if (locked) return `<div class="sched-status">${name}<span class="muted small">Sign-ups closed</span></div>`;
+    return `<div class="sched-status">${name}<button class="btn sm sched-attend" data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="yes">Sign up</button><button class="btn sm sched-decline" data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="no">Sign off</button></div>`;
+  }).join('') : '';
+  return `<div class="sched-item">
+    <a class="sched-title" href="#/events/${ev.id}">${esc(ev.title)}</a>
+    <div class="sched-countdown">${until(ev.start)}</div>
+    ${rsvpHtml}
+    <div class="sched-going"><b>${going}</b> going${ev.maxSignups ? ` of ${ev.maxSignups}` : ''}</div>
+  </div>`;
+}
+function schedulePanel(events) {
+  return `<div class="panel sched-card"><h3 class="sr-only">Daily schedule</h3>
+    <div class="sched-card-body"><div class="sched-list">${events.length ? events.map(scheduleItem).join('') : '<div class="muted">Nothing scheduled.</div>'}</div></div></div>`;
 }
 ACTIONS['info-open'] = (el, d) => {
   const b = S.infoBoard.categories[d.c].buttons[d.b];
@@ -487,38 +726,381 @@ FORMS.infoboard = (f) => {
   act(async () => { await api('/api/info-board', 'PUT', { title: f.elements.title.value.trim() || 'Info', categories }); closeDialog(); }, 'Saved');
 };
 
+// Compact Shotcaller summary for the dashboard's side column - officers only, shown even when
+// Shotcaller isn't configured yet (mirrors viewShotcaller()'s own not-set-up message) so officers
+// always know where to find it. Deliberately a one-shot load (UI.dashShotcaller), not the 5s poll
+// the full Shotcaller page runs - this is a glance, not a control surface.
+UI.dashShotcaller = null;
+async function loadDashShotcaller() {
+  try { UI.dashShotcaller = await api('/api/shotcaller/status'); } catch { UI.dashShotcaller = { active: false }; }
+  render();
+}
+AFTER_RENDER.push((page) => {
+  if (page === 'dashboard' && isOfficer() && S.cfg.shotcallerOn && UI.dashShotcaller === null) loadDashShotcaller();
+});
+// Left+top "lightbar" border - red while inactive, orange while a session is starting, green once
+// live - so an officer can read the state at a glance without opening the panel. scStarting is the
+// same flag the full Shotcaller page sets the instant its Start form submits (shotcaller.js); reusing
+// it here means this card lights up orange immediately for a start kicked off from this page or there.
+// The gear in the corner is separate from this panel's own state - it just edits the per-officer
+// quickstart defaults (S.prefs.quickShotcaller) that the Start button below uses, so it's shown
+// whenever Shotcaller is configured at all, regardless of whether a session is currently running.
+const scGearBtn = () => `<button class="btn sm sc-gear" data-act="sc-dash-settings" aria-label="Quickstart Shotcaller settings">⚙</button>`;
+// The artwork (with "SHOTCALLER" already lettered into it) is the full card background now, behind
+// everything - status text, the Start/Stop button, the data panels - not just a strip up top. A
+// visually-hidden heading is kept so the card still announces itself to screen readers.
+const scBanner = () => `<h3 class="sr-only">Shotcaller</h3>`;
+function shotcallerDashPanel() {
+  if (!isOfficer()) return '';
+  if (!S.cfg.shotcallerOn) {
+    return `<div class="panel"><h3>Shotcaller</h3><div class="muted small">Not set up on this server yet. Set <code>SHOTCALLER_URL</code> and <code>SHOTCALLER_API_KEY</code> to turn this on.</div></div>`;
+  }
+  const d = UI.dashShotcaller;
+  if (!d) return `<div class="panel"><h3>Shotcaller</h3><div class="muted small">Loading…</div></div>`;
+  const starting = typeof scStarting !== 'undefined' && scStarting;
+  const state = starting ? 'starting' : d.active ? 'active' : 'inactive';
+  const label = { inactive: 'Inactive', starting: 'Starting…', active: 'Active' }[state];
+  if (starting) {
+    // Same button, now an icon instead of the word "Start" - same circle-ish slot, orange like the
+    // lightbar instead of green. The CSS keyframe on .sc-starting-btn plays once on mount (green pill
+    // -> orange circle) to read as the Start button morphing into this, since a full re-render swaps
+    // the actual DOM node rather than animating it in place.
+    return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
+      <div class="muted small">${label}</div>
+      <button class="btn sc-start-btn sc-starting-btn" disabled aria-label="Starting session"><span class="sc-spinner"></span></button></div></div>`;
+  }
+  if (!d.active) {
+    // The fast path: one click here starts a session straight away using this officer's own
+    // quickstart defaults (gear icon above) instead of opening the full Start dialog - "nothing much
+    // to set up" because the setup already happened, once, in that dialog. The full Shotcaller page's
+    // own Start dialog (and the guild-wide Admin > Shotcaller defaults it uses) are untouched by this.
+    return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
+      <div class="muted small">${label} · No session running.</div>
+      <button class="btn sc-start-btn" data-act="sc-dash-start">▶ Start</button>
+      <div class="muted small" style="margin-top:10px"><a href="#/shotcaller">Open Shotcaller</a></div></div></div>`;
+  }
+  const connected = (d.parties || []).reduce((n, p) => n + (p.connected || 0), 0);
+  const dedicated = (d.dedicated || []).map((id) => scName(id)).join(', ');
+  // Stage 3: the icon morphs again (sc-stop-btn's keyframe), orange circle -> red "Stop" pill, same
+  // trick as stage 1->2. Three small data panels then cascade in underneath - each one's label fades
+  // in on its own (slow opacity-only animation) while its value box pops up a beat later, staggered
+  // per panel via the --d custom property so they arrive left-to-right rather than all at once.
+  const dataItem = (i, label, value) => `<div class="sc-data-item" style="--d:${i * .15}s">
+    <div class="sc-data-label">${esc(label)}</div>
+    <div class="sc-data-box">${value}</div></div>`;
+  return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
+    <div class="muted small">${label}${d.muted ? ' · 🔇 Muted' : ''}</div>
+    <button class="btn sc-stop-btn" data-act="sc-dash-stop">■ Stop</button>
+    <div class="muted small" style="margin-top:10px"><a href="#/shotcaller">Open Shotcaller</a></div>
+    <div class="sc-data-grid">
+      ${dataItem(0, 'Shotcaller in charge', esc(dedicated || '—'))}
+      ${dataItem(1, 'Voice channels', (d.parties || []).length)}
+      ${dataItem(2, 'Players connected', connected)}
+    </div></div></div>`;
+}
+ACTIONS['sc-dash-stop'] = () => {
+  if (!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.')) return;
+  act(async () => { await api('/api/shotcaller/stop', 'POST'); await loadDashShotcaller(); }, 'Shotcaller session stopped');
+};
+// Starts a session right away from the officer's own saved quickstart defaults - no dialog. Falls
+// back to the first available voice channel if none is saved yet (or the saved one no longer
+// exists), and to GvG - 8 parties / no dedicated caller if those were never set either.
+ACTIONS['sc-dash-start'] = () => {
+  (async () => {
+    try {
+      const q = (S.prefs && S.prefs.quickShotcaller) || {};
+      let channelId = q.channelId;
+      if (channelId) {
+        const { channels } = await api('/api/shotcaller/voice-channels');
+        if (!(channels || []).some((c) => c.id === channelId)) channelId = '';
+      }
+      if (!channelId) {
+        const { channels } = await api('/api/shotcaller/voice-channels');
+        if (!channels || !channels.length) return toast('No voice channels found in that Discord server.', true);
+        channelId = channels[0].id;
+      }
+      const count = q.mode === 'custom' ? Math.round(Number(q.customCount)) : Number(q.mode || 8);
+      if (!Number.isInteger(count) || count < 1 || count > 12) return toast('Your quickstart party count looks off - fix it in the gear settings.', true);
+      scStarting = true; render();
+      try {
+        await api('/api/shotcaller/start', 'POST', { channelId, count, partyNames: [], dedicatedCallerId: q.dedicatedCallerId || null });
+        toast('Shotcaller session started');
+      } finally {
+        scStarting = false;
+        await loadDashShotcaller();
+      }
+    } catch (e) { toast(e.message, true); }
+  })();
+};
+// Gear popup: only the defaults this dashboard card's own Start button uses - saved per officer on
+// /api/prefs under quickShotcaller, entirely separate from Admin > Shotcaller's guild-wide defaults
+// (S.settings.shotcaller) and from the full Shotcaller page's own Start dialog.
+ACTIONS['sc-dash-settings'] = () => {
+  (async () => {
+    const q = (S.prefs && S.prefs.quickShotcaller) || {};
+    let channels = [], channelError = '';
+    try { channels = (await api('/api/shotcaller/voice-channels')).channels || []; }
+    catch (e) { channelError = e.message; }
+    const st = S.settings.shotcaller || {};
+    const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
+    openDialog(`<form data-form="sc-quickstart-prefs"><h2>Quickstart Shotcaller settings</h2>
+      <div class="muted small" style="margin:-8px 0 12px">Only for the fast Start button on your dashboard - Admin &gt; Shotcaller's own defaults aren't changed by this.</div>
+      <div class="field"><label>Voice channel</label>
+        ${channels.length
+          ? `<select name="channelId"><option value="">First available channel</option>${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === q.channelId ? 'selected' : ''}>🔊 ${esc(c.name)}</option>`).join('')}</select>`
+          : `<div class="muted small">${channelError ? esc(channelError) : 'No voice channels found.'} The first available channel will be used when you start.</div>`}
+      </div>
+      <div class="row">
+        <div class="field"><label>Mode</label>
+          <select name="mode" data-act="sc-dash-mode" id="sc-dash-mode">
+            <option value="8" ${q.mode !== '12' && q.mode !== 'custom' ? 'selected' : ''}>GvG - 8 parties</option>
+            <option value="12" ${q.mode === '12' ? 'selected' : ''}>Full Guild - 12 parties</option>
+            <option value="custom" ${q.mode === 'custom' ? 'selected' : ''}>Custom - 1 to 12</option>
+          </select></div>
+        <div class="field ${q.mode === 'custom' ? '' : 'hidden'}" id="sc-dash-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" value="${q.customCount || 8}"></div>
+      </div>
+      <div class="field"><label>Dedicated caller</label>
+        <select name="dedicatedCallerId">
+          <option value="">No dedicated caller - anyone can call out</option>
+          ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === q.dedicatedCallerId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select></div>
+      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
+    </form>`, true);
+  })();
+};
+CHANGES['sc-dash-mode'] = (el) => { $('#sc-dash-custom').classList.toggle('hidden', el.value !== 'custom'); };
+FORMS['sc-quickstart-prefs'] = (f, fd) => act(async () => {
+  await api('/api/prefs', 'PUT', {
+    quickShotcaller: {
+      channelId: fd.channelId || '',
+      mode: fd.mode,
+      customCount: fd.mode === 'custom' ? Math.round(Number(fd.customCount)) || 8 : 8,
+      dedicatedCallerId: fd.dedicatedCallerId || '',
+    },
+  });
+  closeDialog();
+}, 'Saved');
+
+/* ================= Attendance Tracking (dashboard panel, officer only) =================
+   A direct, one-event-at-a-time front end for the voice-attendance engine that already runs continuously in
+   the background (server-shotcaller.js's pollVoiceAttendance, started the moment Shotcaller runs for an
+   event) - pick which event to watch, flip it between automatic and manual tracking (the very same toggle as
+   "Voice channel tracking and Reminders" on that event's own page - this is the same field, just reachable
+   from here too), start the watch, and see live numbers while it runs, all without first having to find the
+   right event. Nothing here invents a second attendance system: every sighting is already permanent (saved to
+   ev.attended) the instant it's confirmed - "Save track" and its 15-minute auto-save are a bookkeeping
+   close-out once the watch itself has ended, never where the data lives, so a refresh mid-track never loses
+   anything. */
+let AT = { eventId: null, live: null };
+let atTimer = null, atTimerFor = null;
+// "Happening now" has no real end time in this app's event model (events are a single start instant, no
+// duration field) - a reasonable stand-in is "started within the last 3 hours and hasn't been superseded by a
+// later pick", long enough to cover a typical raid/siege without still calling something from yesterday
+// "ongoing".
+const ATT_ONGOING_MS = 3 * 3600000;
+function attGroups() {
+  const now = Date.now();
+  const sorted = [...S.events].sort((a, b) => new Date(a.start) - new Date(b.start));
+  const ongoing = sorted.filter((e) => { const t = new Date(e.start).getTime(); return t <= now && now - t < ATT_ONGOING_MS; });
+  const upcoming = sorted.filter((e) => new Date(e.start).getTime() > now);
+  const past = sorted.filter((e) => new Date(e.start).getTime() <= now && !ongoing.includes(e)).reverse();
+  return { ongoing, upcoming, past };
+}
+// Default pick, only when nothing has been chosen yet (or the chosen event disappeared) - an officer's own
+// pick always sticks across re-renders instead of snapping back every time S.events refreshes.
+function attDefaultEvent() {
+  if (AT.eventId && S.events.some((e) => e.id === AT.eventId)) return;
+  const { ongoing, upcoming, past } = attGroups();
+  const pick = ongoing[0] || upcoming[0] || past[0];
+  AT.eventId = pick ? pick.id : null;
+}
+function attStopPoll() { if (atTimer) { clearInterval(atTimer); atTimer = null; atTimerFor = null; } }
+async function attPollOnce() {
+  if (!AT.eventId) return;
+  try { AT.live = await api(`/api/events/${AT.eventId}/voice-track/live`); } catch { AT.live = null; }
+  if (route().page === 'dashboard' && !$('#dlg').open) render();
+}
+// Polls every 5s while this event's track is either running or finished-but-not-yet-saved (the two states
+// that actually change on their own without an officer doing anything) - stops the moment neither is true, or
+// the officer leaves the page, same lifecycle AFTER_RENDER already uses for Shotcaller's own 5s poll.
+AFTER_RENDER.push((page) => {
+  if (page !== 'dashboard' || !isOfficer()) { attStopPoll(); return; }
+  attDefaultEvent();
+  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  const vt = ev && ev.voiceTracking;
+  const shouldPoll = !!(vt && (vt.active || (vt.startedAt && !vt.finishedAt)));
+  if (!shouldPoll) { attStopPoll(); AT.live = null; return; }
+  if (atTimerFor === AT.eventId && atTimer) return;
+  attStopPoll();
+  atTimerFor = AT.eventId;
+  attPollOnce();
+  atTimer = setInterval(attPollOnce, 5000);
+});
+function attendanceTrackPanel() {
+  if (!isOfficer()) return '';
+  attDefaultEvent();
+  const mode = S.settings.attendanceMode === 'voice' ? 'voice' : 'pin';
+  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  const { ongoing, upcoming, past } = attGroups();
+  const group = (label, list) => (list.length ? `<optgroup label="${esc(label)}">${list.map((e) => `<option value="${e.id}" ${AT.eventId === e.id ? 'selected' : ''}>${esc(e.title)} - ${fmtShort(e.start)}</option>`).join('')}</optgroup>` : '');
+  return `<div class="att-wrap">
+    <div class="panel att-card">
+      <h3 class="sr-only">Attendance Tracking</h3>
+      <div class="att-card-body">
+        <div class="att-sect">
+          <div class="att-mode-row">
+            <div><div class="muted small">Tracking method (guild default)</div><div class="att-mode-label">${mode === 'voice' ? 'Voice Attendance Track' : 'PIN Attendance Track'}</div></div>
+            <button class="btn sm" data-act="att-mode-toggle">Switch to ${mode === 'voice' ? 'PIN' : 'Voice'}</button>
+          </div>
+        </div>
+        <div class="att-sect">
+          <div class="field" style="margin:0"><label for="att-event-select">Event to track</label>
+            <select id="att-event-select" data-act="att-event-pick" aria-label="Event to track">${S.events.length ? `${group('Happening now', ongoing)}${group('Upcoming', upcoming)}${group('Past', past)}` : '<option>No events yet</option>'}</select>
+          </div>
+        </div>
+        ${mode === 'voice' && ev ? attVoiceControls(ev) : mode === 'voice' ? '<div class="att-sect muted small">No events to track yet - create one on the Events page.</div>' : '<div class="att-sect muted small">PIN attendance is in use - the attendance PIN for this event lives on the event\'s own page.</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+function attVoiceControls(ev) {
+  const vt = ev.voiceTracking;
+  const running = !!(vt && vt.active);
+  const awaitingSave = !!(vt && !vt.active && vt.startedAt && !vt.finishedAt);
+  const auto = ev.voiceTrackAuto !== false;
+  const live = AT.live || { trackedCount: 0, deafenedCount: 0, noShowCount: 0 };
+  const dataItem = (i, label, value) => `<div class="sc-data-item" style="--d:${i * .15}s">
+    <div class="sc-data-label">${esc(label)}</div>
+    <div class="sc-data-box">${value}</div></div>`;
+  return `<div class="att-sect">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text)">
+        <input type="checkbox" data-act="att-auto-toggle" data-id="${ev.id}" ${auto ? 'checked' : ''}> Automatic tracking
+      </label>
+      <div class="muted small" style="margin:4px 0 0">${auto
+        ? 'Starts on its own the moment Shotcaller is started for this event. Switching this off also switches it off on the event\'s own page, and the other way round.'
+        : 'Off - start tracking by hand below, and add any extra channels to watch first if you need to.'}</div>
+      <div class="att-reveal ${auto ? '' : 'att-reveal-open'}">
+        <div class="field" style="margin-top:12px"><label>Extra channels tracked for this event</label>
+          <form data-form="att-extra" data-id="${ev.id}">
+            ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(ev.voiceTrackExtraChannelIds || []) : ''}
+            <button class="btn sm" style="margin-top:8px">Save channels</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    ${(running || awaitingSave) && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
+    <div class="att-sect att-action">
+      ${running
+        ? `<button class="btn att-running-btn" disabled><span class="sc-spinner"></span> Running</button>`
+        : awaitingSave
+          ? `<button class="btn att-save-btn" data-act="att-save" data-id="${ev.id}">Save track</button>
+             <div class="muted small att-save-hint">Click "Save track" to save all the collected attendance for this event. If you don't, it saves itself automatically after 15 minutes - nothing is lost either way, even on a refresh.</div>`
+          : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>`}
+    </div>
+    ${running || awaitingSave ? `<div class="att-sect"><div class="sc-data-grid">
+        ${dataItem(0, 'Players tracked', live.trackedCount)}
+        ${dataItem(1, 'Deafened', live.deafenedCount)}
+        ${dataItem(2, 'Did not show up', live.noShowCount)}
+      </div></div>` : ''}`;
+}
+ACTIONS['att-mode-toggle'] = () => act(() => api('/api/settings', 'PUT', { attendanceMode: S.settings.attendanceMode === 'voice' ? 'pin' : 'voice' }), 'Tracking method changed');
+CHANGES['att-event-pick'] = (el) => { AT.eventId = Number(el.value); AT.live = null; render(); };
+CHANGES['att-auto-toggle'] = (el) => {
+  const evn = byId(S.events, Number(el.dataset.id));
+  if (!evn) return;
+  act(() => patchEvent(evn, { voiceTrackAuto: el.checked }), el.checked ? 'Automatic tracking is on' : 'Automatic tracking is off');
+};
+FORMS['att-extra'] = (f, fd, id) => {
+  const evn = byId(S.events, Number(id));
+  if (!evn) return;
+  const ids = [...f.querySelectorAll('input[name=vtxc]:checked')].map((i) => i.value);
+  act(() => patchEvent(evn, { voiceTrackExtraChannelIds: ids }), 'Channels saved');
+};
+ACTIONS['att-start'] = (el, d) => act(() => api(`/api/events/${d.id}/voice-track/start`, 'POST', {}), 'Tracking started');
+ACTIONS['att-save'] = (el, d) => act(async () => { await api(`/api/events/${d.id}/voice-track/finish`, 'POST', {}); attStopPoll(); AT.live = null; }, 'Track saved');
+
 VIEWS.dashboard = () => {
   const { order, hidden } = dashPrefs(), off = isOfficer();
   const active = S.members.filter((m) => m.active);
   const leaders = active.filter((m) => LEAD().includes(m.rank)).sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank) || a.name.localeCompare(b.name));
-  const next = S.events.filter((e) => new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start))[0];
+  // Daily Schedule only ever shows today's events, "today" meaning the guild's own 4am-cutover game day
+  // (gameDay, app.js) rather than each viewer's local midnight - otherwise a guild spread across time zones
+  // would each see a different cutoff, and everyone with events days out would see them creep onto the panel.
+  const upcoming = S.events.filter((e) => gameDay(new Date(e.start).getTime()) === gameDay(Date.now())).sort((a, b) => new Date(a.start) - new Date(b.start));
   const ann = brand().announcement;
   const showLeadership = !hidden.has('leadership') && (off || !hiddenFromMembers('leadership'));
   const showNext = !hidden.has('next');
   const showInfo = !hidden.has('info') && (off || ((S.infoBoard.categories || []).length > 0));
-  const side = showNext || showInfo;
+  const showShotcaller = off;
+  // A member (not an officer) gets Guild info stacked under Your Leadership instead of over in the
+  // side column - only when Leadership is actually showing here to stack it under.
+  const infoInLeadership = showInfo && !off && showLeadership;
+  const sideHasInfo = showInfo && !infoInLeadership;
+  const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: ann && !hidden.has('announcement') ? `<div class="announce full" role="note"><b>Announcement</b><div>${esc(ann)}</div></div>` : '',
-    stats: hidden.has('stats') ? '' : `<div class="full">${heroHtml()}${statsHtml()}</div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
+    stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
-    leadership: showLeadership ? leadershipPanel(leaders, side) : '',
-    next: side ? `<div class="side ${showLeadership ? '' : 'full'}">${showNext ? `<div class="panel"><h3>Next event</h3>${next ? nextEventCard(next) : '<div class="muted">Nothing scheduled.</div>'}</div>` : ''}${showInfo ? infoPanel() : ''}</div>` : '',
+    attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
+    leadership: showLeadership ? leadershipPanel(leaders, side, infoInLeadership) : '',
+    next: side ? `<div class="side ${showLeadership ? '' : 'full'}">${showShotcaller ? shotcallerDashPanel() : ''}${showNext ? schedulePanel(upcoming) : ''}${sideHasInfo ? infoPanel() : ''}</div>` : '',
   };
   return `
   <div class="page-head"><div><h1>Dashboard</h1><div class="muted">Welcome, ${esc(S.user.name)}.</div></div>${off ? '<button class="btn" data-act="dash-customize">Customize</button>' : ''}</div>
   <div class="dash-panels">${myStatusBanner()}${order.map((k, i) => (panels[k] ? panels[k].replace('class="', `style="order:${i}" class="`) : '')).join('')}</div>`;
 };
-// Two sections: the tasks (only the leadership sees them) and a short "who is who" that everybody sees.
-function leadershipPanel(leaders, side) {
+// The banner's text box has a fixed height (a % of the banner), so a long announcement
+// needs a smaller font to still fit without spilling out. clamp(...cqw) in style.css
+// already scales the font with the banner's own width; this only steps it down further
+// when the actual text is tall enough to overflow the box, then restores the CSS size
+// for anything that already fits. Runs after every dashboard render and on resize.
+function fitAnnounceText() {
+  const el = $('[data-announce-text]');
+  if (!el) return;
+  el.style.fontSize = '';
+  const box = el.parentElement;
+  const max = parseFloat(getComputedStyle(el).fontSize);
+  let size = max;
+  while (el.scrollHeight > box.clientHeight && size > 9) {
+    size -= 0.5;
+    el.style.fontSize = size + 'px';
+  }
+}
+AFTER_RENDER.push((page) => { if (page === 'dashboard') fitAnnounceText(); });
+window.addEventListener('resize', () => { if (route().page === 'dashboard') fitAnnounceText(); });
+// Two separate panels, stacked in one column: "Tasks" (leadership only - their open/done duties)
+// and "Your Leadership" (everyone - who holds which rank, plus a one-line blurb per leader that
+// only an officer can set, via the gear icon, rather than the inline per-card input this used to be).
+// showInfoHere: a member (not an officer) gets "Guild info" stacked right below "Your Leadership"
+// in this same column, rather than over in the side column with Shotcaller/Daily schedule - an
+// officer's layout is unchanged (Guild info stays in the side column, since this column is already
+// busy with Tasks). Only passed as true when the caller has decided Guild info belongs here.
+function leadershipPanel(leaders, side, showInfoHere) {
   const off = isOfficer();
   const overview = leaders.length
     ? leaders.map((m) => `<div class="ov-row"><b>${esc(m.name)}</b>: ${esc(m.rank)}. <span class="muted">Jobs:</span> ${m.jobs ? esc(m.jobs) : '<span class="muted">-</span>'}</div>`).join('')
     : `<div class="muted">Nobody holds a leadership rank yet.${off ? ` Give a character the rank ${LEAD().map((r) => `"${esc(r)}"`).join(' or ')} on the Member page.` : ''}</div>`;
-  return `<div class="panel ${side ? 'wide' : 'full'}"><h3>Leadership</h3>
-    ${off ? `<div class="sub-head">Tasks <span class="muted small">(only the leadership sees this)</span></div>${leaders.length ? leaders.map(leaderCard).join('') : '<div class="muted small">No leaders yet.</div>'}<div class="sub-sep"></div>` : ''}
-    <div class="sub-head">Who is who</div>${overview}</div>`;
+  return `<div class="${side ? '' : 'full'}">
+    ${off ? `<div class="panel tasks-card"><h3 class="sr-only">Tasks</h3><div class="tasks-card-body">${leaders.length ? leaders.map(leaderCard).join('') : '<div class="muted small">No leaders yet.</div>'}</div></div>` : ''}
+    <div class="panel lead-card"><h3 class="sr-only">Your Leadership</h3>${off ? '<button class="btn sm sc-gear" data-act="leadership-text-edit" aria-label="Edit leadership text">⚙</button>' : ''}<div class="lead-card-body">${overview}</div></div>
+    ${showInfoHere ? infoPanel() : ''}
+  </div>`;
 }
-FORMS.jobs = (f, fd, id) => act(() => api(`/api/members/${id}/jobs`, 'PUT', { jobs: fd.jobs }), 'Saved');
+ACTIONS['leadership-text-edit'] = () => {
+  const leaders = S.members.filter((m) => m.active && LEAD().includes(m.rank)).sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank) || a.name.localeCompare(b.name));
+  openDialog(`<form data-form="leadershipJobs"><h2>Your Leadership text</h2>
+    <div class="muted small" style="margin:-8px 0 12px">Shown next to each leader's name under "Your Leadership". Visible to everyone.</div>
+    ${leaders.length ? leaders.map((m) => `<div class="field"><label>${esc(m.name)} <span class="muted small">(${esc(m.rank)})</span></label><input name="jobs-${m.id}" value="${esc(m.jobs || '')}" maxlength="120" placeholder="For example: Managing the Wargames"></div>`).join('') : '<div class="muted small">No leaders yet.</div>'}
+    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div></form>`, true);
+};
+FORMS.leadershipJobs = (f) => act(async () => {
+  const leaders = S.members.filter((m) => m.active && LEAD().includes(m.rank));
+  await Promise.all(leaders.map((m) => {
+    const el = f.elements[`jobs-${m.id}`];
+    return el ? api(`/api/members/${m.id}/jobs`, 'PUT', { jobs: el.value }) : null;
+  }));
+  closeDialog();
+}, 'Saved');
 
 // A player's own warnings, disqualification and leave, always on top of their dashboard while they exist.
 function myStatusBanner() {
@@ -802,7 +1384,7 @@ VIEWS.warnings = () => {
     <td class="nowrap muted small">${w.status === 'active' ? (w.expiresAt ? fmtLootDate(w.expiresAt.slice(0, 10)) : 'never') : (w.endedAt ? fmtLootDate(w.endedAt.slice(0, 10)) : '-')}</td><td>${status(w)}</td>
     ${off ? `<td>${w.status === 'active' ? `<button class="btn sm" data-act="warn-remove" data-id="${w.id}">Remove</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : '<div class="empty">No warnings.</div>'}
-  ${S.explanations.length ? `<h3 class="sec" style="margin-top:24px">${off ? 'Reasons players sent' : 'Your explanations'}</h3><div class="tbl-wrap"><table><tbody>${S.explanations.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 15).map((x) => `<tr><td class="nowrap muted small">${fmtShort(x.at)}</td>${off ? `<td><b>${esc(x.name)}</b></td>` : ''}<td>${esc(x.reason)}</td>
+  ${S.explanations.length ? `<h3 class="sec" style="margin-top:24px">${off ? 'Reasons players sent' : 'Your explanations'}</h3><div class="tbl-wrap"><table><tbody>${S.explanations.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 15).map((x) => `<tr><td class="nowrap muted small">${fmtShort(x.at)}</td>${off ? `<td><b>${esc(x.name)}</b></td>` : ''}<td style="white-space:pre-wrap">${esc(x.reason)}</td>
       <td><span class="st-pill ${x.status === 'approved' ? 'st-approved' : x.status === 'rejected' ? 'st-rejected' : 'st-open'}">${x.status === 'approved' ? 'Accepted' : x.status === 'rejected' ? 'Not accepted' : 'Waiting'}</span>${x.note ? `<div class="muted small">${esc(x.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
 };
 FORMS['warn-new'] = (f, fd) => act(async () => { await api('/api/warnings', 'POST', fd); f.reset(); }, 'Warning given. The player gets a Discord message.');
@@ -905,7 +1487,7 @@ VIEWS.merc = (id) => {
   const r = ev.mercRequest;
   const eventPanel = `<div class="panel" style="margin-bottom:16px"><h3>${esc(ev.title)}</h3>
     <div class="muted small">${fmtDate(ev.start)} · ${esc(ev.type)}</div>
-    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any class` : (r.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px">${esc(r.note)}</div>` : ''}` : ''}
+    ${r ? `<div style="margin-top:8px">Looking for: ${r.overall ? `${r.overall} player${r.overall === 1 ? '' : 's'}, any class` : (r.needs || []).map((n) => `${n.count}× ${esc(n.cls)}`).join(', ')}</div>${r.note ? `<div class="muted small" style="margin-top:4px;white-space:pre-wrap">${esc(r.note)}</div>` : ''}` : ''}
   </div>`;
   // Already joined this event: a waiting hall instead of the signup form - just their status, and once an
   // officer places them, just their own party, not the full roster or anyone else's party.
@@ -940,6 +1522,31 @@ VIEWS.merc = (id) => {
 ACTIONS['merc-edit-toggle'] = () => { UI.mercEditing = !UI.mercEditing; render(); };
 FORMS['merc-signup'] = (f, fd, id) => act(async () => { await api('/api/merc-signup/' + id, 'POST', fd); UI.mercInfoFor = null; UI.mercEditing = false; }, 'Joined. The officers can see you in the party board now.');
 
+// A guest class coach: someone outside the guild entirely, here only to review VODs for one class. Reached by
+// an invite link from Admin, the same trust model as a mercenary's event link - the link itself is the gate,
+// there is no separate approval step once someone has it.
+VIEWS['guest-coach'] = () => {
+  const head = `<div class="page-head"><div><h1>Guest class coach</h1><div class="muted">Signed in as ${esc(S.user.name)}. This does not make you a guild member - you only get access to VODs for the class below.</div></div></div>`;
+  const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  if (S.isCoach && S.myGuestCoachClass) {
+    return `${head}<div class="panel"><h3>You're coaching ${esc(S.myGuestCoachClass)} players</h3>
+      <div class="muted small" style="margin:-4px 0 10px">You can see their VODs and leave coaching points on them. Switch to a different class any time below.</div>
+      <form data-form="guest-coach-join">
+        <div class="field"><label for="gc-class">Class</label><select id="gc-class" name="class">${opts(classes, S.myGuestCoachClass)}</select></div>
+        <div class="link-row"><a href="#/vods" class="btn sm">Go to VODs</a><button class="btn primary">Switch class</button></div>
+      </form>
+    </div>`;
+  }
+  return `${head}<div class="panel"><h3>Pick the class you are coaching</h3>
+    <div class="muted small" style="margin:-4px 0 10px">You will be able to see and review VODs from anyone currently playing this class. You can switch classes later from this same page.</div>
+    <form data-form="guest-coach-join">
+      <div class="field"><label for="gc-class">Class</label><select id="gc-class" name="class" required>${opts(classes, '', 'Pick a class')}</select></div>
+      <div class="link-row"><button class="btn primary">Join as a guest coach</button></div>
+    </form>
+  </div>`;
+};
+FORMS['guest-coach-join'] = (f, fd) => act(() => api('/api/guest-coaches/join', 'POST', fd), 'Done');
+
 /* ================= Admin: the Discord bot, the channel for party pictures, applications ================= */
 UI.dcheck = null;
 const okMark = (ok, text, bad, optional) => `<div class="chk ${ok ? 'good' : optional ? 'info' : 'bad'}"><span>${ok ? '✓' : optional ? 'i' : '✗'}</span><div>${text}${!ok && bad ? `<div class="muted small">${esc(bad)}</div>` : ''}</div></div>`;
@@ -963,6 +1570,7 @@ function discordAdmin() {
       ${c.bot ? okMark(!!c.guild, c.guild ? `The bot is in your server <b>${esc(c.guild.name)}</b>` : 'The bot is not in your server yet', c.guildError) : ''}
       ${c.bot && c.guild ? okMark(chans.length > 0, `${chans.length} text ${chans.length === 1 ? 'channel' : 'channels'} found`, c.channelsError || 'The bot sees no text channels. Check its role permissions.') : ''}
       ${okMark(c.memberRole, c.memberRole ? 'A member role is set (DISCORD_MEMBER_ROLE_ID): accepted applicants in the server get it' : 'No member role set: being in the Discord server is enough to be a member', '', true)}
+      ${okMark(c.publicKeySet, c.publicKeySet ? `Public Key is set (reminder/test buttons can answer in Discord) - fingerprint <code>${esc(c.publicKeyFingerprint)}</code>` : 'No Public Key set: reminder and test buttons will show "This interaction failed" until DISCORD_PUBLIC_KEY is set (see README "Discord setup" step 8)', '', !c.publicKeySet)}
       ${c.redirectUri ? `<div class="small muted">Redirect address for the Discord application: <code>${esc(c.redirectUri)}</code></div>` : ''}
       ${c.inviteUrl ? `<div class="small" style="margin-top:6px">Invite the bot to your server: <a href="${esc(c.inviteUrl)}" target="_blank" rel="noopener noreferrer">invite link</a> (view channels, send messages, attach files) · <a href="${esc(c.inviteUrlWithRoles)}" target="_blank" rel="noopener noreferrer">the same plus "Manage Roles"</a> if the bot should give the member role to accepted applicants.</div>` : ''}</div>` : ''}
     <h4 class="sub-head" style="margin-top:18px">Party pictures</h4>
@@ -1012,7 +1620,7 @@ function officersAdmin() {
     : [...c.roles, ...roleIds.filter((id) => !c.roles.some((r) => r.id === id)).map((id) => ({ id, name: id + ' (not found on the server - a deleted role?)' }))];
   return `<div class="panel"><h3>Officers</h3>
     <div class="muted small" style="margin:-6px 0 10px">Officer status is decided when someone signs in, from Discord roles or players picked here, plus anything set in the
-      server's .env file. Specific-player coach assignments take effect immediately, including for people already signed in. Discord-role assignments are refreshed when Discord sign-in updates their roles.</div>
+      server's .env file. A change here applies the next time that person signs in, not immediately to someone already signed in.</div>
     <form data-form="officers">
       <label><b>Discord roles that make someone an officer</b></label>
       ${allRoles.length ? allRoles.map((r) => `<label class="tagpick"><input type="checkbox" name="orole" value="${esc(r.id)}" ${roleIds.includes(r.id) ? 'checked' : ''}> ${esc(r.name)}</label>`).join('')
@@ -1100,23 +1708,29 @@ let PARTY_IMG = '';
 // below), so each card gets the image's full width and the text stays a readable size once the dialog scales
 // the image down to fit a phone screen - cramming 3-4 narrow columns into a 340px-wide dialog would make the
 // player names and classes too small to read, which defeats the entire point of a mobile-friendly view.
-async function renderPartiesImage(ev, { maxCols = 4 } = {}) {
+async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {}) {
   if (document.fonts && document.fonts.ready) await document.fonts.ready;
   const css = getComputedStyle(document.documentElement);
   const roleCol = (role) => css.getPropertyValue('--role' + (Math.max(0, S.cfg.roles.indexOf(role)) % 5)).trim() || '#8b95a7';
   const accent = css.getPropertyValue('--accent').trim() || '#ac2d4c';
   const sans = '"Source Sans 3", system-ui, "Segoe UI", Arial, sans-serif', serif = 'Marcellus, Georgia, serif';
   const parties = ev.parties;
+  // A member only counts as locked in for THIS event once they've confirmed (mercenaries are always treated as
+  // confirmed, same rule the live board's partyCard() uses) - everyone else in the preset's member list is still
+  // just a placeholder slot, not a real attendee, so the picture posted to Discord shows ONLY attending players:
+  // no row, no footer, nothing naming them at all - a clean view of who is actually locked in. Precomputed per
+  // party so both the card body and its "X/Y" header count agree.
+  const attendingOf = (p) => p.members.filter((id) => { const m = byId(S.members, id); return m && (m.mercenary || ev.rsvps[m.id] === 'yes'); });
   const cols = Math.min(maxCols, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 46, headH = 42, titleH = 108;
   const W = pad * 2 + cols * cardW + (cols - 1) * gap;
   const gridRows = Math.ceil(parties.length / cols);
-  const cardH = (p) => headH + Math.max(p.members.length, 1) * rowH + 10;
-  const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map(cardH)));
   const measure = document.createElement('canvas').getContext('2d');
   const wrap = (g, text, max) => { const out = []; let line = ''; for (const w of text.split(' ')) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; } if (line) out.push(line); return out; };
+  const cardH = (p) => headH + Math.max(attendingOf(p).length, 1) * rowH + 10;
+  const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map(cardH)));
   // going, but not in a party
   const placed = new Set(parties.flatMap((p) => p.members));
-  const unplaced = S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes' && !placed.has(m.id)).map((m) => m.name);
+  const unplaced = showUnplaced ? S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes' && !placed.has(m.id)).map((m) => m.name) : [];
   measure.font = `400 15px ${sans}`;
   const unLines = unplaced.length ? wrap(measure, 'Going, but not in a party: ' + unplaced.join(', '), W - 2 * pad) : [];
   const H = pad + titleH + rowHeights.reduce((a, b) => a + b, 0) + (gridRows - 1) * gap + (unLines.length ? 16 + unLines.length * 21 : 0) + 42 + pad;
@@ -1134,20 +1748,21 @@ async function renderPartiesImage(ev, { maxCols = 4 } = {}) {
   g.fillStyle = accent; g.fillRect(pad, pad, 52, 4);
   g.fillStyle = '#ebe5e3'; g.font = `400 ${narrow ? 26 : 34}px ${serif}`; g.fillText(fit(ev.title, W - 2 * pad - (narrow ? 0 : 200)), pad, pad + (narrow ? 38 : 46));
   g.fillStyle = '#a39499'; g.font = `400 17px ${sans}`;
-  const total = parties.reduce((a, p) => a + p.members.length, 0);
+  const total = parties.reduce((a, p) => a + attendingOf(p).length, 0);
   g.fillText(`${fmtDate(ev.start)}  ·  ${ev.type}  ·  ${parties.length} ${parties.length === 1 ? 'party' : 'parties'}, ${total} players`, pad, pad + 76);
   if (!narrow) { g.textAlign = 'right'; g.fillStyle = '#a39499'; g.font = `400 16px ${sans}`; g.fillText(guildName(), W - pad, pad + 20); g.textAlign = 'left'; }
   // parties
   let y0 = pad + titleH;
   const rowTop = []; rowHeights.forEach((h, i) => { rowTop[i] = y0; y0 += h + gap; });
   parties.forEach((p, i) => {
+    const attending = attendingOf(p);
     const x = pad + (i % cols) * (cardW + gap), y = rowTop[Math.floor(i / cols)], h = cardH(p);
     g.fillStyle = '#1b1418'; rr(x, y, cardW, h, 10); g.fill(); g.strokeStyle = '#3a2a31'; g.lineWidth = 1; rr(x + .5, y + .5, cardW - 1, h - 1, 10); g.stroke();
     g.fillStyle = '#ebe5e3'; g.font = `600 18px ${sans}`; g.fillText(fit(p.name, cardW - 90), x + 14, y + 27);
-    g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; g.textAlign = 'right'; g.fillText(`${p.members.length}/${S.cfg.partySize || 6}`, x + cardW - 14, y + 27); g.textAlign = 'left';
+    g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; g.textAlign = 'right'; g.fillText(`${attending.length}/${S.cfg.partySize || 6}`, x + cardW - 14, y + 27); g.textAlign = 'left';
     g.fillStyle = '#3a2a31'; g.fillRect(x + 1, y + headH - 1, cardW - 2, 1);
-    if (!p.members.length) { g.fillStyle = '#6f6268'; g.font = `italic 400 15px ${sans}`; g.fillText('Empty', x + 14, y + headH + 28); return; }
-    p.members.forEach((id, j) => {
+    if (!attending.length) { g.fillStyle = '#6f6268'; g.font = `italic 400 15px ${sans}`; g.fillText(p.members.length ? 'No one confirmed yet' : 'Empty', x + 14, y + headH + 28); }
+    attending.forEach((id, j) => {
       const m = byId(S.members, id); if (!m) return;
       const eff = effectiveBuild(m, p), ry = y + headH + j * rowH, col = roleCol(eff.role);
       g.globalAlpha = 0.24; g.fillStyle = col; g.fillRect(x + 1, ry, cardW - 2, rowH - 2); g.globalAlpha = 1;
@@ -1219,9 +1834,39 @@ ACTIONS['parties-view'] = async (el, d) => {
     <img class="post-preview" src="${img}" alt="Parties for ${esc(ev.title)}">
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div>`);
 };
+// Every party that goes out should end up with a leader - picking who relays the Shotcaller channel and the
+// Attendance PIN to the rest of their party. A placeholder (partyIsPlaceholder - 3 or fewer members, same rule
+// as everywhere else) never goes through the leader-check dialog below (there's no one to really ask about for
+// a stand-in party), so it gets one assigned automatically and silently instead, in this same priority order:
+// whichever role shows up first in the party, Tank, then DPS, then Healer.
+function autoAssignLeader(p) {
+  for (const role of ['Tank', 'DPS', 'Healer']) {
+    const id = p.members.find((mid) => { const m = byId(S.members, mid); return m && m.role === role; });
+    if (id) return id;
+  }
+  return p.members[0] || null;
+}
+// Assigns a leader (autoAssignLeader above) to every party that still needs one: placeholders always, and the
+// rest too when includeNonPlaceholder is true (the officer chose "Assign leaders automatically" in the
+// leader-check dialog, FORMS.postparties below). Saves through commitParties, the same optimistic-concurrency
+// save every other party edit uses, so this is safe even if someone else is mid-edit on the same event. Returns
+// the event with the save applied, or null if there was nothing to assign (commitParties already reported any
+// failure with its own toast).
+async function autoAssignMissingLeaders(ev, includeNonPlaceholder) {
+  const needsAny = ev.parties.some((p) => !p.leader && (partyIsPlaceholder(p) || includeNonPlaceholder));
+  if (!needsAny) return ev;
+  const ok = await commitParties('event', ev.id, (parties) => {
+    for (const p of parties) if (!p.leader && (partyIsPlaceholder(p) || includeNonPlaceholder)) p.leader = autoAssignLeader(p);
+    return parties;
+  });
+  return ok ? byId(S.events, ev.id) : null;
+}
 ACTIONS['parties-post'] = async (el, d) => {
-  const ev = byId(S.events, d.id);
+  let ev = byId(S.events, d.id);
+  if (!ev) return;
   if (!S.cfg.botOn) return toast('The Discord bot is not set up yet. See Admin > Discord.', true);
+  ev = await autoAssignMissingLeaders(ev, false);
+  if (!ev) return;
   toast('Drawing the picture...');
   try { PARTY_IMG = await blobToDataUrl(await renderPartiesImage(ev)); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
   const pp = S.settings.partyPost || {};
@@ -1231,6 +1876,26 @@ ACTIONS['parties-post'] = async (el, d) => {
     channels = rc.channels;
     if (rr) mentionNames = (pp.mentionRoleIds || []).map((id) => (rr.roles.find((r) => r.id === id) || { name: id }).name);
   } catch (e) { problem = e.message; }
+  // Shotcaller fields are optional and fetched separately, so a failure loading its voice-channel list only
+  // turns the checkbox off (with an explanation) rather than blocking the plain Discord post above.
+  let scChannels = [], scProblem = '', scLast = null;
+  if (S.cfg.shotcallerOn) {
+    try {
+      const [rv, rs] = await Promise.all([api('/api/shotcaller/voice-channels'), api('/api/shotcaller/status')]);
+      scChannels = rv.channels; scLast = rs.lastVoiceChannel || null;
+    } catch (e) { scProblem = e.message; }
+    if (!scChannels.length && !scProblem) scProblem = 'Could not load the voice channel list.';
+  }
+  // Missing leaders no longer disable the checkbox here - submitting the form (FORMS.postparties below) checks
+  // for them itself and, if Shotcaller is ticked, the leader-check dialog it opens only offers "assign
+  // automatically" (never "continue without them"), so a real party without a leader can no longer reach the
+  // server still missing one when Shotcaller is about to need it.
+  const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+  const st = S.settings.shotcaller || {};
+  const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
+  const scLastId = scLast && scChannels.some((c) => c.id === scLast.channelId) ? scLast.channelId : (scChannels[0] || {}).id;
+  const scAvailable = S.cfg.shotcallerOn && !scProblem;
+  const scChecked = scAvailable && !!ev.shotcallerAutoStart;
   const when = new Date(ev.start);
   const text = (pp.text || '📋 **{event}**: parties for {date} at {time}\n{link}')
     .replace(/\{event\}/g, ev.title).replace(/\{type\}/g, ev.type).replace(/\{parties\}/g, ev.parties.length)
@@ -1242,16 +1907,91 @@ ACTIONS['parties-post'] = async (el, d) => {
     <div class="field"><label for="pp-tx">Text</label><textarea id="pp-tx" name="text" maxlength="1900" style="min-height:90px">${esc(text)}</textarea><div class="muted small">{link} becomes the link to this event.</div></div>
     ${mentionNames.length ? `<div class="muted small" style="margin:-4px 0 12px">Will also @-mention: <b>${mentionNames.map(esc).join(', ')}</b> (set in Admin > Discord).</div>` : ''}
     ${pp.deletePrevious ? `<div class="muted small" style="margin:-4px 0 12px">The last party announcement will be deleted right before this one posts (Admin > Discord).</div>` : ''}
+    ${S.cfg.shotcallerOn ? `<hr style="border-color:var(--line);margin:14px 0">
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:10px"><input type="checkbox" name="scEnabled" id="pp-sc-on" data-act="pp-sc-toggle" ${scChecked ? 'checked' : ''} ${scAvailable ? '' : 'disabled'}> Also start Shotcaller for this event</label>
+    ${scProblem ? `<div class="muted small" style="margin:-4px 0 10px">${esc(scProblem)}</div>` : ''}
+    ${missingLeaders.length ? `<div class="muted small" style="margin:-4px 0 10px">${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet - with Shotcaller ticked, posting will assign one automatically (Tank &gt; DPS &gt; Healer) rather than ask, since it needs one for every real party.</div>` : ''}
+    <div id="pp-sc-fields" class="${scChecked ? '' : 'hidden'}">
+      <div class="field"><label>Voice channel (becomes Party 1 - yours)</label>
+        <select name="scChannelId">${scChannels.map((c) => `<option value="${esc(c.id)}" ${c.id === scLastId ? 'selected' : ''}>🔊 ${esc(c.name)}${scLast && c.id === scLast.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
+      <div class="field"><label>Shotcaller</label>
+        <select name="scDedicatedCallerId">
+          <option value="">No dedicated caller - anyone can call out</option>
+          ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === st.defaultCallerId ? 'selected' : ''}>${esc(c.name)}${c.key === st.defaultCallerId ? ' (default)' : ''}</option>`).join('')}
+        </select></div>
+      <div class="muted small" style="margin:-4px 0 12px">Party count and channel names come from this event's parties (as they are right now). If a Shotcaller session is already running, it is stopped and replaced automatically.</div>
+    </div>` : ''}
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary" ${problem ? 'disabled' : ''}>Post it</button></div></form>`, true);
 };
+CHANGES['pp-sc-toggle'] = (el) => { $('#pp-sc-fields').classList.toggle('hidden', !el.checked); };
+// Holds what's needed to actually post once the leader-check dialog below (or no dialog at all, when nothing's
+// missing) has decided whether to auto-assign leaders first - set just before that dialog opens, read and
+// cleared by its two choices, ACTIONS['leader-check-continue'] / ACTIONS['leader-check-auto'].
+let PENDING_POST_PARTIES = null;
+function openLeaderCheckDialog(ev, missingLeaders, scOn) {
+  // "Continue without them" isn't offered at all when Shotcaller is also being started with this post - the bot
+  // needs a leader for every real party to name its voice channel, so the server would refuse the whole post
+  // anyway (server-community.js). Rather than let an officer pick that option and then get a confusing failure,
+  // it's simply not on offer here: this post can only continue by assigning the missing ones automatically.
+  openDialog(`<h2>Missing party leaders</h2>
+    <p>${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet. A party's leader is who the Shotcaller channel is named for and who relays the event's
+      Attendance PIN to the rest of their party, so an unled party may not get the word in time.
+      ${scOn ? "Shotcaller is being started with this post, and it needs a leader for every real party - so this can only continue by assigning the missing ones automatically." : 'Pick one of the two options below, or cancel and assign leaders yourself first.'}</p>
+    <div class="dlg-actions" style="flex-wrap:wrap;justify-content:flex-end">
+      <button type="button" class="btn" data-act="dlg-close">Cancel - let me assign them</button>
+      ${scOn ? '' : '<button type="button" class="btn" data-act="leader-check-continue">Continue without them</button>'}
+      <button type="button" class="btn primary" data-act="leader-check-auto">Assign leaders automatically</button>
+    </div>`, true);
+}
+ACTIONS['leader-check-continue'] = () => { const fn = PENDING_POST_PARTIES; PENDING_POST_PARTIES = null; closeDialog(); if (fn) fn(false); };
+ACTIONS['leader-check-auto'] = () => { const fn = PENDING_POST_PARTIES; PENDING_POST_PARTIES = null; closeDialog(); if (fn) fn(true); };
 FORMS.postparties = (f, fd, id) => {
+  const ev = byId(S.events, Number(id));
+  if (!ev) return;
   const sel = f.elements.channelId, name = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.replace(/^#/, '') : '';
-  act(async () => {
-    await api(`/api/events/${id}/post-parties`, 'POST', { image: PARTY_IMG, text: fd.text, channelId: fd.channelId, channelName: name });
-    closeDialog(); PARTY_IMG = '';
-    dmMercsTheirParty(byId(S.events, Number(id)));   // best-effort, does not block or affect the toast above
-  }, `Posted in #${name}`);
+  const scOn = f.elements.scEnabled && f.elements.scEnabled.checked;
+  const shotcaller = scOn ? { enabled: true, channelId: fd.scChannelId, dedicatedCallerId: fd.scDedicatedCallerId || null } : undefined;
+  const opts = { text: fd.text, channelId: fd.channelId, channelName: name, scOn, shotcaller };
+  // Placeholder parties (3 or fewer members) are never part of this check - there's no one to really ask about
+  // for a stand-in party, they always get a leader assigned silently (finishPostParties -> autoAssignMissingLeaders
+  // handles that unconditionally). This only asks about real parties an officer actually built.
+  const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+  if (missingLeaders.length) {
+    PENDING_POST_PARTIES = (autoAssign) => finishPostParties(Number(id), opts, autoAssign);
+    openLeaderCheckDialog(ev, missingLeaders, scOn);
+    return;
+  }
+  finishPostParties(Number(id), opts, false);
 };
+async function finishPostParties(id, opts, autoAssign) {
+  let ev = byId(S.events, id);
+  if (!ev) return;
+  // Close right away and drop the old preview - nothing from here on (auto-assigning leaders, redrawing the
+  // picture, the Discord post itself, or - the slow part - Shotcaller's own up-to-a-minute start) should leave
+  // the dialog sitting there looking stuck. The standalone Start dialog (public/shotcaller.js) uses the same
+  // close-first, report-the-outcome-in-a-toast-later approach, including flipping the shared scStarting flag so
+  // the Shotcaller page shows its "Starting…" animation if that's where the officer is or goes next.
+  closeDialog();
+  PARTY_IMG = '';
+  ev = await autoAssignMissingLeaders(ev, autoAssign);
+  if (!ev) return;
+  // Redraw the picture so the posted screenshot shows the crown for whoever was just assigned, instead of the
+  // preview drawn before the officer made this choice.
+  let image;
+  try { image = await blobToDataUrl(await renderPartiesImage(ev)); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
+  if (opts.scOn) { toast('Posting - starting Shotcaller can take up to a minute...'); scStarting = true; render(); }
+  try {
+    const r = await api(`/api/events/${id}/post-parties`, 'POST', { image, text: opts.text, channelId: opts.channelId, channelName: opts.channelName, shotcaller: opts.shotcaller });
+    dmMercsTheirParty(byId(S.events, id));   // best-effort, does not block or affect the toast above
+    toast(`Posted in #${opts.channelName}`);
+    if (r.shotcaller) toast(r.shotcaller.ok ? 'Shotcaller started' : `Shotcaller could not start: ${r.shotcaller.error}`, !r.shotcaller.ok);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    if (opts.scOn) { scStarting = false; await pollShotcaller().catch(() => {}); }
+    await refresh(true).catch(() => {});
+  }
+}
 // Every mercenary currently placed in a party gets a DM with just that one party - same picture style as the
 // channel post, cropped to the one party they are actually in. One failed DM (closed DMs, etc.) does not stop
 // the others; each is reported with its own quiet toast rather than one popup for the whole batch.
@@ -1260,12 +2000,13 @@ async function dmMercsTheirParty(ev) {
   const mercsPlaced = ev.parties.flatMap((p) => p.members).map((id) => byId(S.members, id)).filter((m) => m && m.mercenary);
   for (const merc of mercsPlaced) {
     const party = ev.parties.find((p) => p.members.includes(merc.id));
-    // rsvps cleared too: renderPartiesImage also lists everyone "going but not placed" using the full guild's
+    // showUnplaced: false - renderPartiesImage also lists everyone "going but not placed" using the full guild's
     // RSVPs, which has nothing to do with this mercenary's own party and would otherwise leak the rest of the
-    // roster into what is meant to be just their own picture.
-    const cropped = { ...ev, parties: [party], rsvps: {} };
+    // roster into what is meant to be just their own picture. Keep the real ev.rsvps (not wiped) so the
+    // attending/not-confirmed split still works correctly for this merc's own actual teammates.
+    const cropped = { ...ev, parties: [party] };
     try {
-      const img = await blobToDataUrl(await renderPartiesImage(cropped, { maxCols: 1 }));
+      const img = await blobToDataUrl(await renderPartiesImage(cropped, { maxCols: 1, showUnplaced: false }));
       const r = await api(`/api/events/${ev.id}/merc-dm/${merc.id}`, 'POST', { image: img });
       if (!r.ok) toast(`Could not DM ${merc.name}: ${r.error}`, true);
     } catch (e) { toast(`Could not DM ${merc.name}: ${e.message}`, true); }
@@ -1391,6 +2132,7 @@ VIEWS.admin = () => {
     + discordAdmin()
     + officersAdmin()
     + coachesAdmin()
+    + shotcallerAdmin()
     + mercenariesAdmin()
     + adminPlayersList()
     + noticesAdmin()
@@ -1402,5 +2144,6 @@ VIEWS.admin = () => {
     + accessAdmin()
     + adminSignIn()
     + adminBackup()
-    + adminCustomizingText();
+    + adminCustomizingText()
+    + (typeof testingAdmin === 'function' ? testingAdmin() : '');
 };
