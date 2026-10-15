@@ -177,6 +177,10 @@ module.exports = function install(ctx) {
         if (!other.voiceTracking.finishedAt) scheduleAutoFinish(other);
       }
     }
+    // channelId is all pollVoiceAttendance itself needs any more (it now credits anyone present in ANY of
+    // these channels, not specifically this party's own members - see pollVoiceAttendance below); members is
+    // kept purely for the dashboard's live deafened-count readout (/voice-track/live), which still only cares
+    // about the players who were actually part of the original line-up when tracking began.
     const partyChannels = [{ channelId: started.parties[0] && started.parties[0].channelId, members: [...ev.parties[0].members] }]
       .concat(realRest.map((p, i) => ({ channelId: started.parties[i + 1] && started.parties[i + 1].channelId, members: [...p.members] })))
       .filter((pc) => pc.channelId);
@@ -317,9 +321,6 @@ module.exports = function install(ctx) {
     }
     const unionOf = (ids) => { const s = new Set(); for (const id of ids) for (const owner of extraPresence.get(id) || []) s.add(owner); return s; };
     const globalExtraSet = unionOf(globalExtraIds);
-    const anyChannel = new Set(globalExtraSet);
-    for (const s of byChannel.values()) for (const id of s) anyChannel.add(id);
-    const scope = settings.voiceAttendanceScope === 'any-channel' ? 'any-channel' : 'own-party';
     const offsetMs = (Number(settings.voiceTrackStartOffsetMinutes) || 0) * 60000;
     const now = Date.now();
     let anyChanged = false;
@@ -327,22 +328,32 @@ module.exports = function install(ctx) {
       if (now < Date.parse(ev.start) + offsetMs) continue; // tracking hasn't opened yet for this event
       const evExtraIds = ev.voiceTrackExtraChannelIds || [];
       const evExtraSet = evExtraIds.length ? new Set([...globalExtraSet, ...unionOf(evExtraIds)]) : globalExtraSet;
-      const evAnyChannel = evExtraIds.length ? new Set([...anyChannel, ...unionOf(evExtraIds)]) : anyChannel;
+      // Every owner currently connected to ANY of this event's own tracked channels - every party channel
+      // Shotcaller created for this session, plus whichever extra channels apply (guild-wide + this event's
+      // own) - no matter which party, if any, they are actually assigned to. There used to be a stricter
+      // "own party's channel only" check here; it's gone on purpose, by request - an officer moving someone
+      // between parties mid-raid, a late sign-up swapped in, or a bench kept in voice specifically in case
+      // someone no-shows should not need the party line-up to be perfectly in sync for the attendance side of
+      // things to work. Simply being present in the session IS the signal now, not which exact channel within
+      // it, and not whether the character was ever placed into a party at all.
+      const sessionOwners = new Set(evExtraSet);
+      for (const pc of ev.voiceTracking.partyChannels) for (const owner of (byChannel.get(pc.channelId) || [])) sessionOwners.add(owner);
       let evChanged = false;
-      for (const party of ev.voiceTracking.partyChannels) {
-        const own = byChannel.get(party.channelId) || new Set();
-        const connected = scope === 'any-channel' ? evAnyChannel : (evExtraSet.size ? new Set([...own, ...evExtraSet]) : own);
-        for (const memberId of party.members) {
-          const m = findMember(memberId);
-          if (!m || !connected.has(m.owner)) continue;
-          // A rolling 30-second window, not a lifetime count - "seen at least twice within the last 30
-          // seconds" is what "overall checktime: 30s, 3 times within it" actually asks for, rather than any
-          // two sightings ever, however far apart.
-          const times = (ev.voiceTracking.seenAt[memberId] = ev.voiceTracking.seenAt[memberId] || []);
-          times.push(now);
-          while (times.length && now - times[0] > 30000) times.shift();
-          if (times.length >= 2 && !ev.attended.includes(memberId)) { ev.attended.push(memberId); evChanged = true; }
-        }
+      for (const ownerId of sessionOwners) {
+        // Whoever currently plays that owner's one active character gets the credit - or, if nobody active
+        // matches, whichever mercenary character this guild brought in under that owner specifically for this
+        // event (a mercenary is never "active", by design - see board() in app.js - so needs its own check).
+        // An owner connected who matches neither (someone with no character in Guild Hall at all, say) simply
+        // can't be credited - there's nothing to credit it to.
+        const m = db().members.find((x) => x.owner === ownerId && x.active) || db().members.find((x) => x.owner === ownerId && x.mercenary && x.mercFor === ev.id);
+        if (!m) continue;
+        // A rolling 30-second window, not a lifetime count - "seen at least twice within the last 30
+        // seconds" is what "overall checktime: 30s, 3 times within it" actually asks for, rather than any
+        // two sightings ever, however far apart.
+        const times = (ev.voiceTracking.seenAt[m.id] = ev.voiceTracking.seenAt[m.id] || []);
+        times.push(now);
+        while (times.length && now - times[0] > 30000) times.shift();
+        if (times.length >= 2 && !ev.attended.includes(m.id)) { ev.attended.push(m.id); evChanged = true; }
       }
       if (evChanged) { syncAttendancePoints(ev); anyChanged = true; }
     }

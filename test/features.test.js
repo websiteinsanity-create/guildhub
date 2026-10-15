@@ -144,6 +144,28 @@ withServer('confirming "Going" into an already-full party sends the player back 
   assert.ok(r2.body.parties[0].members.includes(ids[0]), 'confirming into a party that still has room keeps the player in it');
 });
 
+withServer('the event-level signup cap blocks a member confirming Going, but never an officer correcting someone\'s RSVP after the fact', async (s) => {
+  const mk = async (login, name) => { const tok = await s.login(login, 'm1'); return { tok, id: (await s.call('/api/members', 'POST', { name, role: 'DPS' }, tok)).body.id }; };
+  const players = [];
+  for (let i = 0; i < 3; i++) players.push(await mk('P' + i, 'Name' + i));
+  const ids = players.map((p) => p.id);
+  const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: new Date(Date.now() + 864e5).toISOString(), maxSignups: 2 }, s.officer)).body;
+  for (const id of ids.slice(0, 2)) await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: id, status: 'yes' }, s.officer);
+
+  // The third player confirming their OWN character into the already-full event is refused, same as always.
+  const memberTry = await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: ids[2], status: 'yes' }, players[2].tok);
+  assert.equal(memberTry.status, 409, 'a member is still refused once the event is full');
+
+  // An officer correcting that SAME player's RSVP to "yes" on an already-full, past-tense correction must not
+  // be blocked by the same cap - this is exactly the step "Save attendance" (the roster's 6-state editor,
+  // app.js) takes when marking someone "Participated" who had not actually confirmed Going, and a silent
+  // 409 here used to abort that whole save, including the attendance fix sent right after it.
+  const officerFix = await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: ids[2], status: 'yes' }, s.officer);
+  assert.equal(officerFix.status, 200, "an officer's own correction is never blocked by the signup cap");
+  const going = (await state(s, 'officer')).events.find((e) => e.id === ev.id);
+  assert.equal(Object.values(going.rsvps).filter((v) => v === 'yes').length, 3, 'all three are now Going, over the cap of 2 - an officer override is allowed to exceed it');
+});
+
 withServer('party saves use optimistic concurrency (baseVersion) so two officers editing the same event cannot silently overwrite one another', async (s) => {
   const mk = async (login, name, role) => { const tok = await s.login(login, 'm1'); return (await s.call('/api/members', 'POST', { name, role }, tok)).body.id; };
   const a = await mk('P1', 'Alpha', 'Tank'), b = await mk('P2', 'Bravo', 'DPS'), c = await mk('P3', 'Charlie', 'Healer');
@@ -547,11 +569,14 @@ withServer('the Gauntlet is a weapon with its class names, and no pair or name i
   const cfg = (await s.call('/api/config')).body;
   assert.ok(cfg.weapons.includes('Gauntlet'));
   const g = Object.fromEntries(cfg.classes.filter((c) => c.weapons.includes('Gauntlet')).map((c) => [c.weapons.find((w) => w !== 'Gauntlet'), c.name]));
-  assert.deepEqual(g, { Greatsword: 'Mauler', Orb: 'Soulcrusher', Staff: 'Archon', Spear: 'Destroyer', Longbow: 'Mobilist', Daggers: 'Predator', Crossbow: 'Shrike' });
+  assert.deepEqual(g, { Greatsword: 'Mauler', Orb: 'Soulcrusher', Staff: 'Archon', Spear: 'Destroyer', Longbow: 'Mobilist', Daggers: 'Predator', Crossbow: 'Shrike', 'Sword & Shield': 'Bastion', 'Wand & Tome': 'Mystic' });
   const keys = cfg.classes.map((c) => c.weapons.slice().sort().join('+'));
   assert.equal(new Set(keys).size, keys.length, 'no weapon pair is listed twice');
   assert.equal(new Set(cfg.classes.map((c) => c.name)).size, cfg.classes.length, 'no class name is used twice');
   for (const c of cfg.classes) for (const w of c.weapons) assert.ok(cfg.weapons.includes(w), `${c.name} uses a weapon that exists: ${w}`);
+  // Every weapon should pair with every OTHER weapon exactly once - a silently missing pair (like Gauntlet +
+  // Sword & Shield / Wand & Tome once were) means some members can't have a subclass name shown at all.
+  for (const w1 of cfg.weapons) for (const w2 of cfg.weapons) if (w1 !== w2) assert.ok(keys.includes([w1, w2].sort().join('+')), `${w1} + ${w2} has a class`);
   const m = (await s.call('/api/members', 'POST', { name: 'Fist', role: 'Tank', primaryWeapon: 'Gauntlet', secondaryWeapon: 'Greatsword' }, s.ann)).body;
   assert.equal(m.primaryWeapon, 'Gauntlet');
 });
