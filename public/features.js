@@ -546,6 +546,18 @@ ACTIONS['attdetail-save'] = (el, d) => {
 /* ================= dashboard you can personalise ================= */
 // Shown in the Announcement banner whenever no admin has posted anything.
 const GUILD_MOTTO = 'Different by nature. Dangerous by choice. We are Insanity.';
+// Picks one quote from the admin-typed list to show on the dashboard banner when "quotes mode" is on,
+// changing once per guild-day (the same 4am-cutover gameDay() the Daily Schedule panel uses) rather than
+// on every page load or every visitor seeing something different. Deterministic from the day string alone
+// (a small string hash, same idea as a simple PRNG seed) so every browser lands on the same quote for the
+// same guild-day with nothing to poll or store server-side - the list itself already reaches every signed-in
+// member as part of S.settings, same as the rest of Admin's settings.
+function quoteOfDay(list) {
+  const day = gameDay(Date.now());
+  let h = 0;
+  for (let i = 0; i < day.length; i++) h = (h * 31 + day.charCodeAt(i)) | 0;
+  return list[Math.abs(h) % list.length];
+}
 const DASH_PANELS = [
   { key: 'announcement', label: 'Announcement' }, { key: 'stats', label: 'Guild name and numbers' },
   { key: 'leadership', label: 'Leadership' }, { key: 'next', label: 'Daily schedule' },
@@ -728,15 +740,27 @@ FORMS.infoboard = (f) => {
 
 // Compact Shotcaller summary for the dashboard's side column - officers only, shown even when
 // Shotcaller isn't configured yet (mirrors viewShotcaller()'s own not-set-up message) so officers
-// always know where to find it. Deliberately a one-shot load (UI.dashShotcaller), not the 5s poll
-// the full Shotcaller page runs - this is a glance, not a control surface.
+// always know where to find it. A live session can change within seconds from somewhere else entirely (an
+// officer on the full Shotcaller page changing the dedicated caller, a /shotcaller command run directly in
+// Discord, people simply joining or leaving voice) - a card showing "Shotcaller in charge" and a connected
+// count has to track that, not just reflect whatever was true the moment it first loaded. So this polls every
+// 5s while the officer is actually sitting on the Dashboard, same lifecycle (and the same request-coalescing
+// cachedSession() on the server, see server-shotcaller.js) the full Shotcaller page's own 5s poll already
+// uses - the two together cost the bot no more than either one polling alone, since a second reader within the
+// cache window gets the same in-flight answer instead of asking again. Stops the instant the officer leaves
+// the Dashboard, so nothing polls in the background for a tab nobody is looking at.
 UI.dashShotcaller = null;
+let dashScTimer = null, dashScActive = false;
 async function loadDashShotcaller() {
   try { UI.dashShotcaller = await api('/api/shotcaller/status'); } catch { UI.dashShotcaller = { active: false }; }
-  render();
+  if (route().page === 'dashboard' && !$('#dlg').open) render();
 }
 AFTER_RENDER.push((page) => {
-  if (page === 'dashboard' && isOfficer() && S.cfg.shotcallerOn && UI.dashShotcaller === null) loadDashShotcaller();
+  if (page !== 'dashboard' || !isOfficer() || !S.cfg.shotcallerOn) { clearInterval(dashScTimer); dashScTimer = null; dashScActive = false; return; }
+  if (dashScActive) return;
+  dashScActive = true;
+  loadDashShotcaller();
+  dashScTimer = setInterval(loadDashShotcaller, 5000);
 });
 // Left+top "lightbar" border - red while inactive, orange while a session is starting, green once
 // live - so an officer can read the state at a glance without opening the panel. scStarting is the
@@ -942,7 +966,11 @@ function attendanceTrackPanel() {
   const mode = S.settings.attendanceMode === 'voice' ? 'voice' : 'pin';
   const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
   const { ongoing, upcoming, past } = attGroups();
-  const group = (label, list) => (list.length ? `<optgroup label="${esc(label)}">${list.map((e) => `<option value="${e.id}" ${AT.eventId === e.id ? 'selected' : ''}>${esc(e.title)} - ${fmtShort(e.start)}</option>`).join('')}</optgroup>` : '');
+  // A leading check mark on an option makes it obvious, scanning the whole list, which events already have a
+  // saved attendance record (rolled(e), the same test the roster page and Attendance stats already use) without
+  // having to pick each one just to find out.
+  const group = (label, list) => (list.length ? `<optgroup label="${esc(label)}">${list.map((e) => `<option value="${e.id}" ${AT.eventId === e.id ? 'selected' : ''}>${rolled(e) ? '✓ ' : ''}${esc(e.title)} - ${fmtShort(e.start)}</option>`).join('')}</optgroup>` : '');
+  const evTracked = ev && rolled(ev);
   return `<div class="att-wrap">
     <div class="panel att-card">
       <h3 class="sr-only">Attendance Tracking</h3>
@@ -957,6 +985,7 @@ function attendanceTrackPanel() {
           <div class="field" style="margin:0"><label for="att-event-select">Event to track</label>
             <select id="att-event-select" data-act="att-event-pick" aria-label="Event to track">${S.events.length ? `${group('Happening now', ongoing)}${group('Upcoming', upcoming)}${group('Past', past)}` : '<option>No events yet</option>'}</select>
           </div>
+          ${ev ? `<div style="margin-top:8px"><span class="st-pill ${evTracked ? 'st-approved' : 'st-open'}">${evTracked ? '✓ Attendance already tracked for this event' : 'Not yet tracked for this event'}</span></div>` : ''}
         </div>
         ${mode === 'voice' && ev ? attVoiceControls(ev) : mode === 'voice' ? '<div class="att-sect muted small">No events to track yet - create one on the Events page.</div>' : '<div class="att-sect muted small">PIN attendance is in use - the attendance PIN for this event lives on the event\'s own page.</div>'}
       </div>
@@ -1028,6 +1057,8 @@ VIEWS.dashboard = () => {
   // would each see a different cutoff, and everyone with events days out would see them creep onto the panel.
   const upcoming = S.events.filter((e) => gameDay(new Date(e.start).getTime()) === gameDay(Date.now())).sort((a, b) => new Date(a.start) - new Date(b.start));
   const ann = brand().announcement;
+  const quotes = S.settings.quotes || {};
+  const announceText = (quotes.enabled && quotes.list && quotes.list.length) ? quoteOfDay(quotes.list) : (ann || GUILD_MOTTO);
   const showLeadership = !hidden.has('leadership') && (off || !hiddenFromMembers('leadership'));
   const showNext = !hidden.has('next');
   const showInfo = !hidden.has('info') && (off || ((S.infoBoard.categories || []).length > 0));
@@ -1038,7 +1069,7 @@ VIEWS.dashboard = () => {
   const sideHasInfo = showInfo && !infoInLeadership;
   const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(ann || GUILD_MOTTO)}</div></div></div></div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
     stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
@@ -1157,6 +1188,17 @@ function appearanceAdmin() {
       <div><div class="k">Background picture</div>${file('background', b.bgFile)}<div class="muted small">Up to 6 MB. It is dimmed so the text stays readable.</div></div></div>
   </div>`;
 }
+function quotesAdmin() {
+  const q = S.settings.quotes || {};
+  return `<div class="panel"><h3>Quotes</h3>
+    <div class="muted small" style="margin:-6px 0 10px">An alternative to the single announcement above: switch this on and the dashboard banner shows one quote from this list instead, picked at random once per guild-day (everyone sees the same one until the day rolls over) - the announcement text itself is kept, just not shown, so switching this off again brings it straight back.</div>
+    <form data-form="quotes">
+      <label class="tagpick" style="margin-bottom:8px"><input type="checkbox" name="enabled" ${q.enabled ? 'checked' : ''}> Show a random quote instead of the announcement</label>
+      <textarea name="list" rows="8" placeholder="One quote per line.">${esc((q.list || []).join('\n'))}</textarea>
+      <button class="btn primary" style="margin-top:8px">Save quotes</button>
+    </form>
+  </div>`;
+}
 function accessAdmin() {
   const hidden = new Set((S.settings.hiddenSections || []));
   return `<div class="panel"><h3>What normal members can see</h3>
@@ -1182,6 +1224,7 @@ function tagsAdmin() {
 }
 const options = (body, msg) => act(() => api('/api/admin/options', 'PUT', body), msg || 'Saved');
 FORMS.appearance = (f, fd) => options({ branding: { name: fd.name, tagline: fd.tagline, announcement: fd.announcement, accent: f.elements.defaultAccent.checked ? '' : fd.accent, bgDim: fd.bgDim } });
+FORMS.quotes = (f, fd) => options({ quotes: { enabled: f.elements.enabled.checked, list: fd.list.split('\n').map((s) => s.trim()).filter(Boolean) } });
 FORMS.access = (f) => options({ hiddenSections: S.cfg.sections.map((s) => s.key).filter((k) => !f.querySelector(`input[value="${k}"]`).checked) });
 FORMS.approvals = (f) => options({ approvals: Object.fromEntries(S.cfg.approvalGroups.map((g) => [g.key, f.querySelector(`input[value="${g.key}"]`).checked])) });
 FORMS['tag-new'] = (f, fd) => act(() => api('/api/tags', 'POST', fd), 'Tag added');
@@ -2166,6 +2209,7 @@ VIEWS.admin = () => {
   if (!isOfficer()) return '<div class="empty">Officers only.</div>';
   return '<div class="page-head"><h1>Admin</h1></div>'
     + appearanceAdmin()
+    + quotesAdmin()
     + discordAdmin()
     + dailyScheduleAdmin()
     + officersAdmin()

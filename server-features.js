@@ -539,6 +539,12 @@ module.exports = function install(ctx) {
       if (x.bgDim !== undefined) { const v = int(x.bgDim); need(v >= 0 && v <= 95, 400, 'The background dimming must be between 0 and 95.'); b.bgDim = v; }
       touched.push('appearance');
     }
+    if (body.quotes && typeof body.quotes === 'object') {
+      const q = st.quotes, x = body.quotes;
+      if (x.enabled !== undefined) q.enabled = yes(x.enabled);
+      if (Array.isArray(x.list)) q.list = x.list.map((s) => clean(s, 300)).filter(Boolean).slice(0, 200);
+      touched.push('dashboard quotes');
+    }
     if (touched.length) audit(user, 'settings.update', { type: 'settings' }, `${user.name} changed guild settings: ${touched.join(', ')}.`);
     save();
     return st;

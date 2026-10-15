@@ -893,8 +893,13 @@ function eventDetail(ev) {
   // the matching comment in eventSide() for why this no longer blanks the note out for past events.
   const signupNote = closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
 
+  // rolled(ev) alone (not the forceRoster override) is what actually says whether this event has a real,
+  // saved attendance record behind it - a clearly visible pill next to the heading, not just which button
+  // happens to show below, since an officer scanning the page (or several events) should be able to tell at
+  // a glance whether this one still needs a roll call.
+  const reallyTracked = rolled(ev);
   return `
-  <div class="panel"><h3>Going: ${goingN}${cap}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
+  <div class="panel"><h3>Going: ${goingN}${cap} <span class="st-pill ${reallyTracked ? 'st-approved' : 'st-open'}" style="margin-left:8px;vertical-align:middle">${reallyTracked ? '✓ Attendance tracked' : 'Not yet tracked'}</span></h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
     ${roster.length ? `<div class="cols">${S.cfg.roles.map((r) => {
       const g = roster.filter((m) => m.role === r).sort((a, b) => b.gearScore - a.gearScore);
       return `<div class="col" style="--c:${roleColor(r)}"><h3><span>${esc(r)}</span><span>${g.length}</span></h3>
@@ -904,6 +909,8 @@ function eventDetail(ev) {
       <span class="muted small">Change anyone's status above, then save - points (if on) are recalculated too.</span></div>` : ''}
     ${admin && !tracked && roster.length ? `<div style="margin-top:14px"><button class="btn sm" data-act="roster-force-edit" data-id="${ev.id}">Take attendance by hand</button>
       <span class="muted small">Nothing has been recorded for this event yet (no PIN entries, nobody confirmed by voice) - use this to mark who actually showed up yourself.</span></div>` : ''}
+    ${admin && ev.attendanceUndoAvailable ? `<div style="margin-top:8px"><button class="btn sm" data-act="attendance-undo" data-id="${ev.id}">↩ Undo all saved attendance</button>
+      <span class="muted small">Puts attendance back to how it was before this event was ever tracked, undoing every save made since - not just the last one (last touched by ${esc(ev.attendanceUndoSavedBy)}, ${until(ev.attendanceUndoSavedAt)}). Saving again after this starts a fresh one to undo back to.</span></div>` : ''}
   </div>
 
   ${(() => {
@@ -1836,6 +1843,10 @@ document.addEventListener('click', async (e) => {
       for (const c of rsvpChanges) await api(`/api/events/${d.id}/rsvp`, 'POST', c);
       await api(`/api/events/${d.id}/attendance`, 'POST', { memberIds: attendedIds });
     }, 'Attendance saved');
+  }
+  else if (a === 'attendance-undo') {
+    if (!confirm('Undo all saved attendance for this event? This puts it back to how it was before it was ever tracked, undoing every save made since - not just the last one.')) return;
+    act(() => api(`/api/events/${d.id}/attendance/undo`, 'POST', {}), 'Attendance undone');
   }
   // Disabling the button the instant it's clicked (before the request even goes out) is what actually stops
   // a second click from firing a second send - sending reminders can take a moment (a Discord message per
