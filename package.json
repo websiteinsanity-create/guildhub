@@ -1,6 +1,6 @@
 {
   "name": "guild-hall",
-  "version": "1.28.0",
+  "version": "1.29.4",
   "description": "Self-hosted guild manager for Throne and Liberty",
   "main": "server.js",
   "scripts": {

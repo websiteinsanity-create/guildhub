@@ -160,39 +160,101 @@ withServer("in 'pin' mode (the default), voice presence is never looked at - no 
   assert.equal(finalEv.attended.length, 0, 'nobody auto-marked - this guild is still on PIN mode');
 });
 
-withServer("'voice' mode, 'own-party' scope (the default): present in YOUR OWN party's channel marks you attended; present in the wrong one does not", async (s) => {
+withServer("'voice' mode: present in ANY of the session's channels marks you attended, even if it's not your own assigned party's channel", async (s) => {
+  // There used to be a stricter "own party's channel only" mode here - removed by request: a player standing
+  // in the wrong channel, or one who was never assigned to a party at all, should still be credited for
+  // simply being in the session.
   await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', pointsEnabled: true }, s.officer);
   const { ev, anchorMembers, party2Members } = await makeTrackedEvent(s);
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.shotcaller.ok, true);
 
-  // Anchor members in their own channel (c0) - plus one Party 2 member ALSO standing in the anchor's channel
-  // instead of their own (c1), which stays empty - should not get marked under strict 'own-party' scope.
+  // Anchor members in their own channel (c0), plus Party 2's leader ALSO standing in the anchor's channel
+  // instead of their own (c1, which stays empty) - everyone present anywhere in the session is credited.
   s.bot.setConnected('c0', [...anchorMembers.map((m) => m.owner), party2Members[0].owner]);
   s.bot.setConnected('c1', []);
 
-  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.length >= anchorMembers.length ? e : null; });
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(party2Members[0].id) ? e : null; });
 
   const finalEv = await attendedOf(s, ev.id);
   for (const m of anchorMembers) assert.ok(finalEv.attended.includes(m.id), `${m.owner} (in their own party's channel) should be marked attended`);
-  assert.ok(!finalEv.attended.includes(party2Members[0].id), "the Party 2 member standing in the ANCHOR's channel should NOT be marked attended under 'own-party' scope");
+  assert.ok(finalEv.attended.includes(party2Members[0].id), "the Party 2 leader standing in the ANCHOR's channel should still be marked attended - which channel they're in no longer matters");
+  for (const m of party2Members.slice(1)) assert.ok(!finalEv.attended.includes(m.id), 'the rest of Party 2, never actually seen anywhere, stays unmarked');
   const points = (await s.call('/api/state', 'GET', null, s.officer)).body.points.filter((p) => p.eventId === ev.id);
-  assert.equal(points.length, anchorMembers.length, 'exactly one points entry per attendee, matching attended');
+  assert.equal(points.length, anchorMembers.length + 1, 'exactly one points entry per attendee, matching attended');
 });
 
-withServer("'voice' mode, 'any-channel' scope: present ANYWHERE in the session marks you attended, even in another party's channel", async (s) => {
-  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceAttendanceScope: 'any-channel' }, s.officer);
-  const { ev, party2Members } = await makeTrackedEvent(s);
+withServer('a player who never RSVPed to the event at all still gets credited if they are seen in the tracked session', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s);
+
+  // Created but never RSVPed one way or the other - no 'yes', no 'no', nothing in ev.rsvps for them at all.
+  // Maybe they forgot to answer, maybe they just showed up to help out - either way, if they're actually in
+  // the session's voice, that is a real "no-reply but participated" case Guild Hall already has a place for
+  // (the roster's own "noreply-att" status), not something voice-attendance should refuse to notice.
+  const dropIn = (await s.call('/api/members', 'POST', { name: 'DropIn', role: 'DPS', owner: 'd-dropin-1' }, s.officer)).body;
+
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
   assert.equal(r.status, 200, JSON.stringify(r.body));
 
-  s.bot.setConnected('c0', [party2Members[0].owner]); // Party 2's leader, sitting in the ANCHOR's channel
-  s.bot.setConnected('c1', []);
+  s.bot.setConnected('c0', [...anchorMembers.map((m) => m.owner), dropIn.owner]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(dropIn.id) ? e : null; });
 
-  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(party2Members[0].id) ? e : null; });
   const finalEv = await attendedOf(s, ev.id);
-  assert.ok(finalEv.attended.includes(party2Members[0].id), "'any-channel' scope should mark them attended regardless of which channel they're actually in");
+  assert.ok(finalEv.attended.includes(dropIn.id), 'a never-RSVPed player seen in the session should still be credited');
+});
+
+withServer('a player added to a party AFTER tracking has already begun still gets credited on the next poll', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev, anchorMembers, party2Members } = await makeTrackedEvent(s);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.shotcaller.ok, true);
+
+  // A late sign-up, created and swapped into Party 2 only now - after Shotcaller already started and
+  // voice-attendance tracking for this event is already live, using whatever roster the parties had at that
+  // moment. The whole point of this test is that this player was never in that original snapshot at all.
+  const late = (await s.call('/api/members', 'POST', { name: 'Latecomer', role: 'DPS', owner: 'd-late-1' }, s.officer)).body;
+  const partiesResp = await s.call(`/api/events/${ev.id}/parties`, 'POST', {
+    parties: [
+      { name: 'Anchor', members: anchorMembers.map((m) => m.id), leader: anchorMembers[0].id },
+      { name: 'Party 2', members: [...party2Members.map((m) => m.id), late.id], leader: party2Members[0].id },
+    ],
+  }, s.officer);
+  assert.equal(partiesResp.status, 200, JSON.stringify(partiesResp.body));
+
+  s.bot.setConnected('c1', [...party2Members.map((m) => m.owner), late.owner]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(late.id) ? e : null; });
+
+  const finalEv = await attendedOf(s, ev.id);
+  assert.ok(finalEv.attended.includes(late.id), 'the player added to Party 2 after tracking began should still be picked up, not silently skipped for the rest of the track');
+  for (const m of party2Members) assert.ok(finalEv.attended.includes(m.id), 'the rest of Party 2 is unaffected by the late addition');
+});
+
+withServer("a benched player (said Going, never placed in a party) still gets credited for being in voice, under 'own-party' scope too", async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer); // default scope: 'own-party'
+  const { ev, anchorMembers, party2Members } = await makeTrackedEvent(s);
+
+  // A bench: said Going, but deliberately never dragged into either party - kept around in voice in case
+  // someone no-shows and a sub is needed. They have no party channel of their own at all.
+  const bench = (await s.call('/api/members', 'POST', { name: 'Bencher', role: 'DPS', owner: 'd-bench-1' }, s.officer)).body;
+  const rsvp = await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: bench.id, status: 'yes' }, s.officer);
+  assert.equal(rsvp.status, 200, JSON.stringify(rsvp.body));
+
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.shotcaller.ok, true);
+
+  // Sitting in the anchor's channel - not "their own party's channel" (they have none) - which is exactly
+  // why 'own-party' scope must not be the rule that decides whether a bench player gets credited.
+  s.bot.setConnected('c0', [...anchorMembers.map((m) => m.owner), bench.owner]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(bench.id) ? e : null; });
+
+  const finalEv = await attendedOf(s, ev.id);
+  assert.ok(finalEv.attended.includes(bench.id), 'a benched player seen in voice should be credited even though they were never assigned to a party');
+  for (const m of anchorMembers) assert.ok(finalEv.attended.includes(m.id), 'the anchor members track normally alongside the bench player');
+  assert.ok(!finalEv.attended.includes(party2Members[0].id), 'a real Party 2 member who never actually showed up is unaffected by any of this');
 });
 
 withServer('once the Shotcaller session stops, tracking ends - nobody new gets marked afterward even if still "connected" in the (now stale) fake bot state', async (s) => {
@@ -330,19 +392,16 @@ withServer('once Shotcaller has actually tracked an event, the no-PIN auto-atten
 withServer('Admin: the new attendance settings are validated', async (s) => {
   const bad1 = await s.call('/api/settings', 'PUT', { attendanceMode: 'nonsense' }, s.officer);
   assert.equal(bad1.status, 400);
-  const bad2 = await s.call('/api/settings', 'PUT', { voiceAttendanceScope: 'nonsense' }, s.officer);
-  assert.equal(bad2.status, 400);
   const bad3 = await s.call('/api/settings', 'PUT', { voiceTrackExtraChannelIds: ['not-a-snowflake'] }, s.officer);
   assert.equal(bad3.status, 400);
   const bad4 = await s.call('/api/settings', 'PUT', { voiceTrackStartOffsetMinutes: 99999 }, s.officer);
   assert.equal(bad4.status, 400);
   const ok = await s.call('/api/settings', 'PUT', {
-    attendanceMode: 'voice', voiceAttendanceScope: 'any-channel', voiceTrackExtraChannelIds: [EXTRA_CHANNEL],
+    attendanceMode: 'voice', voiceTrackExtraChannelIds: [EXTRA_CHANNEL],
     voiceTrackStartOffsetMinutes: 1, voiceAttendanceIgnoreMuted: true, voiceAttendanceIgnoreDeafened: true,
   }, s.officer);
   assert.equal(ok.status, 200);
   assert.equal(ok.body.attendanceMode, 'voice');
-  assert.equal(ok.body.voiceAttendanceScope, 'any-channel');
   assert.deepEqual(ok.body.voiceTrackExtraChannelIds, [EXTRA_CHANNEL]);
   assert.equal(ok.body.voiceTrackStartOffsetMinutes, 1);
   assert.equal(ok.body.voiceAttendanceIgnoreMuted, true);

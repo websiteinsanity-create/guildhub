@@ -448,7 +448,11 @@ function lootPanel() {
   const itemsOf = (id) => S.loot.filter((l) => l.memberId === id && l.date >= itemFrom && l.date <= itemTo).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
 
   const rows = S.members.filter((m) => m.active && (off || m.owner === S.user.key)).map((m) => {
-    const mine = counted.filter((e) => !onLeaveAt(m.owner, new Date(e.start).getTime()));            // events during a leave of absence do not count against anybody
+    // A member can't be judged on an event that happened before they even had a character in the guild - same
+    // rule the Attendance/Compliance page already applies (see playerStats in server-compliance.js). Without
+    // this, a brand-new member's denominator includes every mandatory event in the whole window, most of which
+    // they had no chance to attend, badly understating their real percentage right after they join.
+    const mine = counted.filter((e) => !onLeaveAt(m.owner, new Date(e.start).getTime()) && !(m.joinedAt && new Date(e.start).getTime() < new Date(m.joinedAt).getTime()));
     const n = mine.filter((e) => e.attended.includes(m.id)).length;
     // A still-decaying starting-attendance baseline (set in Admin as a migration aid) blends in here too, the
     // same way it does on the Attendance page and the member's own profile (see attendanceStats) - otherwise a
@@ -457,7 +461,7 @@ function lootPanel() {
     const blendedOf = mine.length + virtual.events, blendedN = n + virtual.came;
     const pct = blendedOf > 0 ? Math.floor(100 * blendedN / blendedOf) : null;   // rounded down so 59.6% is not shown as 60%
     const disq = isDisqualified(m.owner);
-    return { m, n, total: mine.length, pct, disq, onLeave: onLeaveAt(m.owner, Date.now()), ok: pct !== null && pct >= ls.need && !disq, band: pct === null ? 'none' : bandOf(pct, ls), baseline: virtual.events > 0 };
+    return { m, n, total: mine.length, pct, disq, onLeave: onLeaveAt(m.owner, Date.now()), ok: pct !== null && pct >= ls.need && !disq, band: pct === null ? 'none' : bandOf(pct, ls), baseline: virtual.events > 0, trimmed: mine.length < counted.length };
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.m.name.localeCompare(b.m.name));
   const okCount = rows.filter((r) => r.ok).length;
   // Picking specific characters to compare (officer only) overrides the plain qualified/everyone toggle - the
@@ -476,7 +480,7 @@ function lootPanel() {
           return `<div><span class="k">Items received, ${fmtDay(new Date(itemFrom + 'T00:00:00'))} to ${fmtDay(ref)} (${ls.itemDays} ${ls.itemDays === 1 ? 'day' : 'days'})</span><b>${things.length}</b>${things.length ? ` <span class="muted small">(${S.cfg.lootTypes.filter((t) => t !== 'Lucent').map((t) => [t, things.filter((l) => l.type === t).length]).filter(([, n]) => n).map(([t, n]) => `${n} ${esc(t.toLowerCase())}`).join(', ')})</span><ul>${things.map((l) => `<li>${esc(l.item)} <span class="type-pill t-${esc(l.type)}">${esc(l.type || 'Item')}</span> <span class="muted small">${fmtDay(new Date(l.date + 'T00:00:00'))}</span></li>`).join('')}</ul>` : ' <span class="muted">none</span>'}</div>
           <div><span class="k">Lucent received in the same time</span><b>${sum.toLocaleString()}</b>${lucent.length ? ` <span class="muted small">(${lucent.length} ${lucent.length === 1 ? 'payment' : 'payments'})</span>` : ''}</div>`; })()}
         ${r.disq ? `<div class="warn-line">Disqualified from loot: ${activeWarn(r.m.owner).length} active warnings (the limit is ${S.settings.compliance.disqualifyAt}).</div>` : ''}
-        <div class="muted small">${r.total ? `Attended ${r.n} of ${r.total} mandatory ${r.total === 1 ? 'event' : 'events'}${r.total < counted.length ? ' (events during a leave of absence are left out)' : ''}.` : 'No mandatory events with recorded attendance yet.'}${r.baseline ? ' The percentage above still includes a decaying starting-attendance baseline (Admin).' : ''}</div>
+        <div class="muted small">${r.total ? `Attended ${r.n} of ${r.total} mandatory ${r.total === 1 ? 'event' : 'events'}${r.trimmed ? ' (events during a leave of absence, or from before they joined, are left out)' : ''}.` : 'No mandatory events with recorded attendance yet.'}${r.baseline ? ' The percentage above still includes a decaying starting-attendance baseline (Admin).' : ''}</div>
         ${off ? `<a href="#/loot" class="btn sm primary" data-act="loot-give" data-id="${r.m.id}">Give loot to ${esc(r.m.name)}</a> <button type="button" class="btn sm" data-act="loot-compare-pick" data-id="${r.m.id}">${compareIds.includes(r.m.id) ? 'Remove from compare' : 'Compare'}</button>` : ''}
       </div></details>`;
   };
@@ -1665,12 +1669,6 @@ function adminEventRules() {
           <option value="voice" ${voice ? 'selected' : ''}>Shotcaller voice presence (automatic, no PIN)</option>
         </select>
       </div>
-      <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}><label for="er-scope">Voice check</label>
-        <select id="er-scope" name="voiceAttendanceScope">
-          <option value="own-party" ${st.voiceAttendanceScope === 'any-channel' ? '' : 'selected'}>Only their own party's voice channel</option>
-          <option value="any-channel" ${st.voiceAttendanceScope === 'any-channel' ? 'selected' : ''}>Anywhere in the Shotcaller session</option>
-        </select>
-      </div>
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-close">Close sign-ups (minutes before start)</label><input id="er-close" name="signupCloseDefault" type="number" min="0" max="10080" value="${st.signupCloseDefault}" ${voice ? '' : 'required'}></div>
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-off">Create the PIN (minutes after start, negative = before)</label><input id="er-off" name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${st.pinOffsetMinutes}" ${voice ? '' : 'required'}></div>
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-win">PIN window (minutes players can enter it)</label><input id="er-win" name="pinWindowDefault" type="number" min="1" max="720" value="${st.pinWindowDefault}" ${voice ? '' : 'required'}></div>
@@ -1688,7 +1686,7 @@ function adminEventRules() {
       <button class="btn primary">Save</button>
     </form>
     <p class="muted small" style="margin:12px 0 0">${voice
-      ? "With voice presence picked, nobody gets sent a PIN any more - a player is marked attended automatically once they're seen in a tracked voice channel during a session an officer started for that event (Admin > Shotcaller, or \"Post to Discord\" with \"Also start Shotcaller\" ticked). An event Shotcaller never gets started for has nobody confirming attendance but an officer's own hand, same as always. Any event can override this guild default either way, in its own edit dialog. The PIN fields above are unused while this is picked, not deleted - switching back to PIN restores them exactly as they were."
+      ? "With voice presence picked, nobody gets sent a PIN any more - a player is marked attended automatically once they're seen in ANY voice channel that belongs to a session an officer started for that event (one of the party channels Shotcaller created, or one of the \"other channels always tracked\" below) - not just their own assigned party's channel, and not only players who were actually placed into a party at all. A bench kept in voice in case someone no-shows, or a late sign-up swapped into a party mid-raid, gets credited exactly the same way as everyone else. An event Shotcaller never gets started for has nobody confirming attendance but an officer's own hand, same as always. Any event can override this guild default either way, in its own edit dialog. The PIN fields above are unused while this is picked, not deleted - switching back to PIN restores them exactly as they were."
       : 'These are the defaults for new events. Each event can override the sign-up close time, the PIN window, and the attendance mode itself in its edit dialog. The PIN is sent by Discord to the leader of every party and to the leadership.'} Reminders go to players who have not answered Going or Can't with any character; "5, 2" means the first reminder 5 hours before the event and the second 2 hours before.</p>
   </div>`;
 }
@@ -1839,10 +1837,26 @@ document.addEventListener('click', async (e) => {
       const curRsvp = evn.rsvps[mId] === 'yes' ? 'yes' : evn.rsvps[mId] === 'no' ? 'no' : 'none';
       if (curRsvp !== picked.rsvp) rsvpChanges.push({ memberId: mId, status: picked.rsvp });
     }
-    act(async () => {
-      for (const c of rsvpChanges) await api(`/api/events/${d.id}/rsvp`, 'POST', c);
-      await api(`/api/events/${d.id}/attendance`, 'POST', { memberIds: attendedIds });
-    }, 'Attendance saved');
+    // Not routed through act() - that shows one single toast and skips the refresh entirely on any thrown
+    // error, and attendance can genuinely still be saved even when an RSVP correction alongside it fails, so
+    // "it threw" must not mean "nothing happened, don't bother refreshing".
+    (async () => {
+      try {
+        // Attendance first, always - it's the whole point of this save, and losing it because some unrelated
+        // RSVP correction below happened to fail would be far worse than the other way round. RSVP changes
+        // are then tried one at a time rather than stopping at the first failure, so one row's problem
+        // (closed sign-ups refusing a non-officer, say) doesn't also cost every OTHER row's correction that
+        // would have gone through fine on its own.
+        await api(`/api/events/${d.id}/attendance`, 'POST', { memberIds: attendedIds });
+        const failed = [];
+        for (const c of rsvpChanges) {
+          try { await api(`/api/events/${d.id}/rsvp`, 'POST', c); }
+          catch (e) { failed.push(`${(byId(S.members, c.memberId) || {}).name || c.memberId}: ${e.message}`); }
+        }
+        toast(failed.length ? `Attendance saved, but ${failed.length} RSVP ${failed.length === 1 ? 'change' : 'changes'} failed - ${failed.join('; ')}` : 'Attendance saved', failed.length > 0);
+      } catch (e) { toast(e.message, true); }
+      await refresh(true);
+    })();
   }
   else if (a === 'attendance-undo') {
     if (!confirm('Undo all saved attendance for this event? This puts it back to how it was before it was ever tracked, undoing every save made since - not just the last one.')) return;
@@ -1975,7 +1989,7 @@ document.addEventListener('submit', async (e) => {
     const mins = String(fd.reminderHours || '').split(/[,;]/).map((x) => x.trim()).filter(Boolean).map((x) => Math.round(parseFloat(x) * 60));
     if (mins.some((n) => !Number.isFinite(n))) return toast('Reminders: type hours separated by commas, for example 5, 2', true);
     const payload = {
-      attendanceMode: fd.attendanceMode, voiceAttendanceScope: fd.voiceAttendanceScope,
+      attendanceMode: fd.attendanceMode,
       voiceTrackStartOffsetMinutes: fd.voiceTrackStartOffsetMinutes,
       voiceAttendanceIgnoreMuted: !!f.elements.voiceAttendanceIgnoreMuted && f.elements.voiceAttendanceIgnoreMuted.checked,
       voiceAttendanceIgnoreDeafened: !!f.elements.voiceAttendanceIgnoreDeafened && f.elements.voiceAttendanceIgnoreDeafened.checked,

@@ -79,12 +79,6 @@ const SETTING_DEFAULTS = {
   // Mandatory. Either mode, this only ever matters for events where Shotcaller actually gets started -
   // anything else still has nobody confirming attendance but an officer's own hand, same as always.
   attendanceMode: 'pin',                                  // 'pin' | 'voice'
-  // How strict the voice check is, only relevant in 'voice' mode. 'own-party': only counts if seen in the
-  // specific voice channel their assigned character's party uses for this event - catches someone chatting in
-  // the wrong channel instead of crediting them. 'any-channel': counts if seen anywhere in the session at all -
-  // looser, but still catches a player whose character was never actually placed into a party for the event.
-  // Either way, voiceTrackExtraChannelIds below always counts, regardless of scope.
-  voiceAttendanceScope: 'own-party',                      // 'own-party' | 'any-channel'
   // Channels besides the Shotcaller session's own party channels that always count toward voice attendance -
   // a standing "Main"/"Raid Comms" channel some of the roster sits in instead of their assigned party's own
   // channel, say. Checked through the bot's channel-agnostic /voice-presence endpoint (needs bot v4.3.0+),
@@ -744,7 +738,14 @@ route('POST', '/api/events/:id/rsvp', ({ body, user, params }) => {
   if (body.status === 'none') delete ev.rsvps[m.id];
   else {
     need(['yes', 'no'].includes(body.status), 400, 'Bad status.');
-    if (body.status === 'yes' && ev.maxSignups) {
+    // The cap is a sign-up-time limit on how many people PLAN to come, not a rule about the historical
+    // record - an officer correcting a player's RSVP to match what actually happened (most often as part of
+    // fixing up attendance after the fact, see the roster's 6-state editor) must never be blocked by a cap
+    // that has nothing to do with rewriting the past, same as they're already exempt from sign-ups being
+    // closed right above. Without this, "This event is full" could silently swallow an officer's whole
+    // attendance correction along with it (see ACTIONS['roster-save'] in app.js, which saves the RSVP change
+    // and the attendance fix as one batch).
+    if (body.status === 'yes' && ev.maxSignups && !isOfficer(user)) {
       const going = Object.entries(ev.rsvps).filter(([id, s]) => s === 'yes' && Number(id) !== m.id).length;
       need(going < ev.maxSignups, 409, 'This event is full.');
     }
@@ -929,11 +930,6 @@ route('PUT', '/api/settings', ({ body, user }) => {
     const v = String(body.attendanceMode);
     need(v === 'pin' || v === 'voice', 400, 'Attendance mode must be "pin" or "voice".');
     st.attendanceMode = v;
-  }
-  if (body.voiceAttendanceScope !== undefined) {
-    const v = String(body.voiceAttendanceScope);
-    need(v === 'own-party' || v === 'any-channel', 400, 'Voice attendance scope must be "own-party" or "any-channel".');
-    st.voiceAttendanceScope = v;
   }
   if (body.voiceTrackExtraChannelIds !== undefined) {
     const list = Array.isArray(body.voiceTrackExtraChannelIds) ? body.voiceTrackExtraChannelIds : [];
