@@ -168,6 +168,13 @@ const SETTING_DEFAULTS = {
   // class order", same as the names simply being declared in that order with no override.
   classOrder: [],
   branding: { name: '', tagline: '', accent: '', bgDim: 82, announcement: '', iconFile: '', bgFile: '' },
+  // An alternative to the single announcement above: a list of quotes an officer types in Admin, with one
+  // shown on the dashboard banner at a time - the same banner, the same spot, just a different source of
+  // text when switched on. Off by default, so nothing changes until an officer opts in. Which quote shows
+  // is picked purely client-side from gameDay() (the same 4am-cutover "today" the Daily Schedule panel
+  // uses) hashed against the list, so every visitor sees the same one all guild-day and it rolls over to a
+  // new one the next guild-day - no server-side tick or stored "current pick" needed for that.
+  quotes: { enabled: false, list: [] },
 };
 let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], auditLog: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };
 if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
@@ -384,6 +391,7 @@ function migrate() {
   db.settings = { ...SETTING_DEFAULTS, ...(db.settings || {}) };
   db.settings.approvals = { ...SETTING_DEFAULTS.approvals, ...(db.settings.approvals || {}) };
   db.settings.branding = { ...SETTING_DEFAULTS.branding, ...(db.settings.branding || {}) };
+  db.settings.quotes = { ...SETTING_DEFAULTS.quotes, ...(db.settings.quotes || {}) };
   for (const m of db.members) {
     if (typeof m.questlog === 'string') { m.questlogs = m.questlog ? [{ label: 'Questlog', url: m.questlog }] : []; delete m.questlog; }   // one link became a list
     m.questlogs = m.questlogs || [];
@@ -540,7 +548,16 @@ function pinInfo(ev) {
 // Officers get the whole event. Everybody else gets it without the PIN itself.
 function eventFor(ev, user) {
   const out = { ...ev, pinInfo: pinInfo(ev), signupClosesAt: new Date(closeAt(ev)).toISOString() };
-  if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; delete out.voiceTracking; }
+  if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; delete out.voiceTracking; delete out.attendanceUndo; }
+  else {
+    // Officers get just enough to show "Undo all saved attendance (last touched 2 minutes ago by Ash)" - the
+    // raw snapshot (which member ids it would restore) is bookkeeping for the undo route itself, not something
+    // the UI needs.
+    out.attendanceUndoAvailable = !!ev.attendanceUndo;
+    out.attendanceUndoSavedAt = ev.attendanceUndo ? ev.attendanceUndo.savedAt : null;
+    out.attendanceUndoSavedBy = ev.attendanceUndo ? ev.attendanceUndo.savedBy : null;
+    delete out.attendanceUndo;
+  }
   return out;
 }
 
@@ -686,7 +703,7 @@ function applyPresetRule(ev) {
   if (p) ev.parties = normParties(clone(p.parties));
 }
 route('POST', '/api/events', ({ body, user }) => {
-  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
+  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
   applyPresetRule(ev);
   db.events.push(ev);
   audit.log(user, 'event.create', { type: 'event', id: ev.id, name: ev.title }, `${user.name} created the event "${ev.title}" (${ev.type}, ${ev.start}).`);
@@ -754,10 +771,45 @@ route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
   const ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
+  // Snapshot what this event's attendance looked like before it was EVER tracked (blank, almost always -
+  // whatever ev.attended/autoAttended were the first time this route ever ran for this event), so "Undo" can
+  // always put it all the way back, no matter how many corrections happened in between - one escape hatch
+  // back to "never tracked", not a step-by-step history. Only captured once: a second, third, etc. save in the
+  // same tracking pass leaves the restore target alone and just refreshes who/when it was last touched, so the
+  // undo button's "made by ... just now" stays accurate to the most recent save even though what it restores
+  // does not change. A fresh snapshot is only taken again after an undo actually clears this (or the event is
+  // brand new), i.e. the next time tracking starts from scratch. syncAttendancePoints is purely derived from
+  // ev.attended (see its own comment), so restoring attended/autoAttended and re-running it is enough to undo
+  // the points side effects too, with no separate ledger snapshot needed.
+  ev.attendanceUndo = {
+    attended: ev.attendanceUndo ? ev.attendanceUndo.attended : [...ev.attended],
+    autoAttended: ev.attendanceUndo ? ev.attendanceUndo.autoAttended : ev.autoAttended,
+    savedAt: new Date().toISOString(),
+    savedBy: user.name,
+  };
   ev.attended = [...new Set(ids)];
   ev.autoAttended = true;   // an officer took the roll by hand - the automatic fill-in (see tick()) must never touch this event again
   syncAttendancePoints(ev);
   audit.log(user, 'attendance.record', { type: 'event', id: ev.id, name: ev.title }, `${user.name} recorded attendance for "${ev.title}": ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
+  save();
+  return eventFor(ev, user);
+}, { officer: true });
+
+// Puts this event's attendance all the way back to how it was before it was ever tracked (see the snapshot
+// comment above) - for an officer who is not sure the roll is right any more and wants to start clean, rather
+// than untangle however many corrections happened since. Never fires on its own and never changes once set
+// except by another undo (a save in between only refreshes who/when, not what it restores to - see above), so
+// it is always safe to leave a save unactioned.
+route('POST', '/api/events/:id/attendance/undo', ({ params, user }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const undo = ev.attendanceUndo;
+  need(undo, 400, 'Nothing to undo - this event\'s attendance has not been saved since it was last opened, or was already undone.');
+  ev.attended = [...undo.attended];
+  ev.autoAttended = undo.autoAttended;
+  ev.attendanceUndo = null;
+  syncAttendancePoints(ev);
+  audit.log(user, 'attendance.undo', { type: 'event', id: ev.id, name: ev.title }, `${user.name} undid all saved attendance for "${ev.title}" back to before it was tracked (last touched by ${undo.savedBy}), back to ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
   save();
   return eventFor(ev, user);
 }, { officer: true });

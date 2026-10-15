@@ -34,6 +34,11 @@ services:
       - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
       # Discord Developer Portal > your application > Bot > Reset Token. Used to send direct messages (PINs and reminders).
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      # Discord Developer Portal > your application > General Information > Public Key. Lets Guild Hall verify
+      # that a reminder/daily-schedule button click really came from Discord. Only needed once you set this
+      # app's Interactions Endpoint URL to https://<your PUBLIC_URL>/discord/interactions - see README.md
+      # "Discord setup".
+      - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY:-}
       # Your Discord server: only its members can sign in.
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-}
       # Who is an officer: people with one of these roles (comma separated role ids) ...
@@ -51,7 +56,6 @@ services:
       - SHOTCALLER_URL=${SHOTCALLER_URL:-}
       - SHOTCALLER_API_KEY=${SHOTCALLER_API_KEY:-}
       - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY}
-
     volumes:
       - /opt/persistent_volume/guildhub/data:/data
     # Lets this container resolve host.docker.internal, needed to reach the Shotcaller bot when it runs with

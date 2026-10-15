@@ -192,7 +192,7 @@ tr.click:hover td { background: var(--panel-2); }
 
 /* Officer-only reworked "Guild name and numbers" panel: a slim Member bar, then five
    role columns naming who's in each instead of just a count (see statsOrHeroHtml). */
-.member-bar { display: flex; flex-direction: column; gap: 14px; margin-bottom: 4px; }
+.member-bar { display: flex; flex-direction: column; gap: 14px; margin-bottom: 4px; min-width: 0; }
 /* "Members" banner - unlike the other wordmark art, this one is a self-contained decorative
    strip rather than a card body growing underneath it: nothing overlaps the image, so it just
    shows the whole picture at its own native proportions (1672x941) and the count sits in a plain
@@ -212,6 +212,7 @@ tr.click:hover td { background: var(--panel-2); }
    sit on, over a dark gradient fade for legibility, instead of being squeezed right under the title. */
 .member-bar-head {
   position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 380; min-height: 150px;
+  width: 100%; min-width: 0; max-width: 100%;
   background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
   display: flex; align-items: flex-end; justify-content: flex-end; padding: 16px 22px;
 }
@@ -970,6 +971,14 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
   main { padding: 14px 12px 40px; }
   body { overflow-x: hidden; }
   .page-head { flex-wrap: wrap; }
+
+  /* The "MEMBERS" header strip's bottom-right count/bar used a fixed 190px min-width and a large
+     42px number (sized for roomier desktop/tablet widths); on the narrowest phones that minimum
+     could edge the strip past the edge of the screen. Shrinking both here gives it room to fit at
+     any phone width without touching the desktop/tablet look. */
+  .member-bar-stats { min-width: 0; max-width: 60%; gap: 6px; }
+  .member-bar-count { font-size: 30px; }
+  .member-bar-count small { font-size: 15px; }
 
   /* Starting attendance panel: no room for five aligned columns, so the header row disappears (each field's
      own placeholder - "events", "days" - says what it is instead) and each player's row wraps its four inputs

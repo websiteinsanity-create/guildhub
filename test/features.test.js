@@ -336,6 +336,62 @@ withServer('members only receive their own loot, attendance and points; the lead
   assert.equal((await s.call('/api/admin/options', 'PUT', { hiddenSections: [] }, s.ann)).status, 403);
 });
 
+// ---------------------------------------------------------------- attendance undo ("undo all saved attendance")
+withServer('saving attendance any number of times can always be undone back to before it was ever tracked', async (s) => {
+  await s.call('/api/settings', 'PUT', { pointsEnabled: true }, s.officer);
+  const a = (await s.call('/api/members', 'POST', { name: 'AnnChar', role: 'DPS' }, s.ann)).body;
+  const b = (await s.call('/api/members', 'POST', { name: 'BobChar', role: 'DPS' }, s.bob)).body;
+  const cleo = await s.login('Cleo', 'm1');
+  const c = (await s.call('/api/members', 'POST', { name: 'CleoChar', role: 'DPS' }, cleo)).body;
+  const ev = (await s.call('/api/events', 'POST', { title: 'Boss', type: 'Archboss', start: inDays(-1), points: 5 }, s.officer)).body;
+  assert.equal(ev.attendanceUndoAvailable, false, 'nothing to undo before any save yet');
+
+  // nothing saved yet - undo refuses rather than quietly doing nothing
+  assert.equal((await s.call(`/api/events/${ev.id}/attendance/undo`, 'POST', {}, s.officer)).status, 400);
+
+  // first save: nobody -> [Ann]. This is the "before tracking" baseline every later save undoes back to.
+  const afterFirst = (await s.call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: [a.id] }, s.officer)).body;
+  assert.deepEqual(afterFirst.attended, [a.id]);
+  assert.equal(afterFirst.attendanceUndoAvailable, true);
+  assert.equal(afterFirst.attendanceUndoSavedBy, 'Boss');
+  assert.deepEqual((await state(s, 'officer')).points.filter((p) => p.memberId === a.id).map((p) => p.delta), [5], 'points awarded for the save');
+
+  // a second save: Ann -> [Ann, Bob]
+  const afterSecond = (await s.call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: [a.id, b.id] }, s.officer)).body;
+  assert.deepEqual(afterSecond.attended.sort(), [a.id, b.id].sort());
+  // a third, mistaken save: [Ann, Bob] -> [Ann, Bob, Chris]. Undo should still reach all the way back to
+  // the ORIGINAL blank slate from before any of these three saves, not just undo this one save.
+  const afterThirdSave = (await s.call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: [a.id, b.id, c.id] }, s.officer)).body;
+  assert.deepEqual(afterThirdSave.attended.sort(), [a.id, b.id, c.id].sort());
+  assert.equal(afterThirdSave.attendanceUndoSavedBy, 'Boss', 'the "last touched" metadata keeps up with each save');
+
+  // a member cannot undo - this is an officer tool like the save itself
+  assert.equal((await s.call(`/api/events/${ev.id}/attendance/undo`, 'POST', {}, s.ann)).status, 403);
+
+  // undo reaches all the way back to NEVER TRACKED (blank), skipping every save in between, points included
+  const undone = (await s.call(`/api/events/${ev.id}/attendance/undo`, 'POST', {}, s.officer)).body;
+  assert.deepEqual(undone.attended, [], 'back to the original blank slate, not just the previous save');
+  assert.equal(undone.autoAttended, false);
+  assert.equal(undone.attendanceUndoAvailable, false, 'the undo itself leaves nothing further to undo');
+  const afterUndoState = await state(s, 'officer');
+  assert.deepEqual(afterUndoState.points.filter((p) => [a.id, b.id, c.id].includes(p.memberId)), [], 'every point awarded across all three saves is gone');
+
+  // nothing left to undo a second time
+  assert.equal((await s.call(`/api/events/${ev.id}/attendance/undo`, 'POST', {}, s.officer)).status, 400);
+
+  // a fresh save after an undo starts a brand new tracking pass, with its own new "before tracking" baseline
+  // (the blank state undo just restored) - undoing THIS one goes back to blank again, not to [Ann, Bob, Chris].
+  const afterFresh = (await s.call(`/api/events/${ev.id}/attendance`, 'POST', { memberIds: [a.id] }, s.officer)).body;
+  assert.equal(afterFresh.attendanceUndoAvailable, true);
+  const undoneAgain = (await s.call(`/api/events/${ev.id}/attendance/undo`, 'POST', {}, s.officer)).body;
+  assert.deepEqual(undoneAgain.attended, [], 'the new tracking pass undoes back to blank again');
+
+  // members never see the raw undo snapshot or who saved it, only officers get the undo controls' own data
+  const annsView = (await state(s, 'ann')).events.find((e) => e.id === ev.id);
+  assert.equal(annsView.attendanceUndo, undefined);
+  assert.equal(annsView.attendanceUndoAvailable, undefined);
+});
+
 // ---------------------------------------------------------------- branding, uploads, preferences
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 7)]).toString('base64');
 withServer('guild name, colour, icon and background can be changed by the leadership', async (s) => {
@@ -362,6 +418,26 @@ withServer('guild name, colour, icon and background can be changed by the leader
   assert.equal(fs.readdirSync(path.join(s.dir, 'uploads')).length, 2);
   await up('officer', { kind: 'icon', remove: true });
   cfg = (await s.call('/api/config')).body; assert.equal(cfg.branding.icon, ''); assert.equal(fs.readdirSync(path.join(s.dir, 'uploads')).length, 1, 'the old file is deleted');
+});
+
+withServer('dashboard quotes: a toggle and list only the leadership can set, visible to everyone once saved', async (s) => {
+  const opt = (who, b) => s.call('/api/admin/options', 'PUT', b, s[who]);
+  let cfg = (await state(s, 'officer')).settings;
+  assert.deepEqual(cfg.quotes, { enabled: false, list: [] }, 'off with an empty list by default');
+  assert.equal((await opt('ann', { quotes: { enabled: true, list: ['Victory or nothing.'] } })).status, 403, 'members cannot change it');
+  const r = await opt('officer', { quotes: { enabled: true, list: ['Victory or nothing.', '  ', 'Second wind.', 'Victory or nothing.'] } });
+  assert.equal(r.status, 200);
+  cfg = (await state(s, 'officer')).settings;
+  assert.equal(cfg.quotes.enabled, true);
+  assert.deepEqual(cfg.quotes.list, ['Victory or nothing.', 'Second wind.', 'Victory or nothing.'], 'blank lines are dropped, nothing else deduplicated or reordered');
+  // a member sees the same settings - nothing here is redacted by role, same as the rest of settings
+  const annsView = (await state(s, 'ann')).settings;
+  assert.deepEqual(annsView.quotes, cfg.quotes);
+  // turning it back off keeps the list around rather than discarding it
+  await opt('officer', { quotes: { enabled: false } });
+  cfg = (await state(s, 'officer')).settings;
+  assert.equal(cfg.quotes.enabled, false);
+  assert.deepEqual(cfg.quotes.list, ['Victory or nothing.', 'Second wind.', 'Victory or nothing.']);
 });
 
 withServer('only the leadership arranges the dashboard; the choice is stored per person', async (s) => {
