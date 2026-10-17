@@ -257,3 +257,106 @@ withServer('every sighting - credited or not, muted or not - is logged in voiceT
   assert.equal(missed.muted, true, 'logged anyway, so the popup can say why this one was missed');
   assert.equal(missed.memberId, anchorMembers[1].id, 'resolved to the actual character, not just a bare Discord id');
 });
+
+// Reproduces the reported bug: party 1-8 got tracked, party 11 did not. The manual "Start tracking now"
+// button (and "Track again") recompute which of ev.parties are real (non-placeholder) fresh at the moment
+// they're clicked - if the line-up changed since the Shotcaller session itself was actually started (an
+// officer added, removed, or reordered a party in between), that freshly-recomputed list no longer lines up
+// by plain array position with the channels the bot's session actually has. beginVoiceTracking resolves this
+// by matching each party's channel by the "<leader>'s Party" name the bot echoes back, falling back to
+// position only for parties that don't match a name - this confirms that resolution actually finds the right
+// channel for a party whose position shifted, not just the common case where nothing changed in between.
+withServer('"Start tracking now" still finds the right channel for a party after the line-up changed since Shotcaller itself was started', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const n = Math.floor(Math.random() * 1e6);
+  const make = async (owner) => (await s.call('/api/members', 'POST', { name: owner, role: 'DPS', owner }, s.officer)).body;
+  const anchor1 = await make(`anchor-${n}`);
+  const memberB = await make(`partyb-${n}`);
+  const memberC = await make(`partyc-${n}`);
+  const ev = (await s.call('/api/events', 'POST', { type: 'Castle Siege', start: new Date(Date.now() - 300000).toISOString(), voiceTrackAuto: false }, s.officer)).body;
+  // placeholderOverride/placeholder force these small (1-member) parties to count as real line-ups, not
+  // placeholders (which the default <=3-member rule would otherwise treat them as) - same override an
+  // officer gets from the party menu's "Mark/Unmark as placeholder".
+  await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [
+    { name: 'Anchor', members: [anchor1.id], leader: null },
+    { name: 'Party B', members: [memberB.id], leader: memberB.id, placeholderOverride: true, placeholder: false },
+    { name: 'Party C', members: [memberC.id], leader: memberC.id, placeholderOverride: true, placeholder: false },
+  ] }, s.officer);
+
+  // Start Shotcaller directly (the standalone "Start Shotcaller session" dialog's own route), exactly the
+  // same way public/shotcaller.js's manual dialog does - naming party B and C's channels after their leaders.
+  const started = await s.call('/api/shotcaller/start', 'POST', { channelId: VOICE_CHANNEL, count: 3, partyNames: [`${memberB.name}'s Party`, `${memberC.name}'s Party`] }, s.officer);
+  assert.equal(started.status, 200, JSON.stringify(started.body));
+
+  // The line-up changes before tracking is actually started: party B is dropped entirely (e.g. that player
+  // left/was removed from the roll call), leaving only Anchor and Party C - so the SAME-POSITION channel the
+  // bot gave party B when the session started is no longer where party C's members connect.
+  await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [
+    { name: 'Anchor', members: [anchor1.id], leader: null },
+    { name: 'Party C', members: [memberC.id], leader: memberC.id, placeholderOverride: true, placeholder: false },
+  ] }, s.officer);
+
+  const start = await s.call(`/api/events/${ev.id}/voice-track/start`, 'POST', {}, s.officer);
+  assert.equal(start.status, 200, JSON.stringify(start.body));
+
+  // Party C's actual channel is 'c2' (the bot assigned party B's old slot 'c1', party C's slot 'c2' when the
+  // session started) - a member connecting there should still be credited under their own party's real
+  // channel, not silently missed (or wrongly credited under party B's stale slot).
+  s.bot.setConnected('c2', [memberC.owner]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(memberC.id) ? e : null; });
+  const finalEv = await attendedOf(s, ev.id);
+  assert.ok(finalEv.attended.includes(memberC.id), 'party C is tracked on its own real channel even though its position in ev.parties shifted after the session started');
+});
+
+// The actual reported scenario: no party has a leader assigned at all (this guild doesn't use them with
+// voice tracking), so there is no name for beginVoiceTracking to match on - everything comes down to plain
+// position. Parties are signed up and assigned before the session starts; afterward, the officer reassigns
+// players between parties by telling them in voice/chat rather than re-posting the line-up, which can change
+// how many of ev.parties still count as "real" (non-placeholder) by the time "Start tracking now" is
+// eventually clicked. If a party earlier in the list drops below the placeholder threshold in between, every
+// REAL party after it shifts down by one position relative to the channels the bot actually created for the
+// original count - silently losing the last party's channel from tracking entirely. This is what the
+// snapshot taken at /api/shotcaller/start time (with an eventId) fixes: it freezes the full channel list
+// against the ORIGINAL count/order, so a later count change can no longer drop anything off the end.
+withServer('"Start tracking now" still tracks every party after an earlier party was reassigned down to a placeholder, with no leaders involved at all', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const n = Math.floor(Math.random() * 1e6);
+  const make = async (owner) => (await s.call('/api/members', 'POST', { name: owner, role: 'DPS', owner }, s.officer)).body;
+  const anchor1 = await make(`anchor-${n}`);
+  const memberB = await make(`partyb-${n}`);
+  const memberC = await make(`partyc-${n}`);
+  const memberD = await make(`partyd-${n}`);
+  const ev = (await s.call('/api/events', 'POST', { type: 'Castle Siege', start: new Date(Date.now() - 300000).toISOString(), voiceTrackAuto: false }, s.officer)).body;
+  // No leader on any party - matches this guild's actual setup when using voice tracking.
+  await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [
+    { name: 'Anchor', members: [anchor1.id], leader: null },
+    { name: 'Party B', members: [memberB.id], leader: null, placeholderOverride: true, placeholder: false },
+    { name: 'Party C', members: [memberC.id], leader: null, placeholderOverride: true, placeholder: false },
+    { name: 'Party D', members: [memberD.id], leader: null, placeholderOverride: true, placeholder: false },
+  ] }, s.officer);
+
+  // Start Shotcaller directly, set up "from this event" (eventId passed, as public/shotcaller.js's manual
+  // dialog now does) - 4 parties total, no party names since nobody's bound to a leader here.
+  const started = await s.call('/api/shotcaller/start', 'POST', { channelId: VOICE_CHANNEL, count: 4, partyNames: [null, null, null], eventId: ev.id }, s.officer);
+  assert.equal(started.status, 200, JSON.stringify(started.body));
+
+  // Party C gets reassigned down to a placeholder in between (its one member was pulled out to cover
+  // somewhere else, told by voice rather than re-posted) - without the fix, this shifts party D down into
+  // party C's old channel slot and drops party D's actual channel off the tracked list entirely.
+  await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [
+    { name: 'Anchor', members: [anchor1.id], leader: null },
+    { name: 'Party B', members: [memberB.id], leader: null, placeholderOverride: true, placeholder: false },
+    { name: 'Party C', members: [], leader: null, placeholderOverride: true, placeholder: true },
+    { name: 'Party D', members: [memberD.id], leader: null, placeholderOverride: true, placeholder: false },
+  ] }, s.officer);
+
+  const start = await s.call(`/api/events/${ev.id}/voice-track/start`, 'POST', {}, s.officer);
+  assert.equal(start.status, 200, JSON.stringify(start.body));
+
+  // Party D's real channel is 'c3' (anchor=VOICE_CHANNEL, B='c1', C='c2', D='c3' when the 4-party session was
+  // actually created) - still credited even though D is now only the second real party, not the third.
+  s.bot.setConnected('c3', [memberD.owner]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(memberD.id) ? e : null; });
+  const finalEv = await attendedOf(s, ev.id);
+  assert.ok(finalEv.attended.includes(memberD.id), "party D is still tracked on its own real channel after an earlier party's placeholder status changed, with no leader to go by at all");
+});

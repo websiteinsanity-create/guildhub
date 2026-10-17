@@ -848,6 +848,17 @@ const ROSTER6_LABEL = {
 function roster6Key(rsvp, attended) {
   return Object.keys(ROSTER6).find((k) => ROSTER6[k].rsvp === rsvp && ROSTER6[k].attended === attended) || (attended ? 'noreply-att' : 'noreply');
 }
+// Roster rows (eventDetail's per-role columns) group by this status order first, alphabetically within each
+// group - same order the 6-state dropdown's own options already use (ROSTER6 above) once attendance is
+// tracked, or plain RSVP order before that, so the grouping always matches what the status control itself
+// would show, never a separate ordering of its own.
+const ROSTER6_ORDER = Object.fromEntries(Object.keys(ROSTER6).map((k, i) => [k, i]));
+const RSVP_ORDER = { yes: 0, no: 1, none: 2 };
+function rosterSortKey(ev, m, tracked) {
+  const rsvp = ev.rsvps[m.id] === 'yes' ? 'yes' : ev.rsvps[m.id] === 'no' ? 'no' : 'none';
+  if (!tracked) return RSVP_ORDER[rsvp];
+  return ROSTER6_ORDER[roster6Key(rsvp, ev.attended.includes(m.id))];
+}
 // One roster row: name, subclass and gearscore on the left, and - the whole point of the original rework - a
 // status control on the right that replaced the old separate "change someone else's sign-up" dropdown. Before
 // attendance is tracked, officers get the plain 3-state RSVP dropdown, saved instantly, same as it always was.
@@ -919,7 +930,7 @@ function eventDetail(ev) {
   return `
   <div class="panel"><h3>Going: ${goingN}${cap} <span class="st-pill ${tracked ? 'st-approved' : 'st-open'}" style="margin-left:8px;vertical-align:middle">${tracked ? '✓ Attendance tracked' : 'Not yet tracked'}</span>${admin && tracked && roster.length ? `<button class="btn sm" style="margin-left:8px;vertical-align:middle" data-act="att-correct" data-id="${ev.id}">Correct manually</button>` : ''}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
     ${roster.length ? `<div class="cols">${S.cfg.roles.map((r) => {
-      const g = roster.filter((m) => m.role === r).sort((a, b) => b.gearScore - a.gearScore);
+      const g = roster.filter((m) => m.role === r).sort((a, b) => rosterSortKey(ev, a, tracked) - rosterSortKey(ev, b, tracked) || a.name.localeCompare(b.name));
       return `<div class="col" style="--c:${roleColor(r)}"><h3><span>${esc(r)}</span><span>${g.length}</span></h3>
         ${g.map((m) => rosterRow(ev, m, admin, tracked)).join('') || '<div class="muted small">None</div>'}</div>`;
     }).join('')}</div>` : '<div class="muted">Nobody on the roster yet.</div>'}
@@ -1519,7 +1530,7 @@ function eventDialog(ev, dateStr) {
     </div>
     <div class="row">
       <div class="field"><label>Close sign-ups (minutes before start)</label><input name="signupCloseMinutes" type="number" min="0" max="10080" value="${ev.signupCloseMinutes ?? S.settings.signupCloseDefault}"></div>
-      <div class="field"><label>PIN window (minutes players can enter it)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${ev.pinWindowMinutes ?? S.settings.pinWindowDefault}"></div>
+      <div class="field" id="ev-pinwin-field" ${voiceNow ? 'style="display:none"' : ''}><label>PIN window (minutes players can enter it)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${ev.pinWindowMinutes ?? S.settings.pinWindowDefault}"></div>
     </div>
     <div class="row">
       <div class="field" id="ev-pinoff-field" ${voiceNow ? 'style="display:none"' : ''}><label>Create the PIN (minutes after start, negative = before)</label><input name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${ev.pinOffsetMinutes ?? S.settings.pinOffsetMinutes}"></div>
@@ -1562,6 +1573,10 @@ function applyEventPinForAttn(selectEl) {
     pin.checked = pin.dataset.wasChecked === '1';
   }
   if (row) row.style.display = voice ? 'none' : '';
+  // The PIN window field is just as unused as the PIN checkbox itself once voice tracking governs this event -
+  // hidden right alongside it.
+  const pinWin = document.getElementById('ev-pinwin-field');
+  if (pinWin) pinWin.style.display = voice ? 'none' : '';
   // The two per-event timing overrides (symmetry with pinWindowMinutes above) - only the one that matches
   // whichever mode actually governs this event right now is worth seeing.
   const pinOff = document.getElementById('ev-pinoff-field'), voiceOff = document.getElementById('ev-voiceoff-field');

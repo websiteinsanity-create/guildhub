@@ -289,7 +289,14 @@ FORMS['shotcaller-start'] = (f, fd) => {
   render();
   (async () => {
     try {
-      await api('/api/shotcaller/start', 'POST', { channelId: fd.channelId, count, partyNames, dedicatedCallerId: fd.dedicatedCallerId || null });
+      // eventId (when this session was set up "from an event" above) lets the server freeze this event's
+      // current party line-up against the channels the bot is about to create for it right now - see
+      // server-shotcaller.js's /api/shotcaller/start route. Without a leader on every party (this guild's
+      // setup doesn't use them), that frozen snapshot is the only way "Start tracking now" - clicked
+      // separately, maybe much later, maybe after parties were reassigned by voice instead of re-posted -
+      // still finds each party's actual channel instead of guessing from whatever order the parties happen
+      // to be in by then.
+      await api('/api/shotcaller/start', 'POST', { channelId: fd.channelId, count, partyNames, dedicatedCallerId: fd.dedicatedCallerId || null, eventId: fd.setupKind === 'event' ? fd.eventId : null });
       toast('Shotcaller session started');
     } catch (e) {
       toast(e.message, true);

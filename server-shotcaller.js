@@ -163,6 +163,51 @@ module.exports = function install(ctx) {
     const parties = (status && status.parties) || [];
     return parties.length > 0 && parties.every((p) => !Array.isArray(p.connectedStates) && !Array.isArray(p.connectedUserIds));
   }
+  // channelId is all pollVoiceAttendance itself needs any more (it now credits anyone present in ANY of
+  // these channels, not specifically this party's own members - see pollVoiceAttendance below); members is
+  // kept purely for the dashboard's live deafened-count readout (/voice-track/live), which still only cares
+  // about the players who were actually part of the original line-up when tracking began.
+  //
+  // realRest is recomputed fresh from ev.parties at call time - for the combined post-parties flow that's the
+  // exact same array that was just used to start the session, so it lines up with started.parties by position
+  // with no room for drift. But a party's channel is still worked out this positional way whenever there is
+  // no frozen snapshot to fall back on (see snapshotVoiceSession and its use in beginVoiceTracking below) - if
+  // a party has a leader, matching the bot's own echoed-back "<leader>'s Party" name first (falling back to
+  // position only for whatever's left) still helps in that case, but is no help at all for a guild that
+  // never assigns leaders when using voice tracking - which is exactly when the snapshot matters most.
+  function computePartyChannels(ev, started, realRest) {
+    const expectedNames = realRest.map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
+    const botRest = started.parties.slice(1);
+    const usedBot = new Set(), usedReal = new Set();
+    const matched = new Array(realRest.length).fill(null);
+    for (let i = 0; i < expectedNames.length; i++) {
+      if (!expectedNames[i]) continue;
+      const j = botRest.findIndex((bp, jj) => !usedBot.has(jj) && bp && bp.name === expectedNames[i]);
+      if (j >= 0) { matched[i] = botRest[j]; usedBot.add(j); usedReal.add(i); }
+    }
+    let nextFree = 0;
+    for (let i = 0; i < realRest.length; i++) {
+      if (usedReal.has(i)) continue;
+      while (nextFree < botRest.length && usedBot.has(nextFree)) nextFree++;
+      if (nextFree < botRest.length) { matched[i] = botRest[nextFree]; usedBot.add(nextFree); nextFree++; }
+    }
+    return [{ channelId: started.parties[0] && started.parties[0].channelId, members: [...ev.parties[0].members] }]
+      .concat(realRest.map((p, i) => ({ channelId: matched[i] && matched[i].channelId, members: [...p.members] })))
+      .filter((pc) => pc.channelId);
+  }
+  const liveChannelKey = (started) => started.parties.map((p) => p && p.channelId).filter(Boolean).join(',');
+  // Freezes this event's current party-to-channel layout the moment Shotcaller is actually told to start for
+  // it - from the manual "Start Shotcaller session" dialog (when it was set up "from an event") and from the
+  // combined post-parties flow, whether or not tracking begins immediately. Without this, "Start tracking
+  // now" (clicked separately, maybe much later) and "Track again" would only ever have ev.parties AS IT IS
+  // AT THAT LATER MOMENT to work from - fine if nothing changed, wrong if a party was reassigned by voice or
+  // chat instead of re-posting the lineup, since a party's position no longer means what it meant when the
+  // channels were actually created. Keyed by the live channel set itself (channelIds are freshly created by
+  // the bot every session, so a genuinely new session can never collide with an old snapshot by accident).
+  function snapshotVoiceSession(ev, started, realRest) {
+    if (ctx.effectiveAttendanceMode(ev) !== 'voice' || !started || !Array.isArray(started.parties)) return;
+    ev.voiceSessionSnapshot = { channelKey: liveChannelKey(started), partyChannels: computePartyChannels(ev, started, realRest) };
+  }
   function beginVoiceTracking(ev, started, realRest) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
     if (!started || !Array.isArray(started.parties)) return;
@@ -177,13 +222,13 @@ module.exports = function install(ctx) {
         if (!other.voiceTracking.finishedAt) scheduleAutoFinish(other);
       }
     }
-    // channelId is all pollVoiceAttendance itself needs any more (it now credits anyone present in ANY of
-    // these channels, not specifically this party's own members - see pollVoiceAttendance below); members is
-    // kept purely for the dashboard's live deafened-count readout (/voice-track/live), which still only cares
-    // about the players who were actually part of the original line-up when tracking began.
-    const partyChannels = [{ channelId: started.parties[0] && started.parties[0].channelId, members: [...ev.parties[0].members] }]
-      .concat(realRest.map((p, i) => ({ channelId: started.parties[i + 1] && started.parties[i + 1].channelId, members: [...p.members] })))
-      .filter((pc) => pc.channelId);
+    // The frozen snapshot (above) wins whenever it's for THIS exact live session (same channel set) - it's
+    // the authoritative record of what this event's parties looked like the moment the session actually
+    // started, immune to anything done to ev.parties since. Recompute fresh only when there is no snapshot
+    // for this session (an officer started Shotcaller some other way - the generic dialog with no event
+    // chosen, say - so there was never anything to freeze).
+    const snap = ev.voiceSessionSnapshot;
+    const partyChannels = (snap && snap.channelKey === liveChannelKey(started)) ? snap.partyChannels : computePartyChannels(ev, started, realRest);
     ev.voiceTracking = { active: true, partyChannels, seenAt: {}, startedAt: Date.now(), finishedAt: null };
     if (presenceUnsupported(started)) {
       ev.voiceTracking.presenceUnsupported = true;
@@ -528,6 +573,19 @@ module.exports = function install(ctx) {
       throw e;
     }
     audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session (${count} ${count === 1 ? 'party' : 'parties'}).`);
+    // This dialog can be "set up from an event" (public/shotcaller.js) - when it was, freeze that event's
+    // current party layout against the channels the bot just created for it, right now, while they're still
+    // guaranteed to match - see snapshotVoiceSession's own comment for why. Tracking itself still only
+    // actually begins later, by hand ("Start tracking now") or via "Track again" - this only makes sure
+    // whichever one of those runs later still finds the right channel for every party.
+    if (body.eventId) {
+      const ev = findEvent(body.eventId);
+      if (ev) {
+        const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+        snapshotVoiceSession(ev, r, realRest);
+        save();
+      }
+    }
     return r;
   }, { officer: true });
 
@@ -576,5 +634,5 @@ module.exports = function install(ctx) {
 
   // Exposed to server.js, which passes it on to server-features.js/server-community.js (as ctx.shotcallerApi) -
   // see server-community.js's post-parties route, the only other caller of startSession and of beginVoiceTracking.
-  return { configured, checkCandidates, startSession, beginVoiceTracking };
+  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession };
 };

@@ -257,12 +257,20 @@ module.exports = function install(ctx) {
         });
         audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session for "${ev.title}" while posting its parties to Discord.`);
         shotcaller = { ok: true, data: started };
+        // Freeze this event's party layout against the channels the bot just created, regardless of whether
+        // tracking starts immediately below - if automatic tracking is off for this event, "Start tracking
+        // now" could run much later, after the parties were reassigned by voice or chat instead of re-posted,
+        // and needs this to still find each party's real channel (see snapshotVoiceSession's own comment).
+        shotcallerApi.snapshotVoiceSession(ev, started, realRest);
         // In 'voice' attendance mode, this is normally the moment attendance tracking for this event actually
         // begins - see beginVoiceTracking in server-shotcaller.js (a no-op in 'pin' mode either way). Unless an
         // officer switched "automatic tracking" off for this one event (Voice channel tracking and Reminders on
         // the event page) - then Shotcaller still starts here as asked, but nothing is tracked yet; they start
-        // it by hand later with "Start tracking now" once they're actually ready.
+        // it by hand later with "Start tracking now" once they're actually ready. Either way the snapshot just
+        // taken needs saving - beginVoiceTracking below already does its own save() when it runs, but the
+        // deferred (voiceTrackAuto off) case has nothing else to save it otherwise.
         if (ev.voiceTrackAuto !== false) shotcallerApi.beginVoiceTracking(ev, started, realRest);
+        else save();
       } catch (e) {
         shotcaller = { ok: false, error: e.message || 'Could not start Shotcaller.' };
         // e.message here is already the real reason (the bot's own rejection text, or what went wrong
