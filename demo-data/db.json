@@ -1,0 +1,1929 @@
+{
+  "nextId": 120,
+  "members": [
+    {
+      "id": 1,
+      "owner": "Ash",
+      "joinedAt": "2026-08-16T03:00:47.049Z",
+      "name": "Vaelin",
+      "role": "Tank",
+      "primaryWeapon": "Sword & Shield",
+      "secondaryWeapon": "Greatsword",
+      "rank": "Guild Master",
+      "specialization": "Endurance",
+      "gearScore": 2100,
+      "level": 50,
+      "discord": "vaelin",
+      "timezone": "CET, evenings",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "Main",
+          "url": "https://example.com/questlog/vaelin"
+        },
+        {
+          "label": "Alt profile",
+          "url": "https://example.com/questlog/vaelin-alt"
+        }
+      ],
+      "builds": [
+        {
+          "id": 17,
+          "gearScore": 2300,
+          "specialization": "Endurance",
+          "notes": "",
+          "name": "PvP tank",
+          "mode": "PvP",
+          "role": "Tank",
+          "primaryWeapon": "Sword & Shield",
+          "secondaryWeapon": "Daggers"
+        }
+      ],
+      "mode": "PvE",
+      "jobs": "Guild master: siege plans and alliance talks"
+    },
+    {
+      "id": 2,
+      "owner": "Mira",
+      "joinedAt": "2026-08-19T03:00:47.049Z",
+      "name": "Isolde",
+      "role": "Healer",
+      "primaryWeapon": "Wand & Tome",
+      "secondaryWeapon": "Orb",
+      "rank": "Officer",
+      "specialization": "Endurance",
+      "gearScore": 2652,
+      "level": 50,
+      "discord": "isolde",
+      "timezone": "GMT, late",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/isolde"
+        }
+      ],
+      "builds": [
+        {
+          "id": 15,
+          "gearScore": 2500,
+          "specialization": "Wisdom",
+          "notes": "",
+          "name": "PvP support",
+          "mode": "PvP",
+          "role": "Healer",
+          "primaryWeapon": "Wand & Tome",
+          "secondaryWeapon": "Staff"
+        }
+      ],
+      "mode": "PvE",
+      "jobs": "Healer training and the DKP ledger"
+    },
+    {
+      "id": 3,
+      "owner": "Dax",
+      "joinedAt": "2026-08-22T03:00:47.049Z",
+      "name": "Kestrel",
+      "role": "DPS",
+      "primaryWeapon": "Longbow",
+      "secondaryWeapon": "Daggers",
+      "rank": "Officer",
+      "specialization": "Crit",
+      "gearScore": 2274,
+      "level": 50,
+      "discord": "kestrel",
+      "timezone": "EST",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/kestrel"
+        }
+      ],
+      "builds": [
+        {
+          "id": 16,
+          "gearScore": 2100,
+          "specialization": "Support",
+          "notes": "",
+          "name": "Off-heal",
+          "mode": "PvE",
+          "role": "Healer",
+          "primaryWeapon": "Wand & Tome",
+          "secondaryWeapon": "Longbow"
+        }
+      ],
+      "mode": "PvE",
+      "jobs": "Managing the Wargames"
+    },
+    {
+      "id": 4,
+      "owner": "Marrow",
+      "joinedAt": "2026-08-25T03:00:47.049Z",
+      "name": "Marrow",
+      "role": "DPS",
+      "primaryWeapon": "Daggers",
+      "secondaryWeapon": "Crossbow",
+      "rank": "Veteran",
+      "specialization": "Burst",
+      "gearScore": 2226,
+      "level": 50,
+      "discord": "marrow",
+      "timezone": "CET, evenings",
+      "notes": "",
+      "active": true,
+      "questlogs": [],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 5,
+      "owner": "Thorne",
+      "joinedAt": "2026-08-28T03:00:47.049Z",
+      "name": "Thorne",
+      "role": "Tank",
+      "primaryWeapon": "Sword & Shield",
+      "secondaryWeapon": "Spear",
+      "rank": "Veteran",
+      "specialization": "Endurance",
+      "gearScore": 2538,
+      "level": 50,
+      "discord": "thorne",
+      "timezone": "GMT, late",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/thorne"
+        }
+      ],
+      "builds": [],
+      "mode": "PvP"
+    },
+    {
+      "id": 6,
+      "owner": "Wren",
+      "joinedAt": "2026-08-31T03:00:47.049Z",
+      "name": "Wren",
+      "role": "Healer",
+      "primaryWeapon": "Wand & Tome",
+      "secondaryWeapon": "Longbow",
+      "rank": "Officer",
+      "specialization": "Evasion",
+      "gearScore": 2420,
+      "level": 50,
+      "discord": "wren",
+      "timezone": "EST",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/wren"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE",
+      "jobs": "Onboarding recruits"
+    },
+    {
+      "id": 7,
+      "owner": "Cassian",
+      "joinedAt": "2026-09-03T03:00:47.049Z",
+      "name": "Cassian",
+      "role": "DPS",
+      "primaryWeapon": "Greatsword",
+      "secondaryWeapon": "Crossbow",
+      "rank": "Member",
+      "specialization": "",
+      "gearScore": 2298,
+      "level": 50,
+      "discord": "cassian",
+      "timezone": "CET, evenings",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "Main",
+          "url": "https://example.com/questlog/cassian"
+        },
+        {
+          "label": "Alt profile",
+          "url": "https://example.com/questlog/cassian-alt"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 8,
+      "owner": "Odalys",
+      "joinedAt": "2026-09-06T03:00:47.049Z",
+      "name": "Odalys",
+      "role": "DPS",
+      "primaryWeapon": "Staff",
+      "secondaryWeapon": "Wand & Tome",
+      "rank": "Member",
+      "specialization": "Crit",
+      "gearScore": 2551,
+      "level": 50,
+      "discord": "odalys",
+      "timezone": "GMT, late",
+      "notes": "",
+      "active": true,
+      "questlogs": [],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 9,
+      "owner": "Brannoch",
+      "joinedAt": "2026-09-09T03:00:47.049Z",
+      "name": "Brannoch",
+      "role": "DPS",
+      "primaryWeapon": "Crossbow",
+      "secondaryWeapon": "Sword & Shield",
+      "rank": "Member",
+      "specialization": "",
+      "gearScore": 2553,
+      "level": 50,
+      "discord": "brannoch",
+      "timezone": "EST",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/brannoch"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 10,
+      "owner": "Lyra",
+      "joinedAt": "2026-09-12T03:00:47.049Z",
+      "name": "Lyra",
+      "role": "DPS",
+      "primaryWeapon": "Longbow",
+      "secondaryWeapon": "Staff",
+      "rank": "Member",
+      "specialization": "Evasion",
+      "gearScore": 2426,
+      "level": 50,
+      "discord": "lyra",
+      "timezone": "CET, evenings",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "Main",
+          "url": "https://example.com/questlog/lyra"
+        },
+        {
+          "label": "Alt profile",
+          "url": "https://example.com/questlog/lyra-alt"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 11,
+      "owner": "Fenn",
+      "joinedAt": "2026-09-15T03:00:47.049Z",
+      "name": "Fenn",
+      "role": "DPS",
+      "primaryWeapon": "Daggers",
+      "secondaryWeapon": "Longbow",
+      "rank": "Member",
+      "specialization": "Crit",
+      "gearScore": 2511,
+      "level": 50,
+      "discord": "fenn",
+      "timezone": "GMT, late",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/fenn"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 12,
+      "owner": "Halvard",
+      "joinedAt": "2026-09-18T03:00:47.049Z",
+      "name": "Halvard",
+      "role": "Tank",
+      "primaryWeapon": "Greatsword",
+      "secondaryWeapon": "Sword & Shield",
+      "rank": "Member",
+      "specialization": "Endurance",
+      "gearScore": 2482,
+      "level": 50,
+      "discord": "halvard",
+      "timezone": "EST",
+      "notes": "",
+      "active": true,
+      "questlogs": [],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 13,
+      "owner": "Sable",
+      "joinedAt": "2026-09-21T03:00:47.049Z",
+      "name": "Sable",
+      "role": "Healer",
+      "primaryWeapon": "Wand & Tome",
+      "secondaryWeapon": "Orb",
+      "rank": "Recruit",
+      "specialization": "",
+      "gearScore": 2590,
+      "level": 50,
+      "discord": "sable",
+      "timezone": "CET, evenings",
+      "notes": "",
+      "active": true,
+      "questlogs": [
+        {
+          "label": "Main",
+          "url": "https://example.com/questlog/sable"
+        },
+        {
+          "label": "Alt profile",
+          "url": "https://example.com/questlog/sable-alt"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE"
+    },
+    {
+      "id": 14,
+      "owner": "Rook",
+      "joinedAt": "2026-09-24T03:00:47.049Z",
+      "name": "Rook",
+      "role": "DPS",
+      "primaryWeapon": "Spear",
+      "secondaryWeapon": "Daggers",
+      "rank": "Recruit",
+      "specialization": "",
+      "gearScore": 2245,
+      "level": 50,
+      "discord": "rook",
+      "timezone": "GMT, late",
+      "notes": "",
+      "active": false,
+      "questlogs": [
+        {
+          "label": "",
+          "url": "https://example.com/questlog/rook"
+        }
+      ],
+      "builds": [],
+      "mode": "PvE"
+    }
+  ],
+  "events": [
+    {
+      "id": 18,
+      "createdBy": "Ash",
+      "title": "Archboss: Kazar",
+      "type": "Archboss",
+      "start": "2026-10-03T03:00:47.049Z",
+      "description": "",
+      "points": 5,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes",
+        "10": "yes",
+        "11": "yes",
+        "12": "yes"
+      },
+      "attended": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 28,
+      "createdBy": "Ash",
+      "title": "Riftstone fight",
+      "type": "Riftstone",
+      "start": "2026-10-06T03:00:47.049Z",
+      "description": "",
+      "points": 3,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes",
+        "10": "yes",
+        "11": "yes"
+      },
+      "attended": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 39,
+      "createdBy": "Ash",
+      "title": "Castle siege: Stonegard",
+      "type": "Castle Siege",
+      "start": "2026-10-08T03:00:47.049Z",
+      "description": "",
+      "points": 10,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes",
+        "10": "yes",
+        "11": "yes",
+        "12": "yes",
+        "13": "yes"
+      },
+      "attended": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        10,
+        11,
+        12
+      ],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 50,
+      "createdBy": "Mira",
+      "title": "Archboss: Morokai",
+      "type": "Archboss",
+      "start": "2026-10-11T03:00:47.049Z",
+      "description": "",
+      "points": 5,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes",
+        "10": "yes",
+        "11": "yes",
+        "12": "yes"
+      },
+      "attended": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        9,
+        11
+      ],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 59,
+      "createdBy": "Ash",
+      "title": "Dungeon night",
+      "type": "Dungeon",
+      "start": "2026-10-12T03:00:47.049Z",
+      "description": "",
+      "points": 2,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes"
+      },
+      "attended": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 66,
+      "createdBy": "Ash",
+      "title": "Castle siege: Stonegard",
+      "type": "Castle Siege",
+      "start": "2026-10-13T03:00:47.049Z",
+      "description": "",
+      "points": 10,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes",
+        "10": "yes",
+        "11": "yes",
+        "12": "yes",
+        "13": "yes"
+      },
+      "attended": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 77,
+      "createdBy": "Ash",
+      "title": "Castle siege: Stonegard",
+      "type": "Castle Siege",
+      "start": "2026-10-16T18:00:00.000Z",
+      "description": "Meet at the war table 15 minutes early. Bring siege potions and be in voice chat.",
+      "points": 10,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes",
+        "10": "yes"
+      },
+      "attended": [],
+      "parties": [
+        {
+          "name": "Frontline",
+          "leader": 5,
+          "builds": {
+            "3": "16"
+          },
+          "members": [
+            5,
+            2,
+            3,
+            4,
+            7,
+            8
+          ]
+        },
+        {
+          "name": "Backline",
+          "leader": 1,
+          "members": [
+            1,
+            6,
+            9,
+            10
+          ]
+        }
+      ],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 78,
+      "createdBy": "Mira",
+      "title": "Archboss: Tevent",
+      "type": "Archboss",
+      "start": "2026-10-18T19:00:00.000Z",
+      "description": "",
+      "points": 5,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 79,
+      "createdBy": "Dax",
+      "title": "Dungeon run",
+      "type": "Dungeon",
+      "start": "2026-10-16T16:00:00.000Z",
+      "description": "",
+      "points": 2,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 80,
+      "createdBy": "Wren",
+      "title": "Guild contracts",
+      "type": "Guild Contract",
+      "start": "2026-10-16T19:30:00.000Z",
+      "description": "",
+      "points": 1,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 81,
+      "createdBy": "Ash",
+      "title": "Wargames",
+      "type": "Wargames",
+      "start": "2026-10-17T18:00:00.000Z",
+      "description": "",
+      "points": 4,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 82,
+      "createdBy": "Dax",
+      "title": "Tax delivery",
+      "type": "Tax delivery",
+      "start": "2026-10-17T15:30:00.000Z",
+      "description": "",
+      "points": 1,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "3": "yes",
+        "4": "yes",
+        "5": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 83,
+      "createdBy": "Mira",
+      "title": "Worldboss",
+      "type": "Worldboss (Conflict)",
+      "start": "2026-10-20T17:00:00.000Z",
+      "description": "",
+      "points": 3,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 84,
+      "createdBy": "Ash",
+      "title": "Riftstone fight",
+      "type": "Riftstone",
+      "start": "2026-10-19T18:00:00.000Z",
+      "description": "",
+      "points": 3,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes"
+      },
+      "attended": [],
+      "parties": [],
+      "pin": null,
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    },
+    {
+      "id": 85,
+      "createdBy": "Ash",
+      "title": "Guild bosses",
+      "type": "Guild bosses",
+      "start": "2026-10-15T02:55:47.049Z",
+      "description": "",
+      "points": 3,
+      "mandatory": true,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "rsvps": {
+        "1": "yes",
+        "2": "yes",
+        "3": "yes",
+        "4": "yes",
+        "5": "yes",
+        "6": "yes",
+        "7": "yes",
+        "8": "yes",
+        "9": "yes"
+      },
+      "attended": [],
+      "parties": [
+        {
+          "name": "Boss team",
+          "leader": 1,
+          "members": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ],
+      "pin": {
+        "code": "4821",
+        "at": "2026-10-15T03:00:47.049Z",
+        "by": "automatic",
+        "sent": [
+          {
+            "id": "Ash",
+            "name": "Ash",
+            "why": "leadership",
+            "ok": false,
+            "error": "Demo mode: nothing is sent to Discord."
+          }
+        ]
+      },
+      "pinEntries": {},
+      "remindersSent": {},
+      "reminderLog": []
+    }
+  ],
+  "points": [
+    {
+      "id": 19,
+      "memberId": 1,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 20,
+      "memberId": 2,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 21,
+      "memberId": 3,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 22,
+      "memberId": 4,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 23,
+      "memberId": 5,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 24,
+      "memberId": 6,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 25,
+      "memberId": 7,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 26,
+      "memberId": 8,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 27,
+      "memberId": 9,
+      "delta": 5,
+      "reason": "Attended: Archboss: Kazar",
+      "eventId": 18,
+      "at": "2026-10-03T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 29,
+      "memberId": 1,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 30,
+      "memberId": 2,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 31,
+      "memberId": 3,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 32,
+      "memberId": 4,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 33,
+      "memberId": 5,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 34,
+      "memberId": 6,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 35,
+      "memberId": 7,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 36,
+      "memberId": 8,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 37,
+      "memberId": 9,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 38,
+      "memberId": 10,
+      "delta": 3,
+      "reason": "Attended: Riftstone fight",
+      "eventId": 28,
+      "at": "2026-10-06T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 40,
+      "memberId": 1,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 41,
+      "memberId": 2,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 42,
+      "memberId": 3,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 43,
+      "memberId": 4,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 44,
+      "memberId": 5,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 45,
+      "memberId": 6,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 46,
+      "memberId": 7,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 47,
+      "memberId": 10,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 48,
+      "memberId": 11,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 49,
+      "memberId": 12,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 39,
+      "at": "2026-10-08T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 51,
+      "memberId": 1,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 52,
+      "memberId": 2,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 53,
+      "memberId": 3,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 54,
+      "memberId": 4,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 55,
+      "memberId": 5,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 56,
+      "memberId": 6,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 57,
+      "memberId": 9,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 58,
+      "memberId": 11,
+      "delta": 5,
+      "reason": "Attended: Archboss: Morokai",
+      "eventId": 50,
+      "at": "2026-10-11T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 60,
+      "memberId": 1,
+      "delta": 2,
+      "reason": "Attended: Dungeon night",
+      "eventId": 59,
+      "at": "2026-10-12T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 61,
+      "memberId": 2,
+      "delta": 2,
+      "reason": "Attended: Dungeon night",
+      "eventId": 59,
+      "at": "2026-10-12T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 62,
+      "memberId": 3,
+      "delta": 2,
+      "reason": "Attended: Dungeon night",
+      "eventId": 59,
+      "at": "2026-10-12T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 63,
+      "memberId": 4,
+      "delta": 2,
+      "reason": "Attended: Dungeon night",
+      "eventId": 59,
+      "at": "2026-10-12T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 64,
+      "memberId": 5,
+      "delta": 2,
+      "reason": "Attended: Dungeon night",
+      "eventId": 59,
+      "at": "2026-10-12T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 65,
+      "memberId": 6,
+      "delta": 2,
+      "reason": "Attended: Dungeon night",
+      "eventId": 59,
+      "at": "2026-10-12T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 67,
+      "memberId": 1,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 68,
+      "memberId": 2,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 69,
+      "memberId": 3,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 70,
+      "memberId": 4,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 71,
+      "memberId": 5,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 72,
+      "memberId": 8,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 73,
+      "memberId": 9,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 74,
+      "memberId": 10,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 75,
+      "memberId": 11,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 76,
+      "memberId": 12,
+      "delta": 10,
+      "reason": "Attended: Castle siege: Stonegard",
+      "eventId": 66,
+      "at": "2026-10-13T05:00:47.049Z",
+      "by": "system"
+    },
+    {
+      "id": 118,
+      "memberId": 4,
+      "delta": -8,
+      "reason": "Loot spent",
+      "at": "2026-10-10T03:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 119,
+      "memberId": 2,
+      "delta": 4,
+      "reason": "Manual bonus",
+      "at": "2026-10-11T03:00:47.049Z",
+      "by": "Ash"
+    }
+  ],
+  "duties": [
+    {
+      "id": 100,
+      "memberId": 1,
+      "text": "Final call on siege lineups",
+      "status": "doing",
+      "at": "2026-10-14T17:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 101,
+      "memberId": 1,
+      "text": "Alliance talks with Nightfall",
+      "status": "doing",
+      "at": "2026-10-14T18:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 102,
+      "memberId": 1,
+      "text": "Review recruit applications",
+      "status": "todo",
+      "at": "2026-10-14T19:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 103,
+      "memberId": 2,
+      "text": "Run Sunday healer training",
+      "status": "doing",
+      "at": "2026-10-14T20:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 104,
+      "memberId": 2,
+      "text": "Keep the DKP ledger up to date",
+      "status": "doing",
+      "at": "2026-10-14T21:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 105,
+      "memberId": 2,
+      "text": "Post the weekly event schedule",
+      "status": "done",
+      "at": "2026-10-14T22:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 106,
+      "memberId": 3,
+      "text": "Trial two DPS recruits",
+      "status": "todo",
+      "at": "2026-10-14T23:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 107,
+      "memberId": 3,
+      "text": "Plan the Archboss rotation",
+      "status": "doing",
+      "at": "2026-10-15T00:00:47.049Z",
+      "by": "Ash"
+    },
+    {
+      "id": 108,
+      "memberId": 6,
+      "text": "Onboard new recruits in Discord",
+      "status": "doing",
+      "at": "2026-10-15T01:00:47.049Z",
+      "by": "Ash"
+    }
+  ],
+  "presets": [
+    {
+      "id": 98,
+      "name": "Castle siege line-up",
+      "description": "Main groups for sieges. Swap healers if someone is away.",
+      "createdBy": "Ash",
+      "at": "2026-10-08T03:00:47.049Z",
+      "parties": [
+        {
+          "name": "Frontline",
+          "leader": 5,
+          "members": [
+            5,
+            2,
+            3,
+            4,
+            7,
+            8
+          ]
+        },
+        {
+          "name": "Backline",
+          "leader": 1,
+          "members": [
+            1,
+            6,
+            9,
+            10,
+            11,
+            12
+          ]
+        },
+        {
+          "name": "Flank",
+          "leader": 12,
+          "members": [
+            13,
+            14
+          ]
+        }
+      ]
+    },
+    {
+      "id": 99,
+      "name": "Archboss squad",
+      "description": "One tight group for boss rotations.",
+      "createdBy": "Mira",
+      "at": "2026-10-12T03:00:47.049Z",
+      "parties": [
+        {
+          "name": "Boss team",
+          "leader": 1,
+          "members": [
+            1,
+            2,
+            3,
+            4,
+            8,
+            9
+          ]
+        }
+      ]
+    }
+  ],
+  "loot": [
+    {
+      "id": 109,
+      "memberId": 5,
+      "item": "",
+      "type": "Lucent",
+      "amount": 1200,
+      "date": "2026-10-13",
+      "by": "Ash",
+      "at": "2026-10-13T03:00:47.049Z"
+    },
+    {
+      "id": 110,
+      "memberId": 2,
+      "item": "Ancient Oracle Staff",
+      "type": "Item",
+      "amount": 0,
+      "date": "2026-10-14",
+      "by": "Ash",
+      "at": "2026-10-14T03:00:47.049Z"
+    },
+    {
+      "id": 111,
+      "memberId": 4,
+      "item": "Boss Cloak of Vigor",
+      "type": "Item",
+      "amount": 0,
+      "date": "2026-10-13",
+      "by": "Ash",
+      "at": "2026-10-13T03:00:47.049Z"
+    },
+    {
+      "id": 112,
+      "memberId": 5,
+      "item": "Legendary Greatsword",
+      "type": "Item",
+      "amount": 0,
+      "date": "2026-10-10",
+      "by": "Ash",
+      "at": "2026-10-10T03:00:47.049Z"
+    },
+    {
+      "id": 113,
+      "memberId": 1,
+      "item": "Trait extract x3",
+      "type": "Shard",
+      "amount": 0,
+      "date": "2026-10-09",
+      "by": "Ash",
+      "at": "2026-10-09T03:00:47.049Z"
+    },
+    {
+      "id": 114,
+      "memberId": 4,
+      "item": "Shadow Dagger",
+      "type": "Item",
+      "amount": 0,
+      "date": "2026-10-06",
+      "by": "Ash",
+      "at": "2026-10-06T03:00:47.049Z"
+    },
+    {
+      "id": 115,
+      "memberId": 8,
+      "item": "Rare Belt of Focus",
+      "type": "Item",
+      "amount": 0,
+      "date": "2026-10-03",
+      "by": "Ash",
+      "at": "2026-10-03T03:00:47.049Z"
+    },
+    {
+      "id": 116,
+      "memberId": 2,
+      "item": "Skillcore: Heal Pulse",
+      "type": "Skillcore",
+      "amount": 0,
+      "date": "2026-10-12",
+      "by": "Ash",
+      "at": "2026-10-12T03:00:47.049Z"
+    },
+    {
+      "id": 117,
+      "memberId": 4,
+      "item": "Skillcore: Shadow Step",
+      "type": "Skillcore",
+      "amount": 0,
+      "date": "2026-10-11",
+      "by": "Ash",
+      "at": "2026-10-11T03:00:47.049Z"
+    }
+  ],
+  "series": [
+    {
+      "id": 86,
+      "title": "Boonstone fight",
+      "type": "Boonstone",
+      "weekdays": [
+        1
+      ],
+      "intervalWeeks": 1,
+      "time": "21:00",
+      "tz": "Europe/Berlin",
+      "startDate": "2026-10-15",
+      "endDate": "",
+      "description": "Weekly boonstone fight. Be in voice chat 15 minutes early.",
+      "points": 3,
+      "mandatory": false,
+      "maxSignups": 0,
+      "signupCloseMinutes": 30,
+      "pinWindowMinutes": 15,
+      "reminders": true,
+      "skipped": [],
+      "createdBy": "Ash",
+      "at": "2026-10-15T03:00:47.049Z"
+    }
+  ],
+  "changes": [
+    {
+      "id": 93,
+      "status": "pending",
+      "kind": "member",
+      "ownerKey": "Cassian",
+      "memberId": 7,
+      "changes": {
+        "primaryWeapon": {
+          "from": "Greatsword",
+          "to": "Spear"
+        }
+      },
+      "by": "Cassian",
+      "byKey": "Cassian",
+      "at": "2026-10-15T01:00:47.049Z"
+    },
+    {
+      "id": 94,
+      "status": "pending",
+      "kind": "build",
+      "op": "add",
+      "ownerKey": "Lyra",
+      "memberId": 10,
+      "data": {
+        "name": "PvP bow",
+        "mode": "PvP",
+        "role": "DPS",
+        "primaryWeapon": "Longbow",
+        "secondaryWeapon": "Crossbow",
+        "specialization": "Crit",
+        "gearScore": 2400,
+        "notes": ""
+      },
+      "by": "Lyra",
+      "byKey": "Lyra",
+      "at": "2026-10-14T22:00:47.049Z"
+    }
+  ],
+  "requests": [
+    {
+      "id": 95,
+      "memberId": 2,
+      "buildKey": "15",
+      "kind": "Lucent",
+      "item": "",
+      "amount": 1500,
+      "lootType": "Item",
+      "reason": "Enchanting my PvP support set",
+      "status": "open",
+      "by": "Mira",
+      "byKey": "Mira",
+      "at": "2026-10-14T21:00:47.049Z"
+    },
+    {
+      "id": 96,
+      "memberId": 4,
+      "buildKey": "main",
+      "kind": "Item",
+      "item": "Skillcore: Poison Cloud",
+      "amount": 0,
+      "lootType": "Skillcore",
+      "reason": "Missing for the siege rotation",
+      "status": "open",
+      "by": "Marrow",
+      "byKey": "Marrow",
+      "at": "2026-10-14T01:00:47.049Z"
+    },
+    {
+      "id": 97,
+      "memberId": 8,
+      "buildKey": "main",
+      "kind": "Lucent",
+      "item": "",
+      "amount": 800,
+      "lootType": "Item",
+      "reason": "",
+      "status": "approved",
+      "note": "Paid out on Friday",
+      "decidedBy": "Ash",
+      "decidedAt": "2026-10-14T07:00:47.049Z",
+      "by": "Odalys",
+      "byKey": "Odalys",
+      "at": "2026-10-13T03:00:47.049Z"
+    }
+  ],
+  "tags": [
+    {
+      "id": 90,
+      "name": "Trial",
+      "color": "#e2a24a"
+    },
+    {
+      "id": 91,
+      "name": "Raid leader",
+      "color": "#5fb8e8"
+    },
+    {
+      "id": 92,
+      "name": "Needs a talk",
+      "color": "#e2685c"
+    }
+  ],
+  "playerTags": {
+    "Cassian": [
+      90
+    ],
+    "Mira": [
+      91
+    ],
+    "Sable": [
+      90,
+      92
+    ]
+  },
+  "profiles": {
+    "Mira": {
+      "bio": "Healer main since launch. Happy to teach newcomers.",
+      "modes": [
+        "PvE",
+        "PvP"
+      ],
+      "updatedAt": "2026-10-12T03:00:47.049Z"
+    },
+    "Marrow": {
+      "bio": "Dagger player, mostly here for the siege nights.",
+      "modes": [
+        "PvP"
+      ],
+      "updatedAt": "2026-10-07T03:00:47.049Z"
+    }
+  },
+  "infoBoard": {
+    "title": "Guild info",
+    "categories": [
+      {
+        "title": "Guild rules",
+        "buttons": [
+          {
+            "label": "Loot rules",
+            "text": "Loot goes to players with at least 60% attendance on mandatory events in the last 14 days.\nAsk in the Requests section if you need Lucent or a specific item for a build."
+          },
+          {
+            "label": "Attendance",
+            "text": "Say Going or Can't for every event. If you say Going, please come: no-shows are tracked.\nSign-ups close 30 minutes before the start."
+          },
+          {
+            "label": "Siege etiquette",
+            "text": "Be in voice chat 15 minutes early. Follow your party leader."
+          }
+        ]
+      },
+      {
+        "title": "Links",
+        "buttons": [
+          {
+            "label": "Discord",
+            "text": "Our server: https://discord.gg/example"
+          },
+          {
+            "label": "Questlog help",
+            "text": "Paste the link to your character on Questlog into your profile so the leadership can check your gear."
+          }
+        ]
+      }
+    ]
+  },
+  "notices": [],
+  "noticeAcks": {},
+  "leaves": [
+    {
+      "id": 87,
+      "ownerKey": "Sable",
+      "name": "Sable",
+      "from": "2026-10-13",
+      "to": "2026-10-20",
+      "reason": "Exams",
+      "status": "approved",
+      "by": "Sable",
+      "at": "2026-10-12T03:00:47.049Z",
+      "decidedBy": "Ash",
+      "decidedAt": "2026-10-12T03:00:47.049Z"
+    },
+    {
+      "id": 88,
+      "ownerKey": "Odalys",
+      "name": "Odalys",
+      "from": "2026-10-25",
+      "to": "2026-11-01",
+      "reason": "Holiday",
+      "status": "pending",
+      "by": "Odalys",
+      "at": "2026-10-15T02:00:47.049Z"
+    }
+  ],
+  "warnings": [
+    {
+      "id": 89,
+      "ownerKey": "Cassian",
+      "name": "Cassian",
+      "kind": "noshow",
+      "reason": "3 no-shows in the last 30 days (limit 3)",
+      "auto": true,
+      "by": "system",
+      "at": "2026-10-13T03:00:47.049Z",
+      "status": "active",
+      "expiresAt": "2026-12-12T03:00:47.049Z"
+    }
+  ],
+  "explanations": [],
+  "settings": {}
+}

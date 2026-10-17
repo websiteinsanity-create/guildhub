@@ -366,37 +366,42 @@ function attEvents() {
   const days = UI.attDays === 'all' ? null : Number(UI.attDays);
   return S.events.filter((e) => new Date(e.start) < Date.now() && rolled(e) && (!UI.attMand || e.mandatory) && (!days || new Date(e.start) >= Date.now() - days * 864e5));
 }
-// One row per player (all of their active characters together).
+// The Attendance page's own window (UI.attDays/UI.attMand) doesn't match either window already cached in
+// refresh() (the compliance window, or the loot panel's window) - it changes freely as someone drags the day
+// count or flips "mandatory only," so it's fetched lazily here, against the server's custom-window mode of
+// the same /api/attendance-stats endpoint, the moment a window shows up that nothing cached yet covers. This
+// also carries the server's own per-event resolution (the `list` array) for the per-player drill-down below,
+// instead of the client resolving going/no-show/declined/no-reply itself.
+let attStatsKey = null, attStatsFetching = null;
+function attStatsByOwner() {
+  const key = `${UI.attDays}:${UI.attMand ? 1 : 0}`;
+  if (attStatsKey !== key && attStatsFetching !== key) {
+    attStatsFetching = key;
+    api(`/api/attendance-stats?windowDays=${encodeURIComponent(UI.attDays)}&mandatoryOnly=${UI.attMand ? 1 : 0}`)
+      .then((rows) => { S.attStatsByOwner = Object.fromEntries(rows.map((r) => [r.owner, r])); attStatsKey = key; attStatsFetching = null; render(); })
+      .catch(() => { attStatsFetching = null; });
+  }
+  return attStatsKey === key ? (S.attStatsByOwner || {}) : {};
+}
+// One row per player (all of their active characters together), read from the server's own resolution of
+// each event (going/no-show/declined/no-reply, leave-of-absence, join-date, and the percentage itself,
+// baseline blend included) instead of recomputing any of that here.
 //   Came      = one of their characters attended
 //   No-show   = said Going with a character, but none of them attended
 //   No reply  = never answered Going or Can't with any character
-function attRows(evs) {
+function attRows() {
   const off = isOfficer(), ls = lootSettings(), byOwner = new Map();
   for (const m of S.members.filter((x) => x.active && (off || x.owner === S.user.key))) { if (!byOwner.has(m.owner)) byOwner.set(m.owner, []); byOwner.get(m.owner).push(m); }
+  const stats = attStatsByOwner();
   return [...byOwner].map(([owner, chars]) => {
-    const ids = chars.map((c) => c.id), list = [];
-    // Same reasoning as playerStats() server-side and eventChart()/eventRoster() elsewhere on the client: a
-    // player cannot have been a no-show or no-reply for an event that happened before they had any character in
-    // the guild at all. Uses the EARLIEST joinedAt across all of a player's characters (an alt added later
-    // should not push "joined" forward), falling back to "always joined" for a character missing joinedAt
-    // entirely (only pre-dates the field, not a real player).
-    const joinTimes = chars.map((c) => Date.parse(c.joinedAt)).filter(Number.isFinite);
-    const joinedAt = joinTimes.length ? Math.min(...joinTimes) : -Infinity;
-    let n = 0, noshow = 0, noreply = 0, declined = 0, total = 0;
-    for (const e of evs) {
-      if (new Date(e.start).getTime() < joinedAt) continue;        // predates this player entirely - not even "leave", just not theirs
-      if (onLeaveAt(owner, new Date(e.start).getTime())) { list.push({ e, status: 'leave', answer: '-' }); continue; }       // away with the leadership's OK: not judged
-      total++;
-      const answers = ids.map((id) => e.rsvps[id]), going = answers.includes('yes'), no = answers.includes('no');
-      const attended = ids.some((id) => e.attended.includes(id));
-      if (!going && !no) noreply++;
-      let status;
-      if (attended) { status = 'attended'; n++; } else if (going) { status = 'noshow'; noshow++; } else if (no) { status = 'declined'; declined++; } else status = 'noreply';
-      list.push({ e, status, answer: going ? 'Going' : no ? "Can't" : 'no answer' });
-    }
-    const virtual = virtualAttendanceFor(owner);
-    const blendedTotal = total + virtual.events, blendedN = n + virtual.came;
-    const pct = blendedTotal > 0 ? Math.floor(100 * blendedN / blendedTotal) : null;
+    const ids = chars.map((c) => c.id);
+    const s = stats[owner];
+    const list = (s ? s.list : [])
+      .map((x) => ({ e: byId(S.events, x.id), status: x.status, answer: x.status === 'leave' ? '-' : x.status === 'declined' ? "Can't" : x.status === 'noreply' ? 'no answer' : 'Going' }))
+      .filter((x) => x.e);
+    const n = s ? s.came : 0, total = s ? s.counted : 0, noshow = s ? s.noshow : 0, noreply = s ? s.noreply : 0;
+    const declined = list.filter((x) => x.status === 'declined').length;
+    const pct = s ? s.pct : null;
     const last = S.events.filter((e) => ids.some((id) => e.attended.includes(id))).map((e) => e.start).sort().pop();
     return { owner, name: ownerName(owner), chars, n, total, noshow, noreply, declined, pct, band: pct === null ? 'none' : bandOf(pct, ls), last, bal: ids.reduce((a, id) => a + balance(id), 0), list };
   });
@@ -451,7 +456,7 @@ FORMS['att-starting'] = (f, fd) => {
 VIEWS.points = () => {
   const off = isOfficer(), ls = lootSettings(), q = UI.attQ.toLowerCase();
   const evs = attEvents(), days = UI.attDays === 'all' ? null : Number(UI.attDays);
-  const rows = attRows(evs).filter((r) => (!UI.attRole || r.chars.some((c) => c.role === UI.attRole)) && (!UI.attBand || r.band === UI.attBand)
+  const rows = attRows().filter((r) => (!UI.attRole || r.chars.some((c) => c.role === UI.attRole)) && (!UI.attBand || r.band === UI.attBand)
     && (!UI.attFlag || (UI.attFlag === 'noshow' ? r.noshow > 0 : r.noreply > 0)) && (!q || `${r.name} ${r.chars.map((c) => `${c.name} ${classOf(c)}`).join(' ')}`.toLowerCase().includes(q)));
   const sorts = {
     name: (a, b) => a.name.localeCompare(b.name),
@@ -511,7 +516,7 @@ VIEWS.points = () => {
 // leave-of-absence record, not something settable through a player's rsvp/attended on one event.
 const ATT_EDIT_OPTIONS = [['attended', 'Came'], ['noshow', 'No-show'], ['declined', "Said can't"], ['noreply', 'No reply']];
 ACTIONS['att-detail'] = (el, d) => {
-  const r = attRows(attEvents()).find((x) => x.owner === d.key);
+  const r = attRows().find((x) => x.owner === d.key);
   if (!r) return;
   const off = isOfficer();
   openDialog(`<h2>${esc(r.name)}</h2>
@@ -963,8 +968,12 @@ AFTER_RENDER.push((page) => {
 function attendanceTrackPanel() {
   if (!isOfficer()) return '';
   attDefaultEvent();
-  const mode = S.settings.attendanceMode === 'voice' ? 'voice' : 'pin';
+  const mode = S.settings.attendanceMode === 'voice' ? 'voice' : 'pin';           // the guild default - only shown as a label here
   const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  // Which controls to actually show follows the SELECTED event's own effective mode (its own override, if it
+  // has one, else the guild default above) - not just the guild default - so an event that overrides the
+  // guild's usual mode shows the right set of controls instead of a mismatched one.
+  const evMode = ev ? (ev.effectiveAttendanceMode === 'voice' ? 'voice' : 'pin') : mode;
   const { ongoing, upcoming, past } = attGroups();
   // A leading check mark on an option makes it obvious, scanning the whole list, which events already have a
   // saved attendance record (rolled(e), the same test the roster page and Attendance stats already use) without
@@ -978,8 +987,8 @@ function attendanceTrackPanel() {
         <div class="att-sect">
           <div class="att-mode-row">
             <div><div class="muted small">Tracking method (guild default)</div><div class="att-mode-label">${mode === 'voice' ? 'Voice Attendance Track' : 'PIN Attendance Track'}</div></div>
-            <button class="btn sm" data-act="att-mode-toggle">Switch to ${mode === 'voice' ? 'PIN' : 'Voice'}</button>
           </div>
+          <div class="muted small" style="margin-top:4px">Changed in Admin, under "Events: sign-ups, attendance and reminders" - this panel just follows whatever's set there.</div>
         </div>
         <div class="att-sect">
           <div class="field" style="margin:0"><label for="att-event-select">Event to track</label>
@@ -987,7 +996,7 @@ function attendanceTrackPanel() {
           </div>
           ${ev ? `<div style="margin-top:8px"><span class="st-pill ${evTracked ? 'st-approved' : 'st-open'}">${evTracked ? '✓ Attendance already tracked for this event' : 'Not yet tracked for this event'}</span></div>` : ''}
         </div>
-        ${mode === 'voice' && ev ? attVoiceControls(ev) : mode === 'voice' ? '<div class="att-sect muted small">No events to track yet - create one on the Events page.</div>' : '<div class="att-sect muted small">PIN attendance is in use - the attendance PIN for this event lives on the event\'s own page.</div>'}
+        ${!ev ? '<div class="att-sect muted small">No events to track yet - create one on the Events page.</div>' : evMode === 'voice' ? attVoiceControls(ev) : attPinControls(ev)}
       </div>
     </div>
   </div>`;
@@ -1032,7 +1041,12 @@ function attVoiceControls(ev) {
         ${dataItem(2, 'Did not show up', live.noShowCount)}
       </div></div>` : ''}`;
 }
-ACTIONS['att-mode-toggle'] = () => act(() => api('/api/settings', 'PUT', { attendanceMode: S.settings.attendanceMode === 'voice' ? 'pin' : 'voice' }), 'Tracking method changed');
+// PIN mode's counterpart to attVoiceControls above - used to be a dead end here ("the PIN lives on the
+// event's own page"), now it actually shows and drives the PIN for whichever event is picked above, through
+// the same pinControlsBlock(ev) the event's own page uses (app.js), so the two surfaces never drift apart.
+function attPinControls(ev) {
+  return `<div class="att-sect">${pinControlsBlock(ev)}</div>`;
+}
 CHANGES['att-event-pick'] = (el) => { AT.eventId = Number(el.value); AT.live = null; render(); };
 CHANGES['att-auto-toggle'] = (el) => {
   const evn = byId(S.events, Number(el.dataset.id));
@@ -1069,7 +1083,7 @@ VIEWS.dashboard = () => {
   const sideHasInfo = showInfo && !infoInLeadership;
   const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.png" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
     stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
