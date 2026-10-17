@@ -12,7 +12,7 @@ const { validTimeZone, zonedToUtcMs, matchesRule, occurrences, isoDate } = requi
 module.exports = function install(ctx) {
   const {
     route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, findMember, findEvent, normParties, applyPresetRule,
-    eventFor, pickMember, cleanLinks, syncAttendancePoints, hooks, tickHooks, clone, appUrl, nameOfOwner, LOOT_TYPES, LOOT_DEFAULT_TYPE,
+    eventFor, pickMember, cleanLinks, setAttended, hooks, tickHooks, clone, appUrl, nameOfOwner, LOOT_TYPES, LOOT_DEFAULT_TYPE,
     UPLOAD_DIR, publicBranding, pickEvent, audit,
   } = ctx;
   const db = () => ctx.db;                                   // the database object is replaced when a backup is restored
@@ -26,6 +26,7 @@ module.exports = function install(ctx) {
   const coaching = require('./server-coaching')(ctx);                                         // class coaches, student VODs and screenshots
   ctx.coaching = coaching;   // server-community.js's applicantState() needs this for guest coaches - set after install so the reference is there by the time anyone actually calls it, even though community itself was installed first
   const compliance = require('./server-compliance')(ctx);                                   // leave of absence, warnings, the event chart
+  ctx.reevaluateWarnings = compliance.reevaluateWarnings;   // setAttended() in server.js needs this for every writer, not just attendance-status - set after install so the reference is there by the time anyone actually calls it, same pattern as ctx.coaching above
 
   // Officer correction for one player's recorded result on one PAST event, from the Attendance page's
   // event-by-event list (public/features.js's att-detail dialog, clicking "Came"/"No-show"/etc. there) -
@@ -52,13 +53,21 @@ module.exports = function install(ctx) {
     need(pick, 400, 'Bad status.');
     const ids = D.members.filter((m) => m.owner === owner && m.active).map((m) => m.id);
     need(ids.length, 404, 'This player has no active characters.');
-    ev.attended = ev.attended.filter((id) => !ids.includes(id));
     for (const id of ids) delete ev.rsvps[id];
-    const primary = ids[0];                 // one consistent character carries the record - see the note above
+    const primary = ids[0];                 // one consistent character carries the rsvp - see the note above
     if (pick.rsvp) ev.rsvps[primary] = pick.rsvp;
-    if (pick.attended) ev.attended.push(primary);
-    ev.autoAttended = true;                 // an officer corrected it by hand - the automatic no-show fill-in must never touch this event again
-    syncAttendancePoints(ev);
+    // Marking "attended": if voice/PIN tracking already credited one of this owner's OTHER characters, leave
+    // that credit exactly where it is rather than yanking it onto the primary character - a mercenary with two
+    // active alts should not lose which alt actually showed up just because an officer corrected their RSVP
+    // status. Only fall back to crediting the primary when none of the owner's characters were already
+    // credited (also covers the overwhelming majority case: one active character per owner, same as before).
+    // Marking anything else ("No-show"/"Said can't"/"No reply"): clear ALL of the owner's active characters,
+    // same as always - there's no "which alt" question when nobody is credited.
+    const alreadyCredited = ids.some((id) => ev.attended.includes(id));
+    const next = pick.attended
+      ? (alreadyCredited ? ev.attended : [...ev.attended.filter((id) => !ids.includes(id)), primary])
+      : ev.attended.filter((id) => !ids.includes(id));
+    setAttended(ev, next, { mode: 'replace', by: user.name, skipReevaluate: true });
     audit(user, 'attendance.override', { type: 'event', id: ev.id, name: ev.title }, `${user.name} changed ${nameOfOwner(owner)}'s result for "${ev.title}" to "${ATT_EDIT_LABEL[body.status]}".`);
     const withdrawn = compliance.reevaluateWarnings(owner);
     save();
@@ -94,7 +103,9 @@ module.exports = function install(ctx) {
     const events = D.events.map((e) => {
       const out = eventFor(e, user);
       out.chart = compliance.eventChart(e, P);                // counts only: who is coming, who is not, who did not answer (per role)
-      out.rollTaken = e.attended.length > 0;                  // lets a member's own attendance % work without seeing who else came
+      // attendanceTracked (from eventFor's own spread of the event) already tells a member whether the roll
+      // was taken, with no need for a separate rollTaken field any more - it is never redacted, unlike attended
+      // just below, which is why a member's own attendance % used to need this as a stand-in in the first place.
       if (!off) { out.attended = e.attended.filter((id) => own.has(id)); if (hide('parties')) out.parties = []; }
       return out;
     });
@@ -460,6 +471,14 @@ module.exports = function install(ctx) {
       title: se.title || se.type, type: se.type, description: se.description, points: se.points, mandatory: se.mandatory, pinEnabled: se.pinEnabled,
       maxSignups: se.maxSignups, signupCloseMinutes: se.signupCloseMinutes, pinWindowMinutes: se.pinWindowMinutes, reminders: se.reminders,
       shotcallerAutoStart: se.shotcallerAutoStart,
+      // Per-event timing overrides (pickEvent's pinOffsetMinutes/voiceTrackStartOffsetMinutes) are copied from
+      // the series' own template the same way every other template field here is - a generated event's own
+      // copy, independently editable afterwards, not a live link back to the series - matching exactly how a
+      // hand-created event's copy comes from the guild default at creation time. Without this, a series-
+      // generated event never gets these fields at all (pickEvent, which normally fills them in, is never
+      // called for these events), and pinInfo()'s `ev.pinOffsetMinutes * 60000` turns into NaN -> an invalid
+      // Date -> a hard crash the moment anyone reads the event.
+      pinOffsetMinutes: se.pinOffsetMinutes, voiceTrackStartOffsetMinutes: se.voiceTrackStartOffsetMinutes,
     });
   };
   function materialize() {
@@ -468,7 +487,7 @@ module.exports = function install(ctx) {
     for (const se of D.series) {
       for (const occ of occurrences(se, t0, t0 + horizonMs())) {
         if (se.skipped.includes(occ.date) || D.events.some((e) => e.seriesId === se.id && e.seriesDate === occ.date)) continue;
-        const ev = { id: newId(), createdBy: se.createdBy, seriesId: se.id, seriesDate: occ.date, rsvps: {}, attended: [], parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], start: new Date(occ.startMs).toISOString() };
+        const ev = { id: newId(), createdBy: se.createdBy, seriesId: se.id, seriesDate: occ.date, rsvps: {}, attended: [], autoAttended: false, attendanceTracked: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], start: new Date(occ.startMs).toISOString() };
         applyTemplate(ev, se);
         applyPresetRule(ev);
         D.events.push(ev);

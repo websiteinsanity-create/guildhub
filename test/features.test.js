@@ -346,7 +346,7 @@ withServer('members only receive their own loot, attendance and points; the lead
   assert.deepEqual(seenByAnn.points.map((p) => p.memberId), [a.id]);
   const e = seenByAnn.events.find((x) => x.id === ev.id);
   assert.deepEqual(e.attended, [a.id], "a member sees only their own character in the attendance list");
-  assert.equal(e.rollTaken, true, 'but still knows that attendance was recorded');
+  assert.equal(e.attendanceTracked, true, 'but still knows that attendance was recorded');
   assert.equal(e.parties.length, 1);
   assert.equal((await state(s, 'officer')).loot.length, 2); assert.deepEqual((await state(s, 'officer')).events.find((x) => x.id === ev.id).attended.sort(), [a.id, b.id].sort());
   // hide sections

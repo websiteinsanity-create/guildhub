@@ -344,7 +344,10 @@ function voiceExtraChannelsField(selectedIds) {
   const known = new Set(SC_CHANNELS.map((c) => c.id));
   const stale = selectedIds.filter((id) => !known.has(id));
   const rows = SC_CHANNELS.concat(stale.map((id) => ({ id, name: `(channel ${id}, not found)` })));
-  return `<div class="scrollbox" style="max-height:160px">${rows.map((c) => `<label class="tagpick"><input type="checkbox" name="vtxc" value="${esc(c.id)}" ${selectedIds.includes(c.id) ? 'checked' : ''}> 🔊 ${esc(c.name)}</label>`).join('') || '<span class="muted small">No voice channels found.</span>'}</div>`;
+  // A guild with a lot of voice channels can have long, similar-looking names - fixed to a one-line, truncated
+  // row (chan-pick-box below) so every row is the same height and the box reliably shows about 6 of them
+  // before it needs to scroll, instead of ballooning whenever a name happens to wrap onto two lines.
+  return `<div class="scrollbox chan-pick-box">${rows.map((c) => `<label class="tagpick"><input type="checkbox" name="vtxc" value="${esc(c.id)}" ${selectedIds.includes(c.id) ? 'checked' : ''}><span class="chan-name" title="${esc(c.name)}">🔊 ${esc(c.name)}</span></label>`).join('') || '<span class="muted small">No voice channels found.</span>'}</div>`;
 }
 
 /* ---------------------------------------------------------------- Admin > Testing: a live voice-attendance dry-run */

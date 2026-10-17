@@ -54,17 +54,38 @@ module.exports = function install(ctx) {
   //   came     one of their characters attended
   //   noshow   said Going with a character, but none of them came
   //   noreply  never answered Going or Can't with any character
+  // Earliest joinedAt across all of a player's characters (adding an alt later should not push their "joined"
+  // date forward), falling back to "always joined" (no filtering) for any character missing joinedAt
+  // entirely, which only pre-dates this field, not a real player. Shared by playerStats and lootStats below -
+  // this is one of the filtering rules the loot panel used to skip entirely (see lootPanel() in app.js before
+  // the attendance rework), silently judging a brand-new member on events from before they even joined.
+  function earliestJoinedAt(chars) {
+    const t = chars.map((x) => Date.parse(x.joinedAt)).filter(Number.isFinite);
+    return t.length ? Math.min(...t) : -Infinity;
+  }
+  // Resolves one event's outcome for one player (identified by all of their character ids) - "did they come,
+  // no-show, decline, or never answer." The one piece of per-event logic every attendance-percentage surface
+  // in the app needs and used to reimplement slightly differently (see the attendance rework's plan): the
+  // compliance page's playerStats below, the loot panel's lootStats below it, and the Attendance page's
+  // per-owner rows all resolve each event through this same function now, over whatever event list and
+  // window each of those callers has already decided on - this function itself has no opinion about windows,
+  // mandatory-only, or leave-of-absence; callers filter their own event list before calling it, except for
+  // leave-of-absence, which both current callers want identically, so it's handled once here.
+  function resolveOutcome(owner, ids, e) {
+    if (isOnLeave(owner, Date.parse(e.start))) return { status: 'leave', replied: true };
+    const answers = ids.map((id) => e.rsvps[id]), going = answers.includes('yes'), no = answers.includes('no'), attended = ids.some((id) => e.attended.includes(id));
+    const replied = going || no;
+    const status = attended ? 'attended' : going ? 'noshow' : no ? 'declined' : 'noreply';
+    return { status, replied };
+  }
   function playerStats(owner, chars, t = Date.now()) {
     const c = cfg(), from = t - c.windowDays * 864e5;
     const ids = chars.map((x) => x.id);
     // Never judge a player on an event that happened before they had any character in the guild at all - they
     // could not possibly have answered or shown up to something that predates their own joinedAt, so it isn't a
     // real no-reply/no-show, just an artifact of a rolling lookback window reaching back further than this
-    // player has existed. Uses the EARLIEST joinedAt across all of a player's characters (adding an alt later
-    // should not push their "joined" date forward), and falls back to "always joined" (no filtering - the old
-    // behavior) for any character missing joinedAt entirely, which only pre-dates this field, not a real player.
-    const joinTimes = chars.map((x) => Date.parse(x.joinedAt)).filter(Number.isFinite);
-    const joinedAt = joinTimes.length ? Math.min(...joinTimes) : -Infinity;
+    // player has existed.
+    const joinedAt = earliestJoinedAt(chars);
     // An event only counts once its attendance is final - event start plus the configured delay - not merely
     // once it is in the past. Judging it the moment it starts (or as soon as one person happens to check in)
     // would catch players still inside their own valid PIN window and wrongly call them a no-show.
@@ -72,14 +93,12 @@ module.exports = function install(ctx) {
     const list = [];
     let counted = 0, came = 0, noshow = 0, noreply = 0;
     for (const e of events) {
-      if (isOnLeave(owner, Date.parse(e.start))) { list.push({ ev: e, status: 'leave', replied: true }); continue; }
+      const r = resolveOutcome(owner, ids, e);
+      if (r.status === 'leave') { list.push({ ev: e, ...r }); continue; }
       counted++;
-      const answers = ids.map((id) => e.rsvps[id]), going = answers.includes('yes'), no = answers.includes('no'), attended = ids.some((id) => e.attended.includes(id));
-      const replied = going || no;
-      if (!replied) noreply++;
-      let status;
-      if (attended) { status = 'attended'; came++; } else if (going) { status = 'noshow'; noshow++; } else if (no) status = 'declined'; else status = 'noreply';
-      list.push({ ev: e, status, replied });
+      if (!r.replied) noreply++;
+      if (r.status === 'attended') came++; else if (r.status === 'noshow') noshow++;
+      list.push({ ev: e, ...r });
     }
     // A migration aid: a still-decaying starting baseline (see virtualAttendanceFor above) blends in here
     // alongside the real counted/came - counted and came themselves stay real-only (used as-is for no-show and
@@ -90,6 +109,29 @@ module.exports = function install(ctx) {
     const blendedCounted = counted + virtual.events, blendedCame = came + virtual.came;
     const pct = blendedCounted > 0 ? Math.floor(100 * blendedCame / blendedCounted) : null;
     return { counted, came, noshow, noreply, pct, list, virtualActive: virtual.active };
+  }
+  // The loot panel's own version of the same computation - same per-event resolution and leave-of-absence/
+  // join-date rules as playerStats above, but over the loot window (an explicit [fromMs, toMs) the caller
+  // already worked out from the guild's own loot settings, not compliance's windowDays) and without
+  // compliance's finalAfterMinutes "only judge it once it's truly over" delay, matching how the loot panel has
+  // always judged an event the moment it starts, not some minutes after. Also blends in the same decaying
+  // starting-attendance baseline as playerStats, so a freshly-migrated guild sees consistent numbers on both
+  // pages, not just on Compliance.
+  function lootStats(owner, chars, { fromMs, toMs, mandatoryOnly = true }, t = Date.now()) {
+    const ids = chars.map((x) => x.id);
+    const joinedAt = earliestJoinedAt(chars);
+    const events = db().events.filter((e) => { const s = Date.parse(e.start); return s >= fromMs && s < toMs && s <= t && s >= joinedAt && (!mandatoryOnly || e.mandatory); });
+    let counted = 0, came = 0;
+    for (const e of events) {
+      const r = resolveOutcome(owner, ids, e);
+      if (r.status === 'leave') continue;
+      counted++;
+      if (r.status === 'attended') came++;
+    }
+    const virtual = virtualAttendanceFor(owner, t);
+    const blendedCounted = counted + virtual.events, blendedCame = came + virtual.came;
+    const pct = blendedCounted > 0 ? Math.floor(100 * blendedCame / blendedCounted) : null;
+    return { counted, came, pct, virtualActive: virtual.active };
   }
 
   function triggersFor(s) {
@@ -223,6 +265,56 @@ module.exports = function install(ctx) {
     return { roles, total };
   }
 
+  // One server-side source of truth for "what's this player's attendance percentage", for every surface that
+  // used to compute its own (the Attendance page, the member profile card, the loot panel) - see playerStats
+  // and lootStats above. Three ways to call it:
+  //   - no params: compliance's own rolling window (playerStats) - the roster "Standing" column, the points/
+  //     attendance pages, the member profile card.
+  //   - ?from=<ms>&to=<ms>[&mandatoryOnly=0]: the loot panel's own window (lootStats), picked locally from its
+  //     own date picker and the browser's "today", neither of which this server can guess.
+  //   - ?windowDays=<n|all>&mandatoryOnly=<0|1>: the Attendance page's own adjustable period and mandatory-
+  //     only toggle - a custom window compliance's configured one does not apply to (and does not touch), still
+  //     judged through the exact same resolveOutcome() as every other reading, plus a `list` of per-event
+  //     outcomes (event id only - the client already has the full event from /api/state) for its drill-down.
+  //     Only ever counts events attendance was actually taken for, same as the client's own rolled()/
+  //     attendanceTracked check used to.
+  // A plain member only ever gets their own row; an officer gets everyone's.
+  route('GET', '/api/attendance-stats', ({ query, user }) => {
+    const off = isOfficer(user), P = players(), t = Date.now();
+    const owners = off ? [...P.keys()] : (P.has(user.key) ? [user.key] : []);
+    const useLoot = query && query.from && query.to;
+    const useCustom = !useLoot && query && (query.windowDays !== undefined || query.mandatoryOnly !== undefined);
+    const fromMs = useLoot ? Number(query.from) : null, toMs = useLoot ? Number(query.to) : null;
+    const lootMandatoryOnly = useLoot ? query.mandatoryOnly !== '0' : undefined;
+    const customDays = useCustom && query.windowDays !== 'all' ? Number(query.windowDays) : null;
+    const customFrom = customDays ? t - customDays * 864e5 : -Infinity;
+    const customMandatoryOnly = useCustom && query.mandatoryOnly === '1';
+    return owners.map((owner) => {
+      const chars = P.get(owner) || [];
+      if (useLoot) {
+        const s = lootStats(owner, chars, { fromMs, toMs, mandatoryOnly: lootMandatoryOnly }, t);
+        return { owner, name: nameOf(owner), pct: s.pct, counted: s.counted, came: s.came, noshow: null, noreply: null, virtualActive: s.virtualActive };
+      }
+      if (useCustom) {
+        const ids = chars.map((x) => x.id);
+        const joinedAt = earliestJoinedAt(chars);
+        const events = db().events.filter((e) => e.attendanceTracked && Date.parse(e.start) < t && Date.parse(e.start) >= customFrom && Date.parse(e.start) >= joinedAt && (!customMandatoryOnly || e.mandatory));
+        let counted = 0, came = 0, noshow = 0, noreply = 0; const list = [];
+        for (const e of events) {
+          const r = resolveOutcome(owner, ids, e);
+          if (r.status !== 'leave') { counted++; if (!r.replied) noreply++; if (r.status === 'attended') came++; else if (r.status === 'noshow') noshow++; }
+          list.push({ id: e.id, status: r.status, replied: r.replied });
+        }
+        const virtual = virtualAttendanceFor(owner, t);
+        const blendedCounted = counted + virtual.events, blendedCame = came + virtual.came;
+        const pct = blendedCounted > 0 ? Math.floor(100 * blendedCame / blendedCounted) : null;
+        return { owner, name: nameOf(owner), pct, counted, came, noshow, noreply, virtualActive: virtual.active, list };
+      }
+      const s = playerStats(owner, chars, t);
+      return { owner, name: nameOf(owner), pct: s.pct, counted: s.counted, came: s.came, noshow: s.noshow ?? null, noreply: s.noreply ?? null, virtualActive: s.virtualActive };
+    });
+  });
+
   // ---------------------------------------------------------------- leave of absence
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d + 'T00:00:00Z'));
   route('POST', '/api/leaves', ({ body, user }) => {
@@ -349,5 +441,5 @@ module.exports = function install(ctx) {
       alert: off ? null : (() => { const a = alertFor(user.key); if (a) delete a.upTo; return a; })(),
     };
   }
-  return { extraState, eventChart, players, runChecks, isOnLeave, reevaluateWarnings };
+  return { extraState, eventChart, players, runChecks, isOnLeave, reevaluateWarnings, playerStats, lootStats, virtualAttendanceFor };
 };

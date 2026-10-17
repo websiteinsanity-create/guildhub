@@ -8,7 +8,7 @@
 // Guild Hall already knows its own Discord server and there is no reason to ask for that twice.
 
 module.exports = function install(ctx) {
-  const { route, need, HttpError, save, audit, shotcaller, findMember, findEvent, eventFor, syncAttendancePoints, partyIsPlaceholder } = ctx;
+  const { route, need, HttpError, save, audit, shotcaller, findMember, findEvent, eventFor, setAttended, partyIsPlaceholder } = ctx;
   const db = () => ctx.db;
   const yes = (v) => v === true || v === 'true';
   const configured = () => !!(shotcaller.url && shotcaller.apiKey && shotcaller.guildId);
@@ -214,6 +214,31 @@ module.exports = function install(ctx) {
     return eventFor(ev, user);
   }, { officer: true });
 
+  // "Track again" on the event page's voice panel: wipes this event's attendance all the way back to before
+  // it was EVER tracked (not just whatever voice tracking itself credited - any hand correction an officer made
+  // on the roster too), then immediately starts a fresh track exactly as /voice-track/start above does. Restores
+  // from the one-shot attendanceUndo snapshot setAttended() takes on its very first write to this event, from
+  // whichever source wrote first (voice, PIN, or a roster save) - so there is always something to restore to,
+  // even for an event only voice tracking ever touched. Clears that snapshot afterwards so the fresh pass gets
+  // its own, and beginVoiceTracking's own full replace of ev.voiceTracking naturally discards the old sighting
+  // data (the "seen" popup log included) for the new pass to start building from scratch.
+  route('POST', '/api/events/:id/voice-track/restart', async ({ user, params }) => {
+    const ev = findEvent(params.id);
+    need(ev, 404, 'Event not found.');
+    need(ctx.effectiveAttendanceMode(ev) === 'voice', 400, 'This event is not using voice tracking.');
+    const status = await callSession('');
+    need(status && status.active, 409, 'Shotcaller is not running right now - start it first, then come back and start tracking.');
+    const undo = ev.attendanceUndo;
+    ev.attended = undo ? [...undo.attended] : [];
+    ev.autoAttended = undo ? undo.autoAttended : false;
+    ev.attendanceTracked = undo ? (undo.attendanceTracked === undefined ? false : undo.attendanceTracked) : false;
+    ev.attendanceUndo = null;
+    const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+    beginVoiceTracking(ev, status, realRest);
+    audit(user, 'event.voicetrack.restart', { type: 'event', id: ev.id, name: ev.title }, `${user.name} reset and restarted voice-attendance tracking for "${ev.title}".`);
+    return eventFor(ev, user);
+  }, { officer: true });
+
   // The dashboard's "Save track" button (and its 15-minute auto-save fallback above) - a bookkeeping close-out,
   // not where the attendance itself lives (every sighting was already committed to ev.attended the moment
   // pollVoiceAttendance confirmed it). Safe to call more than once or after the auto-save already fired;
@@ -301,8 +326,11 @@ module.exports = function install(ctx) {
     const ignoreMuted = !!settings.voiceAttendanceIgnoreMuted;
     const ignoreDeafened = !!settings.voiceAttendanceIgnoreDeafened;
     const byChannel = new Map();
+    const rawByChannel = new Map();   // channelId -> every raw connected state (mute/deaf included), BEFORE the ignoreMuted/ignoreDeafened filter - for the "who got tracked, muted or not" popup, which needs to show everyone seen, not just who was eligible to be credited
     for (const p of status.parties || []) {
-      byChannel.set(p.channelId, presentIds(p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id })), ignoreMuted, ignoreDeafened));
+      const states = p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id }));
+      rawByChannel.set(p.channelId, states);
+      byChannel.set(p.channelId, presentIds(states, ignoreMuted, ignoreDeafened));
     }
     // Extra channels - the guild-wide list (Admin > Events) plus whatever each individually tracked event adds
     // of its own (its own "Voice channel tracking" picker) - are never part of the session itself, so they're
@@ -313,18 +341,24 @@ module.exports = function install(ctx) {
     const allExtraIds = new Set(globalExtraIds);
     for (const ev of tracked) for (const id of ev.voiceTrackExtraChannelIds || []) if (id) allExtraIds.add(id);
     const extraPresence = new Map();     // channelId -> Set of owner ids present in it
+    const rawExtraByChannel = new Map();   // channelId -> raw connected states, same reason as rawByChannel above
     if (allExtraIds.size) {
       try {
         const r = await callBot(`/voice-presence?channels=${[...allExtraIds].map(encodeURIComponent).join(',')}`);
-        for (const c of r.channels || []) if (c.found) extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened));
+        for (const c of r.channels || []) if (c.found) { rawExtraByChannel.set(c.channelId, c.connectedStates || []); extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened)); }
       } catch { /* extra channels are a bonus, not a reason to skip the party channels below */ }
     }
     const unionOf = (ids) => { const s = new Set(); for (const id of ids) for (const owner of extraPresence.get(id) || []) s.add(owner); return s; };
+    const rawUnionOf = (ids) => { const out = []; for (const id of ids) for (const s of rawExtraByChannel.get(id) || []) out.push(s); return out; };
     const globalExtraSet = unionOf(globalExtraIds);
-    const offsetMs = (Number(settings.voiceTrackStartOffsetMinutes) || 0) * 60000;
+    const globalExtraRaw = rawUnionOf(globalExtraIds);
     const now = Date.now();
     let anyChanged = false;
     for (const ev of tracked) {
+      // Per-event override (same idea as pinOffsetMinutes) - copied from the guild default the first time this
+      // event was saved, independently editable after, so one event's voice tracking can open earlier or later
+      // than the guild's usual lead time without changing it for everyone else.
+      const offsetMs = (Number(ev.voiceTrackStartOffsetMinutes ?? settings.voiceTrackStartOffsetMinutes) || 0) * 60000;
       if (now < Date.parse(ev.start) + offsetMs) continue; // tracking hasn't opened yet for this event
       const evExtraIds = ev.voiceTrackExtraChannelIds || [];
       const evExtraSet = evExtraIds.length ? new Set([...globalExtraSet, ...unionOf(evExtraIds)]) : globalExtraSet;
@@ -338,7 +372,8 @@ module.exports = function install(ctx) {
       // it, and not whether the character was ever placed into a party at all.
       const sessionOwners = new Set(evExtraSet);
       for (const pc of ev.voiceTracking.partyChannels) for (const owner of (byChannel.get(pc.channelId) || [])) sessionOwners.add(owner);
-      let evChanged = false;
+      const newlyCredited = [];
+      const creditedOwnerOf = new Map();   // memberId -> owner id, for the raw sighting pass below
       for (const ownerId of sessionOwners) {
         // Whoever currently plays that owner's one active character gets the credit - or, if nobody active
         // matches, whichever mercenary character this guild brought in under that owner specifically for this
@@ -353,9 +388,37 @@ module.exports = function install(ctx) {
         const times = (ev.voiceTracking.seenAt[m.id] = ev.voiceTracking.seenAt[m.id] || []);
         times.push(now);
         while (times.length && now - times[0] > 30000) times.shift();
-        if (times.length >= 2 && !ev.attended.includes(m.id)) { ev.attended.push(m.id); evChanged = true; }
+        if (times.length >= 2 && !ev.attended.includes(m.id)) { newlyCredited.push(m.id); creditedOwnerOf.set(m.id, ownerId); }
       }
-      if (evChanged) { syncAttendancePoints(ev); anyChanged = true; }
+      // One setAttended call per event per poll tick, not one per member - a burst of sightings in a single
+      // 10s tick is one points-sync and one reevaluateWarnings pass per affected owner, not N of them.
+      if (newlyCredited.length) { setAttended(ev, [...ev.attended, ...newlyCredited], { mode: 'add', by: 'Voice tracking (automatic)' }); anyChanged = true; }
+      // The "who got tracked" popup's own log: every raw sighting this poll, muted/deafened included, for
+      // anyone present in ANY of this event's channels - not just the ones the ignoreMuted/ignoreDeafened
+      // settings would actually credit. Reset to {} on every beginVoiceTracking (a fresh ev.voiceTracking
+      // object each time), so "Track again" naturally clears it too. muted/deafened/lastSeenAt keep updating
+      // every poll for as long as someone is visible; mutedAtCredit/deafenedAtCredit are captured once, the
+      // instant credited flips true, and then frozen - "state at the moment they were credited," not live.
+      ev.voiceTracking.seen = ev.voiceTracking.seen || {};
+      const rawEvExtra = evExtraIds.length ? [...globalExtraRaw, ...rawUnionOf(evExtraIds)] : globalExtraRaw;
+      const rawStates = [...rawEvExtra];
+      for (const pc of ev.voiceTracking.partyChannels) for (const s of (rawByChannel.get(pc.channelId) || [])) rawStates.push(s);
+      for (const s of rawStates) {
+        const ownerId = s.id;
+        const m = db().members.find((x) => x.owner === ownerId && x.active) || db().members.find((x) => x.owner === ownerId && x.mercenary && x.mercFor === ev.id);
+        const entry = (ev.voiceTracking.seen[ownerId] = ev.voiceTracking.seen[ownerId] || { credited: false });
+        entry.lastSeenAt = now;
+        entry.muted = !!s.mute;
+        entry.deafened = !!s.deaf;
+        entry.memberId = m ? m.id : null;
+        entry.memberName = m ? m.name : null;
+        if (!entry.credited && m && creditedOwnerOf.get(m.id) === ownerId) {
+          entry.credited = true;
+          entry.mutedAtCredit = !!s.mute;
+          entry.deafenedAtCredit = !!s.deaf;
+        }
+      }
+      if (rawStates.length) anyChanged = true;   // the seen log's lastSeenAt/muted/deafened keep moving even when nobody new gets credited this poll
     }
     if (anyChanged) save();
   }

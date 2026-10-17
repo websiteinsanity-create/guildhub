@@ -166,7 +166,10 @@ test('the attendance PIN goes to party leaders and leadership only; players type
   assert.equal((await call('/api/events/' + ev.id + '/pin', 'POST', { memberId: dee.id, pin: '0000' }, 'D')).status, 409, 'no PIN yet');
 
   fake.state.dms.length = 0;
-  assert.equal((await call('/api/settings', 'PUT', { pinOffsetMinutes: -10 }, 'A')).status, 200);     // the PIN is now due
+  // pinOffsetMinutes is a per-event override now (copied from the guild default once, at creation, then
+  // independent of it) - so making the PIN due "now" means editing THIS event's own copy, not the guild-wide
+  // setting, which this already-created event no longer follows.
+  assert.equal((await call('/api/events/' + ev.id, 'PUT', { title: ev.title, type: ev.type, start: ev.start, pinWindowMinutes: 10, pinEnabled: true, pinOffsetMinutes: -10 }, 'A')).status, 200);     // the PIN is now due
   const withPin = await waitFor(async () => (await state('A')).events.find((e) => e.id === ev.id && e.pin));
   const code = withPin.pin.code;
   assert.match(code, /^\d{4}$/);

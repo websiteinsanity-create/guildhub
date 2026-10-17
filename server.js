@@ -415,6 +415,18 @@ function migrate() {
     // Event from before the PIN could be switched off for a non-mandatory event on its own: it follows whatever
     // Mandatory already was, same as the default for a brand new event does.
     if (ev.pinEnabled === undefined) ev.pinEnabled = !!ev.mandatory;
+    // Event from before attendanceTracked existed: reproduce exactly what rolled()'s old attended.length>0
+    // heuristic would have said, so nothing flips state just from upgrading - a zero-attendee hand roll call
+    // from before this field existed genuinely can't be told apart from "never tracked" after the fact, but
+    // every event that already had ANY signal (a real attendee, a hand correction, a PIN entry, or a voice
+    // track ever having run) keeps reading as tracked, same as it always has.
+    if (ev.attendanceTracked === undefined) {
+      ev.attendanceTracked = !!(ev.autoAttended || (ev.attended && ev.attended.length) || (ev.pinEntries && Object.keys(ev.pinEntries).length) || ev.voiceTracking);
+    }
+    // Event from before per-event timing overrides existed: inherit the guild default at migration time,
+    // same as pinWindowMinutes/signupCloseMinutes already do a few lines up.
+    if (ev.pinOffsetMinutes === undefined) ev.pinOffsetMinutes = db.settings.pinOffsetMinutes;
+    if (ev.voiceTrackStartOffsetMinutes === undefined) ev.voiceTrackStartOffsetMinutes = db.settings.voiceTrackStartOffsetMinutes;
   }
 }
 migrate();
@@ -492,6 +504,68 @@ function syncAttendancePoints(ev) {
   }
 }
 
+// The single place every attendance write goes through - roster-save, a PIN entry, a voice-tracking sighting,
+// tick()'s no-PIN auto-attend fallback, and the Attendance page's owner-level correction all used to mutate
+// ev.attended directly, each with its own slightly different bookkeeping (some set autoAttended, some didn't;
+// only one of them ever re-checked whether an existing warning was still justified afterward). This is that
+// bookkeeping, done once, the same way, for every one of them:
+//   - mode: 'replace' (roster-save, the Attendance-page correction) fully replaces ev.attended and marks the
+//     event as hand-corrected (autoAttended=true), so tick()'s automatic fallback never touches it again.
+//   - mode: 'add' (a PIN entry, a voice sighting, the fallback itself) only ever grows the list, exactly as
+//     each of those always did on their own - autoAttended is left alone.
+//   - ev.attendanceTracked is always set true, even if the resulting list is empty - a deliberate, hand-taken
+//     "nobody came" roll call is still "tracked," which attended.length>0 alone could never represent (see
+//     rolled() client-side, which used to have no other way to tell the two apart).
+//   - the one-shot "before this event was EVER tracked" snapshot (attendanceUndo, used by "Undo all saved
+//     attendance" and voice tracking's "Track again") is taken here too, by whichever writer gets here FIRST
+//     in a tracking pass - not just roster-save any more - so both of those restore actions always have
+//     something real to go back to, no matter which source (voice, PIN, or a hand-typed roll call) started
+//     this pass. savedAt/savedBy keep refreshing on every call after that, same as before.
+//   - every owner whose attendance actually changed this call gets reevaluateWarnings() - a correction from
+//     ANY source can now withdraw a no-longer-justified automatic warning, not just the Attendance page's own
+//     dedicated correction route.
+// Deliberately does not call audit.log or save() itself: the audit message text differs meaningfully per
+// source, and PIN/voice already batch several members' state into one save() at the end of a loop rather
+// than one per member - keeping those at the call site keeps this function a pure, easily-testable mutation
+// of ev with no side effects beyond that.
+function setAttended(ev, characterIds, { mode, by, skipReevaluate = false }) {
+  const next = [...new Set(characterIds)];
+  const before = ev.attended || [];
+  const changed = before.length !== next.length || !before.every((id) => next.includes(id)) || !next.every((id) => before.includes(id));
+  if (!ev.attendanceUndo) {
+    ev.attendanceUndo = { attended: [...before], autoAttended: ev.autoAttended, attendanceTracked: ev.attendanceTracked, savedAt: new Date().toISOString(), savedBy: by };
+  } else {
+    ev.attendanceUndo.savedAt = new Date().toISOString();
+    ev.attendanceUndo.savedBy = by;
+  }
+  ev.attended = next;
+  ev.attendanceTracked = true;
+  if (mode === 'replace') ev.autoAttended = true;
+  // A roster-save (mode 'replace') is a deliberate, infrequent, human action - always re-sync its points, even
+  // when the id list happens to come out the same as before, because points can also depend on settings that
+  // changed in between two saves (pointsEnabled toggled off and back on with the same roster resubmitted, say)
+  // which the "did the attended set change" check below has no way to see. The additive writers (PIN, the voice
+  // poller's own 10s tick, the no-PIN fallback) are the ones this guard exists for - they call setAttended far
+  // more often, usually with nothing new to report, and syncing/reevaluating on every single poll regardless
+  // is the performance risk flagged for pin-load/mega-stress.
+  if (changed || mode === 'replace') {
+    syncAttendancePoints(ev);
+    // skipReevaluate: for a caller that needs the withdrawn-warnings LIST (not just a reevaluation side effect) -
+    // e.g. attendance-status in server-features.js also changes rsvps, which reevaluateWarnings cares about just
+    // as much as attended does, so that route calls reevaluateWarnings itself, once, after everything (rsvp AND
+    // attended) has been mutated, and reports what it returns. Calling it a second time here would find nothing
+    // left to withdraw (reevaluateWarnings is idempotent) and silently zero out that route's own return value.
+    if (!skipReevaluate) {
+      const changedIds = [...before.filter((id) => !next.includes(id)), ...next.filter((id) => !before.includes(id))];
+      const owners = new Set();
+      for (const id of changedIds) { const m = findMember(id); if (m) owners.add(m.owner); }
+      if (mode === 'replace') for (const id of next) { const m = findMember(id); if (m) owners.add(m.owner); }   // a same-roster resave can still need reevaluating, same reasoning as the points re-sync above
+      for (const owner of owners) { try { featuresCtx.reevaluateWarnings && featuresCtx.reevaluateWarnings(owner); } catch { /* a warnings glitch must never block an attendance save */ } }
+    }
+  }
+  return changed;
+}
+
 // ---------- routes ----------
 const routes = [];
 const route = (method, pattern, handler, { auth = true, officer = false, applicant = false } = {}) => {
@@ -532,7 +606,7 @@ route('GET', '/api/config', () => ({ ...config, version: pkg.version, authMode: 
 const closeAt = (ev) => Date.parse(ev.start) - (ev.signupCloseMinutes ?? db.settings.signupCloseDefault) * 60000;
 function pinInfo(ev) {
   const start = Date.parse(ev.start), win = ev.pinWindowMinutes * 60000;
-  const scheduledAt = new Date(start + db.settings.pinOffsetMinutes * 60000).toISOString();
+  const scheduledAt = new Date(start + ev.pinOffsetMinutes * 60000).toISOString();
   // enabled: true unless an officer switched the PIN off for this specific event - tells the client there is no
   // point waiting for one here, rather than showing "not activated yet" until enough time has passed to give up.
   if (!ev.pin) return { state: 'pending', scheduledAt, windowMinutes: ev.pinWindowMinutes, enabled: !!ev.pinEnabled };
@@ -541,7 +615,9 @@ function pinInfo(ev) {
 }
 // Officers get the whole event. Everybody else gets it without the PIN itself.
 function eventFor(ev, user) {
-  const out = { ...ev, pinInfo: pinInfo(ev), signupClosesAt: new Date(closeAt(ev)).toISOString() };
+  // Computed once, here, so no client surface has to reimplement effectiveAttendanceMode()'s
+  // override-vs-guild-default logic itself (part of the attendance-tracking consolidation).
+  const out = { ...ev, pinInfo: pinInfo(ev), signupClosesAt: new Date(closeAt(ev)).toISOString(), effectiveAttendanceMode: effectiveAttendanceMode(ev) };
   if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; delete out.voiceTracking; delete out.attendanceUndo; }
   else {
     // Officers get just enough to show "Undo all saved attendance (last touched 2 minutes ago by Ash)" - the
@@ -679,6 +755,12 @@ function pickEvent(b, ex) {
     voiceTrackExtraChannelIds: Array.isArray(b.voiceTrackExtraChannelIds)
       ? [...new Set(b.voiceTrackExtraChannelIds.map((x) => String(x)))].filter((id) => /^\d{15,25}$/.test(id))
       : (ex ? ex.voiceTrackExtraChannelIds || [] : []),
+    // Per-event timing, same pattern as pinWindowMinutes above: copied from the guild default the first time
+    // this event is saved, then independently editable from then on - NOT a live-following sentinel like
+    // attendanceModeOverride's 'default'. Lets one event's PIN open earlier/later, or voice tracking's
+    // crediting window open earlier/later, without moving every other event's timing too.
+    pinOffsetMinutes: int(b.pinOffsetMinutes, ex ? ex.pinOffsetMinutes : db.settings.pinOffsetMinutes, -1440, 1440),
+    voiceTrackStartOffsetMinutes: int(b.voiceTrackStartOffsetMinutes, ex ? ex.voiceTrackStartOffsetMinutes : db.settings.voiceTrackStartOffsetMinutes, -1440, 1440),
   };
 }
 // What actually governs this one event: its own override if it has one, otherwise the guild-wide default.
@@ -697,7 +779,7 @@ function applyPresetRule(ev) {
   if (p) ev.parties = normParties(clone(p.parties));
 }
 route('POST', '/api/events', ({ body, user }) => {
-  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
+  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceTracked: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
   applyPresetRule(ev);
   db.events.push(ev);
   audit.log(user, 'event.create', { type: 'event', id: ev.id, name: ev.title }, `${user.name} created the event "${ev.title}" (${ev.type}, ${ev.start}).`);
@@ -772,25 +854,7 @@ route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
   const ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
-  // Snapshot what this event's attendance looked like before it was EVER tracked (blank, almost always -
-  // whatever ev.attended/autoAttended were the first time this route ever ran for this event), so "Undo" can
-  // always put it all the way back, no matter how many corrections happened in between - one escape hatch
-  // back to "never tracked", not a step-by-step history. Only captured once: a second, third, etc. save in the
-  // same tracking pass leaves the restore target alone and just refreshes who/when it was last touched, so the
-  // undo button's "made by ... just now" stays accurate to the most recent save even though what it restores
-  // does not change. A fresh snapshot is only taken again after an undo actually clears this (or the event is
-  // brand new), i.e. the next time tracking starts from scratch. syncAttendancePoints is purely derived from
-  // ev.attended (see its own comment), so restoring attended/autoAttended and re-running it is enough to undo
-  // the points side effects too, with no separate ledger snapshot needed.
-  ev.attendanceUndo = {
-    attended: ev.attendanceUndo ? ev.attendanceUndo.attended : [...ev.attended],
-    autoAttended: ev.attendanceUndo ? ev.attendanceUndo.autoAttended : ev.autoAttended,
-    savedAt: new Date().toISOString(),
-    savedBy: user.name,
-  };
-  ev.attended = [...new Set(ids)];
-  ev.autoAttended = true;   // an officer took the roll by hand - the automatic fill-in (see tick()) must never touch this event again
-  syncAttendancePoints(ev);
+  setAttended(ev, ids, { mode: 'replace', by: user.name });
   audit.log(user, 'attendance.record', { type: 'event', id: ev.id, name: ev.title }, `${user.name} recorded attendance for "${ev.title}": ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
   save();
   return eventFor(ev, user);
@@ -806,10 +870,21 @@ route('POST', '/api/events/:id/attendance/undo', ({ params, user }) => {
   need(ev, 404, 'Event not found.');
   const undo = ev.attendanceUndo;
   need(undo, 400, 'Nothing to undo - this event\'s attendance has not been saved since it was last opened, or was already undone.');
+  const before = ev.attended;
   ev.attended = [...undo.attended];
   ev.autoAttended = undo.autoAttended;
+  // Snapshots taken before this field existed (see migrate()) won't have it - treat those as "untracked"
+  // rather than leaving the pill stuck on whatever it happened to read before the undo.
+  ev.attendanceTracked = undo.attendanceTracked === undefined ? false : undo.attendanceTracked;
   ev.attendanceUndo = null;
   syncAttendancePoints(ev);
+  // Same reevaluation setAttended() does for every other writer - an undo can just as easily make a warning
+  // newly justified again (restoring a no-show) as withdraw one (restoring an attendee), so every owner whose
+  // credit actually changed gets checked, not just the ones who lost it.
+  const changedIds = [...before.filter((id) => !ev.attended.includes(id)), ...ev.attended.filter((id) => !before.includes(id))];
+  const changedOwners = new Set();
+  for (const id of changedIds) { const m = findMember(id); if (m) changedOwners.add(m.owner); }
+  for (const owner of changedOwners) { try { featuresCtx.reevaluateWarnings && featuresCtx.reevaluateWarnings(owner); } catch { /* never block the undo over this */ } }
   audit.log(user, 'attendance.undo', { type: 'event', id: ev.id, name: ev.title }, `${user.name} undid all saved attendance for "${ev.title}" back to before it was tracked (last touched by ${undo.savedBy}), back to ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
   save();
   return eventFor(ev, user);
@@ -1390,7 +1465,7 @@ async function tick() {
       // server-shotcaller.js) - the PIN system stays fully intact underneath (an officer can still send one by
       // hand any time), but nothing auto-sends one, so a player never sees a PIN window open for an event this
       // guild isn't using the PIN for any more.
-      if (!ev.pin && !ev.pinSkip && ev.pinEnabled && effectiveAttendanceMode(ev) !== 'voice' && now >= start + db.settings.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
+      if (!ev.pin && !ev.pinSkip && ev.pinEnabled && effectiveAttendanceMode(ev) !== 'voice' && now >= start + ev.pinOffsetMinutes * 60000) await generatePin(ev, 'automatic');
       // An event that does not use the attendance PIN has nobody confirming they actually showed up unless an
       // officer remembers to tick the Attendance box by hand - which leaves everyone who said "Going" wrongly
       // looking like a no-show. Once the event is comfortably over (the same delay compliance uses to judge
@@ -1405,10 +1480,13 @@ async function tick() {
       // attendance is: unconfirmed, for an officer to resolve by hand, not quietly decided by this fallback.
       if (!ev.pinEnabled && effectiveAttendanceMode(ev) !== 'voice' && !ev.autoAttended && now >= start + db.settings.compliance.finalAfterMinutes * 60000) {
         const going = Object.entries(ev.rsvps).filter(([, s]) => s === 'yes').map(([id]) => Number(id));
-        const before = ev.attended.length;
-        ev.attended = [...new Set([...ev.attended, ...going])];
+        setAttended(ev, [...ev.attended, ...going], { mode: 'add', by: 'Automatic (no PIN, RSVP fallback)' });
+        // This fallback's own "never run twice" guard, same as before - mode:'add' alone leaves autoAttended
+        // untouched (PIN/voice sightings must stay free to keep layering on afterward), but this particular
+        // writer is a one-shot catch-all, not an ongoing source, so it still claims autoAttended for itself.
+        // Harmless here specifically: pinEnabled===false and mode!=='voice' both already gate this whole
+        // block, so neither of the other two additive writers can ever fire for this same event anyway.
         ev.autoAttended = true;
-        if (ev.attended.length !== before) syncAttendancePoints(ev);
         save();
       }
       await runReminders(ev, Date.now());
@@ -1438,7 +1516,7 @@ route('POST', '/api/events/:id/pin', ({ body, user, params }) => {
     pinFails.set(fk, fails + 1);
     throw new HttpError(400, `Wrong PIN. ${4 - fails} ${4 - fails === 1 ? 'try' : 'tries'} left.`);
   }
-  if (!ev.attended.includes(m.id)) { ev.attended.push(m.id); syncAttendancePoints(ev); }
+  if (!ev.attended.includes(m.id)) setAttended(ev, [...ev.attended, m.id], { mode: 'add', by: user.name });
   ev.pinEntries[m.id] = { at: new Date().toISOString(), by: user.name };
   save();
   return { ok: true };
@@ -1536,23 +1614,29 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
 const shotcallerApi = require('./server-shotcaller')({
-  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, findEvent, eventFor, syncAttendancePoints, effectiveAttendanceMode, partyIsPlaceholder,
+  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, findEvent, eventFor, syncAttendancePoints, setAttended, effectiveAttendanceMode, partyIsPlaceholder,
   shotcaller: { url: SHOTCALLER_URL, apiKey: SHOTCALLER_API_KEY, get guildId() { return discord.cfg.guildId; } },
   get db() { return db; },
 });
 
 // ---------- more features (approvals, profiles, builds, requests, tags, recurring events, branding) ----------
-require('./server-features')({
+// Kept as a named object (not an inline literal passed straight to require(...)) specifically so server.js
+// can read back ctx.reevaluateWarnings after install - server-features.js attaches it there once
+// server-compliance.js is up, the same late-binding trick it already uses for ctx.coaching, and setAttended
+// (defined above, long before this runs) needs that reference at call time, not at parse time.
+const featuresCtx = {
   route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
-  eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
+  eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, setAttended, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
   LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi, partyIsPlaceholder,
   get db() { return db; },
-});
+};
+require('./server-features')(featuresCtx);
 
 // ---------- server ----------
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
 };
 
 function readBody(req, limit = 2e6) {
@@ -1774,6 +1858,14 @@ http.createServer(async (req, res) => {
 
   // static files
   let file = path.normalize(path.join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname));
+  if (file.startsWith(PUBLIC_DIR) && !fs.existsSync(file) && /\.png$/i.test(file)) {
+    // A size-reduced delivery package can ship a banner/tile image recompressed to .jpg under the same
+    // basename, without updating every url('/img/x.png') in style.css to match - this is what makes that
+    // still work: if the requested .png is not actually on disk, try the same name with a .jpg extension
+    // before giving up and falling back to index.html below.
+    const jpgAlt = file.replace(/\.png$/i, '.jpg');
+    if (fs.existsSync(jpgAlt) && !fs.statSync(jpgAlt).isDirectory()) file = jpgAlt;
+  }
   if (!file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC_DIR, 'index.html');
   res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
   fs.createReadStream(file).pipe(res);

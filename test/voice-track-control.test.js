@@ -194,3 +194,66 @@ withServer("an event's own extra channels never leak into another event's attend
   const settings = (await s.call('/api/state', 'GET', null, s.officer)).body.settings;
   assert.deepEqual(settings.voiceTrackExtraChannelIds, [], "the guild-wide list is untouched by one event's own picker");
 });
+
+// ---------------------------------------------------------------- "Track again" (attendance rework addendum)
+withServer('"Track again" resets attendance all the way to never-tracked, then starts a fresh track', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s, -5);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  s.bot.setConnected(VOICE_CHANNEL, anchorMembers.map((m) => m.owner));
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.length === anchorMembers.length ? e : null; });
+  let cur = await attendedOf(s, ev.id);
+  assert.equal(cur.attendanceTracked, true, 'tracked - real sightings were credited');
+
+  // An officer hand-corrects one of them to "not attending" before restarting - this is the kind of correction
+  // "Track again" is supposed to wipe too, not just whatever voice tracking itself credited.
+  await s.call(`/api/events/${ev.id}/attendance-status`, 'POST', { owner: anchorMembers[0].owner, status: 'noshow' }, s.officer);
+  cur = await attendedOf(s, ev.id);
+  assert.ok(!cur.attended.includes(anchorMembers[0].id), 'the hand correction took effect');
+
+  s.bot.setConnected(VOICE_CHANNEL, []);   // nobody connected right now - restart should not instantly re-credit anyone
+  const restart = await s.call(`/api/events/${ev.id}/voice-track/restart`, 'POST', {}, s.officer);
+  assert.equal(restart.status, 200, JSON.stringify(restart.body));
+  cur = await attendedOf(s, ev.id);
+  assert.equal(cur.attended.length, 0, 'everything reset to never-tracked - including the hand correction, not just the voice credits');
+  assert.equal(cur.attendanceTracked, false, 'reads as never tracked, not merely emptied');
+  assert.equal(cur.autoAttended, false);
+
+  // The fresh pass needs its own two sightings again (the old seenAt counters were discarded) before
+  // crediting anyone - confirms beginVoiceTracking really did start a brand new voiceTracking object.
+  s.bot.setConnected(VOICE_CHANNEL, anchorMembers.map((m) => m.owner));
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.length === anchorMembers.length ? e : null; });
+});
+
+withServer('"Track again" is refused when no Shotcaller session is running, same precondition as "Start tracking now"', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev } = await makeTrackedEvent(s);
+  const r = await s.call(`/api/events/${ev.id}/voice-track/restart`, 'POST', {}, s.officer);
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /not running/i);
+});
+
+// ------------------------------------------------- the "who got tracked" popup's raw seen/mute-deaf log
+withServer('every sighting - credited or not, muted or not - is logged in voiceTracking.seen for the tracked-players popup', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceAttendanceIgnoreMuted: true }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s, -5);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  // One player connects clean (gets credited); the other connects muted, and ignoreMuted is on, so they are
+  // seen but deliberately never credited - the popup needs to show them anyway, with why they were missed.
+  s.bot.setConnected(VOICE_CHANNEL, [
+    { id: anchorMembers[0].owner, mute: false, deaf: false },
+    { id: anchorMembers[1].owner, mute: true, deaf: false },
+  ]);
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(anchorMembers[0].id) ? e : null; });
+  const final = await attendedOf(s, ev.id);
+  assert.ok(!final.attended.includes(anchorMembers[1].id), 'muted and ignoreMuted is on - never credited');
+  const seen = final.voiceTracking.seen;
+  const credited = seen[anchorMembers[0].owner], missed = seen[anchorMembers[1].owner];
+  assert.equal(credited.credited, true);
+  assert.equal(credited.mutedAtCredit, false, 'state at the moment of crediting, frozen - not a live read');
+  assert.equal(missed.credited, false);
+  assert.equal(missed.muted, true, 'logged anyway, so the popup can say why this one was missed');
+  assert.equal(missed.memberId, anchorMembers[1].id, 'resolved to the actual character, not just a bare Discord id');
+});
