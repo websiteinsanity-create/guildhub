@@ -46,6 +46,11 @@ function seriesPanel() {
 function seriesDialog(se) {
   const isNew = !se, st = S.settings, t0 = S.cfg.eventTypes[0];
   se = se || { title: '', type: t0.name, weekdays: [1], intervalWeeks: 1, time: '21:00', tz: S.cfg.defaultTimezone || 'UTC', startDate: todayTz(), endDate: '', description: '', points: t0.points, mandatory: !!t0.mandatory, pinEnabled: !!t0.mandatory, maxSignups: 0, signupCloseMinutes: st.signupCloseDefault, pinWindowMinutes: st.pinWindowDefault, reminders: true, shotcallerAutoStart: false };
+  // A recurring event has no per-event "Attendance tracking" override of its own (every date it creates just
+  // follows the guild default, same as a one-off event left on "Guild default") - so, unlike the per-event
+  // dialog, there is no select to react to here: whether the PIN is used at all is simply whatever the guild
+  // default says right now.
+  const voice = st.attendanceMode === 'voice';
   openDialog(`
   <form data-form="series" data-id="${se.id || ''}">
     <h2>${isNew ? 'New recurring event' : 'Edit recurring event'}</h2>
@@ -70,11 +75,11 @@ function seriesDialog(se) {
     </div>
     <div class="row">
       <div class="field"><label>Close sign-ups (minutes before start)</label><input name="signupCloseMinutes" type="number" min="0" max="10080" value="${se.signupCloseMinutes}"></div>
-      <div class="field"><label>PIN window (minutes)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${se.pinWindowMinutes}"></div>
+      <div class="field" ${voice ? 'style="display:none"' : ''}><label>PIN window (minutes)</label><input name="pinWindowMinutes" type="number" min="1" max="720" value="${se.pinWindowMinutes}"></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="reminders" ${se.reminders === false ? '' : 'checked'}> Remind players who have not answered</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:8px"><input type="checkbox" name="mandatory" id="ev-mand" ${se.mandatory ? 'checked' : ''}> Mandatory (counts toward "Qualified for loot")</label>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(se.pinEnabled ?? se.mandatory) ? 'checked' : ''}> Attendance PIN for these events (on by default for a mandatory event, off for an optional one)</label>
+    <label style="${voice ? 'display:none' : 'display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px'}"><input type="checkbox" name="pinEnabled" id="ev-pin" ${(se.pinEnabled ?? se.mandatory) ? 'checked' : ''}> Attendance PIN for these events (on by default for a mandatory event, off for an optional one)</label>
     ${S.cfg.shotcallerOn ? `<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:12px"><input type="checkbox" name="shotcallerAutoStart" ${se.shotcallerAutoStart ? 'checked' : ''}> Also start Shotcaller when posting these events' parties to Discord (can still be switched either way at post time)</label>` : ''}
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(se.description)}</textarea></div>
     <div class="muted small">Dates are created about ${Math.round((S.cfg.recurrenceHorizonDays || 42) / 7)} weeks ahead. Changing the series changes all upcoming dates (sign-ups are kept). Deleting a single date only skips that date.</div>
@@ -545,6 +550,14 @@ ACTIONS['attdetail-save'] = (el, d) => {
   if (!rows.length) return;
   act(async () => {
     for (const sel of rows) await api(`/api/events/${sel.dataset.ev}/attendance-status`, 'POST', { owner, status: sel.dataset.rst });
+    // attRows() (used to rebuild this same dialog right below) reads from the lazily-cached custom-window
+    // stats, keyed only by the Attendance page's own day/mandatory-only filters - a correction here changes
+    // neither of those, so the cache has no way to know it's now stale. Without this, the dialog that reopens
+    // right after would show the pre-save numbers again, making the save look like it did nothing. Force a
+    // fresh read into that same cache, under the same key, before the dialog rebuilds.
+    const key = `${UI.attDays}:${UI.attMand ? 1 : 0}`;
+    S.attStatsByOwner = Object.fromEntries((await api(`/api/attendance-stats?windowDays=${encodeURIComponent(UI.attDays)}&mandatoryOnly=${UI.attMand ? 1 : 0}`)).map((r) => [r.owner, r]));
+    attStatsKey = key;
   }, rows.length === 1 ? 'Attendance updated' : `Attendance updated for ${rows.length} events`).then((ok) => { if (ok) ACTIONS['att-detail'](null, { key: owner }); });
 };
 
@@ -920,7 +933,7 @@ FORMS['sc-quickstart-prefs'] = (f, fd) => act(async () => {
    ev.attended) the instant it's confirmed - "Save track" and its 15-minute auto-save are a bookkeeping
    close-out once the watch itself has ended, never where the data lives, so a refresh mid-track never loses
    anything. */
-let AT = { eventId: null, live: null };
+let AT = { eventId: null, live: null, animSeen: {} };
 let atTimer = null, atTimerFor = null;
 // "Happening now" has no real end time in this app's event model (events are a single start instant, no
 // duration field) - a reasonable stand-in is "started within the last 3 hours and hasn't been superseded by a
@@ -1007,7 +1020,20 @@ function attVoiceControls(ev) {
   const awaitingSave = !!(vt && !vt.active && vt.startedAt && !vt.finishedAt);
   const auto = ev.voiceTrackAuto !== false;
   const live = AT.live || { trackedCount: 0, deafenedCount: 0, noShowCount: 0 };
-  const dataItem = (i, label, value) => `<div class="sc-data-item" style="--d:${i * .15}s">
+  // The dashboard's 5s attendance poll (attPollOnce) re-renders the whole page while a track is running or
+  // awaiting save, which tears this button and data grid down and rebuilds them from scratch every single
+  // time - without this, the one-time "just switched to this state" entrance animations below (the button's
+  // green-to-orange/orange-to-gold morph, the data boxes popping in) would replay in full on every one of
+  // those re-renders. Nothing was actually restarting - the button was just re-playing its start animation
+  // every 5 seconds, which is what looked like "it keeps starting" (and kept doing so for as long as the
+  // track stayed running, matching "continues even after 10 mins"). Play the animation only the first time
+  // this event is seen in a given state (running / awaiting save / neither); a later re-render of the exact
+  // same state settles straight into its end look, no animation.
+  const state = running ? 'running' : awaitingSave ? 'save' : null;
+  const firstSeen = AT.animSeen[ev.id] !== state;
+  AT.animSeen[ev.id] = state;
+  const settled = firstSeen ? '' : ' settled';
+  const dataItem = (i, label, value) => `<div class="sc-data-item${settled}" style="--d:${i * .15}s">
     <div class="sc-data-label">${esc(label)}</div>
     <div class="sc-data-box">${value}</div></div>`;
   return `<div class="att-sect">
@@ -1029,9 +1055,9 @@ function attVoiceControls(ev) {
     ${(running || awaitingSave) && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
     <div class="att-sect att-action">
       ${running
-        ? `<button class="btn att-running-btn" disabled><span class="sc-spinner"></span> Running</button>`
+        ? `<button class="btn att-running-btn${settled}" disabled><span class="sc-spinner"></span> Running</button>`
         : awaitingSave
-          ? `<button class="btn att-save-btn" data-act="att-save" data-id="${ev.id}">Save track</button>
+          ? `<button class="btn att-save-btn${settled}" data-act="att-save" data-id="${ev.id}">Save track</button>
              <div class="muted small att-save-hint">Click "Save track" to save all the collected attendance for this event. If you don't, it saves itself automatically after 15 minutes - nothing is lost either way, even on a refresh.</div>`
           : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>`}
     </div>
@@ -1083,7 +1109,7 @@ VIEWS.dashboard = () => {
   const sideHasInfo = showInfo && !infoInLeadership;
   const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.png" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
     stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',

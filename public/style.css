@@ -185,10 +185,10 @@ tr.click:hover td { background: var(--panel-2); }
 }
 .stat-art::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.25), rgba(10,7,9,.85) 65%, rgba(10,7,9,.95)); pointer-events: none; }
 .stat-art-body { position: relative; z-index: 1; padding: 48% 18px 16px; }
-.stat-members { background-image: url('/img/members-banner.png'); }
-.stat-tank { background-image: url('/img/tank-tile.png'); }
-.stat-healer { background-image: url('/img/healer-tile.png'); }
-.stat-dps { background-image: url('/img/dps-tile.png'); }
+.stat-members { background-image: url('/img/members-banner.jpg'); }
+.stat-tank { background-image: url('/img/tank-tile.jpg'); }
+.stat-healer { background-image: url('/img/healer-tile.jpg'); }
+.stat-dps { background-image: url('/img/dps-tile.jpg'); }
 
 /* Officer-only reworked "Guild name and numbers" panel: a slim Member bar, then five
    role columns naming who's in each instead of just a count (see statsOrHeroHtml). */
@@ -199,7 +199,7 @@ tr.click:hover td { background: var(--panel-2); }
    line right below it, the same way a muted subtitle sits under a plain page <h1> elsewhere. */
 .members-banner {
   position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 941;
-  background-image: url('/img/members-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 /* The dashboard's compact "Member" header bar (above the class columns) uses the same artwork as
    a background, but cropped tight to just its top ~40% - the "MEMBERS" wordmark, its ornamental
@@ -213,7 +213,7 @@ tr.click:hover td { background: var(--panel-2); }
 .member-bar-head {
   position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 380; min-height: 150px;
   width: 100%; min-width: 0; max-width: 100%;
-  background-image: url('/img/members-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/members-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
   display: flex; align-items: flex-end; justify-content: flex-end; padding: 16px 22px;
 }
 .member-bar-head::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,0) 40%, rgba(10,7,9,.88) 75%, rgba(10,7,9,.94)); pointer-events: none; }
@@ -278,7 +278,7 @@ tr.click:hover td { background: var(--panel-2); }
      of its height, so the wordmark sits at the same spot from the top in every state. Below the
      image's own height, the card's plain dark background shows through (no-repeat) rather than the
      art stretching or tiling - which reads fine since the overlay below is already going dark there. */
-  background-image: url('/img/shotcaller-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/shotcaller-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 /* Dark overlay so the status text, button and data panels stay readable over the art. */
 .sc-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
@@ -307,7 +307,7 @@ tr.click:hover td { background: var(--panel-2); }
    states to signal, unlike Shotcaller. */
 .lead-card {
   position: relative; overflow: hidden; text-align: center; padding: 0;
-  background-image: url('/img/leadership-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/leadership-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 .lead-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
 .lead-card-body { position: relative; z-index: 1; padding: 54% 20px 26px; text-align: left; }
@@ -325,7 +325,7 @@ tr.click:hover td { background: var(--panel-2); }
    35% for clearance (already has a small buffer built in). */
 .sched-card {
   position: relative; overflow: hidden; padding: 0; aspect-ratio: 1122 / 1402;
-  background-image: url('/img/schedule-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/schedule-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 .sched-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
 .sched-card-body { position: absolute; inset: 0; z-index: 1; padding-top: 35%; display: flex; flex-direction: column; }
@@ -351,7 +351,7 @@ tr.click:hover td { background: var(--panel-2); }
    card's width; rounded up to 30% for clearance. */
 .info-card {
   position: relative; overflow: hidden; padding: 0;
-  background-image: url('/img/guildinfo-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/guildinfo-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 .info-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
 .info-card-body { position: relative; z-index: 1; padding: 30% 20px 26px; }
@@ -363,7 +363,7 @@ tr.click:hover td { background: var(--panel-2); }
    scaled; rounded up to 36% for clearance (already has a small buffer built in). */
 .tasks-card {
   position: relative; overflow: hidden; padding: 0;
-  background-image: url('/img/tasks-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/tasks-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 .tasks-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
 .tasks-card-body { position: relative; z-index: 1; padding: 36% 20px 26px; }
@@ -375,7 +375,7 @@ tr.click:hover td { background: var(--panel-2); }
    also 34% of the card's width; rounded up to 35% for clearance. */
 .loot-card {
   position: relative; overflow: hidden; padding: 0;
-  background-image: url('/img/loot-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/loot-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 .loot-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.45), rgba(10,7,9,.82) 55%, rgba(10,7,9,.92)); pointer-events: none; }
 .loot-card-body { position: relative; z-index: 1; padding: 35% 20px 26px; }
@@ -1098,7 +1098,7 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
    A direct, one-event-at-a-time front end for the voice-attendance engine that already runs in the background
    (server-shotcaller.js's pollVoiceAttendance) - pick an event, flip automatic/manual, start the watch, and
    watch it live, right on the Dashboard instead of having to find the right event first.
-   Built exactly like the Shotcaller dashboard card (.sc-card/.sc-card-body above): the attendance-banner.png
+   Built exactly like the Shotcaller dashboard card (.sc-card/.sc-card-body above): the attendance-banner.jpg
    art is the background for the WHOLE card - mode row, event picker, auto-toggle, button, stats - not just a
    strip up top, scaled by WIDTH only (background-size: 100% auto) so the wordmark's vertical position stays
    fixed no matter which of the three states (inactive/running/awaiting-save) is showing, since those states
@@ -1108,7 +1108,7 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
    matching how the image itself is scaled. */
 .att-card {
   position: relative; overflow: hidden; padding: 0;
-  background-image: url('/img/attendance-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+  background-image: url('/img/attendance-banner.jpg'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
 .att-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,7,9,.4), rgba(10,7,9,.82) 55%, rgba(10,7,9,.93)); pointer-events: none; }
 .att-card-body { position: relative; z-index: 1; padding: 18% 20px 26px; }
@@ -1151,4 +1151,11 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
   100% { background: #e8b84b; border-color: #e8b84b; box-shadow: 0 0 16px rgba(232,184,75,.55); }
 }
 .att-save-hint { margin-top: 8px; }
+/* "settled" (features.js's attVoiceControls): the dashboard's attendance panel re-renders every 5s while a
+   track is running or awaiting save, which would otherwise replay these one-time "just switched to this
+   state" entrance animations on every re-render - skip them once this state has already been seen. The base
+   rules above already land on the same end look these animations finish at, so turning the animation off
+   entirely (rather than just skipping to its end) needs no separate "final" styles here. */
+.att-running-btn.settled, .att-save-btn.settled { animation: none; }
+.sc-data-item.settled .sc-data-label, .sc-data-item.settled .sc-data-box { animation: none; opacity: 1; transform: none; }
 .att-warn { background: rgba(224,18,79,.12); border: 1px solid rgba(224,18,79,.4); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
