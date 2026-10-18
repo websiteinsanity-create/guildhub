@@ -212,6 +212,9 @@ const guildDate = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: S.cfg.def
 // still counts as belonging to the previous day.
 const gameDay = (ms) => guildDate(ms - 4 * 3600000);
 const onLeaveAt = (owner, ms) => { const d = guildDate(ms); return (S.leaves || []).some((l) => l.ownerKey === owner && l.status === 'approved' && l.from <= d && d <= l.to); };
+// Per-event, per-owner "attend anyway" switch for someone on an approved leave covering that event (see
+// POST /api/events/:id/loa-override) - does not touch the leave itself, just this one event's display.
+const loaOverridden = (ev, owner) => !!(ev && ev.loaOverride && ev.loaOverride.includes(owner));
 const activeWarn = (owner) => (S.warnings || []).filter((w) => w.ownerKey === owner && w.status === 'active');
 const isDisqualified = (owner) => { const n = (S.settings.compliance || {}).disqualifyAt || 0; return n > 0 && activeWarn(owner).length >= n; };
 const linkLabel = (l) => l.label || l.url.replace(/^https?:\/\/(www\.)?/i, '').slice(0, 40);
@@ -916,7 +919,14 @@ function attCorrectDialog(ev) {
 function eventDetail(ev) {
   const admin = isOfficer();
   const roster = eventRoster(ev);
-  const goingN = roster.filter((m) => ev.rsvps[m.id] === 'yes').length;
+  // Someone on an approved leave covering this event's date is left off the Going list entirely (not just
+  // dimmed - see memberRow/board() for how the party builder handles the same situation) unless they (or an
+  // officer, from the party builder's "..." menu) switched on "attend anyway" for this one event. The full
+  // roster (unfiltered) is still what gates "Take attendance by hand"/"Correct manually" below and feeds
+  // attCorrectDialog - an officer correcting attendance after the fact can still credit someone who showed up
+  // despite being on leave, same as always.
+  const visibleRoster = roster.filter((m) => !onLeaveAt(m.owner, Date.parse(ev.start)) || loaOverridden(ev, m.owner));
+  const goingN = visibleRoster.filter((m) => ev.rsvps[m.id] === 'yes').length;
   // attendance has actually been recorded - the roster control becomes the 6-state version.
   const tracked = rolled(ev);
   const closesAt = new Date(ev.signupClosesAt), closed = Date.now() >= closesAt;
@@ -930,7 +940,7 @@ function eventDetail(ev) {
   return `
   <div class="panel"><h3>Going: ${goingN}${cap} <span class="st-pill ${tracked ? 'st-approved' : 'st-open'}" style="margin-left:8px;vertical-align:middle">${tracked ? '✓ Attendance tracked' : 'Not yet tracked'}</span>${admin && tracked && roster.length ? `<button class="btn sm" style="margin-left:8px;vertical-align:middle" data-act="att-correct" data-id="${ev.id}">Correct manually</button>` : ''}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
     ${roster.length ? `<div class="cols">${S.cfg.roles.map((r) => {
-      const g = roster.filter((m) => m.role === r).sort((a, b) => rosterSortKey(ev, a, tracked) - rosterSortKey(ev, b, tracked) || a.name.localeCompare(b.name));
+      const g = visibleRoster.filter((m) => m.role === r).sort((a, b) => rosterSortKey(ev, a, tracked) - rosterSortKey(ev, b, tracked) || a.name.localeCompare(b.name));
       return `<div class="col" style="--c:${roleColor(r)}"><h3><span>${esc(r)}</span><span>${g.length}</span></h3>
         ${g.map((m) => rosterRow(ev, m, admin, tracked)).join('') || '<div class="muted small">None</div>'}</div>`;
     }).join('')}</div>` : '<div class="muted">Nobody on the roster yet.</div>'}
@@ -1169,7 +1179,17 @@ function patchEvent(ev, patch) {
 function rsvpRow(ev, m, locked) {
   const s = ev.rsvps[m.id] || 'none';
   const b = (val, label) => `<button class="btn sm ${s === val ? 'on' : ''}" ${locked ? 'disabled' : ''} data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="${s === val ? 'none' : val}">${label}</button>`;
-  return `<div class="rsvp-row"><span><b>${esc(m.name)}</b> ${roleChip(m.role)}${s === 'none' ? ' <span class="muted small">no answer yet</span>' : ''}</span><span class="seg">${b('yes', 'Attend')}${b('no', 'Not attend')}</span></div>`;
+  // On an approved leave covering this event: hidden from the Going list and shown dimmed everywhere in the
+  // party builder (see memberRow/eventDetail) unless this switch is on - the member's own way to say "I'm
+  // coming to this one anyway" without cancelling the leave itself. An officer has the same switch from the
+  // party builder's "..." menu, for a player who is not around to flip it themselves.
+  const onLeave = !m.mercenary && onLeaveAt(m.owner, Date.parse(ev.start));
+  const overridden = onLeave && loaOverridden(ev, m.owner);
+  const loaNote = onLeave ? `<div class="muted small loa-note">${overridden
+    ? "You're on an approved leave for this event, but marked as attending anyway."
+    : "You're on an approved leave covering this event - you won't show as Going unless you attend anyway."}
+    <button class="btn sm loa-toggle" data-act="loa-override" data-ev="${ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Undo, I\'m on leave' : 'Attend anyway'}</button></div>` : '';
+  return `<div class="rsvp-row"><span><b>${esc(m.name)}</b> ${roleChip(m.role)}${s === 'none' ? ' <span class="muted small">no answer yet</span>' : ''}</span><span class="seg">${b('yes', 'Attend')}${b('no', 'Not attend')}</span></div>${loaNote}`;
 }
 
 const CROWN = '<svg class="crown" viewBox="0 0 24 24" width="15" height="15" role="img" aria-label="Party leader"><path fill="currentColor" d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z"/></svg>';
@@ -1179,10 +1199,15 @@ function memberMenu(m, at, o) {
   const cur = inParty ? effectiveBuild(m, o.parties[o.i]).key : 'main';
   const choices = [{ key: 'main', label: `Main: ${classOf(m) || 'no class'} (${m.role})` }, ...(m.builds || []).map((b) => ({ key: String(b.id), label: `${b.name}: ${classFor(b.primaryWeapon, b.secondaryWeapon) || 'no class'} (${b.role}, ${b.mode})` }))];
   const targets = (o.parties || []).map((q, j) => (inParty && j === o.i ? '' : `<button data-act="m-move" ${at} data-m="${m.id}" data-to="${j}">${esc(q.name)}</button>`)).join('');
+  // An officer's own way to flip the leave-of-absence override (see memberRow/rsvpRow) for a player who is
+  // not around to do it themselves - same switch, same route, just reachable from here too.
+  const onLeave = o.ev && !m.mercenary && onLeaveAt(m.owner, Date.parse(o.ev.start));
+  const overridden = onLeave && loaOverridden(o.ev, m.owner);
   return `<details class="menu"><summary aria-label="Options for ${esc(m.name)}">&hellip;</summary><div class="menu-list">
     ${inParty ? `<button data-act="m-leader" ${at} data-m="${m.id}">${o.leader === m.id ? 'Remove as party leader' : 'Make party leader'}</button>` : ''}
     ${inParty && choices.length > 1 ? `<div class="menu-sep">Class / build in this party</div><div class="menu-scroll">${choices.map((c) => `<button data-act="m-build" ${at} data-m="${m.id}" data-b="${c.key}">${cur === c.key ? '&#10003; ' : ''}${esc(c.label)}</button>`).join('')}</div>` : ''}
     ${targets ? `<div class="menu-sep">${inParty ? 'Move to' : 'Add to'}</div><div class="menu-scroll">${targets}</div>` : ''}
+    ${onLeave ? `<button data-act="loa-override" data-ev="${o.ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Remove leave override' : 'Mark attending despite leave'}</button>` : ''}
     ${inParty ? `<button class="danger" data-act="m-remove" ${at} data-m="${m.id}">Remove from party</button>` : ''}
   </div></details>`;
 }
@@ -1201,9 +1226,23 @@ function memberRow(m, at, o) {
   const meta = `${icons}${cls ? `<span class="cls">${esc(cls)}</span>` : wpns.map((n) => esc(n)).join(' / ')}`;
   const spec = eff.specialization ? `<div class="mspec spec">${esc(eff.specialization)}</div>` : '';
   const tag = o.ev && o.from === 'pool' ? (o.ev.rsvps[m.id] === 'yes' ? 'going' : '') : '';
-  return `<div class="mrow ${o.dim ? 'not-attending' : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${o.dim ? ' (not confirmed for this event)' : ''}">
+  // Someone on an approved leave of absence covering this event (and not overridden - see loaOverridden) is
+  // dimmed everywhere they show up here, with their own "LoA" badge, instead of the plain "not confirmed"
+  // treatment - distinct from, and taking priority over, a declined or never-answered RSVP (o.dim, set by
+  // partyCard for its "Not confirmed for this event" sub-list), so an officer can tell at a glance which of
+  // the three reasons applies without opening anyone's profile. Computed here, once, so every place a member
+  // row is shown (the pool, a party, that sub-list) reads it the same way.
+  const onLeave = o.ev && !m.mercenary && onLeaveAt(m.owner, Date.parse(o.ev.start));
+  const overridden = onLeave && loaOverridden(o.ev, m.owner);
+  const loa = onLeave && !overridden;
+  const rsvp = o.ev ? (o.ev.rsvps[m.id] === 'yes' ? 'yes' : o.ev.rsvps[m.id] === 'no' ? 'no' : 'none') : 'none';
+  const dimKind = loa ? 'loa' : o.dim ? (rsvp === 'no' ? 'declined' : 'noreply') : null;
+  const dimTitle = { loa: 'on an approved leave covering this event', declined: 'said not attending', noreply: 'has not answered yet' }[dimKind] || '';
+  const canToggleLoa = onLeave && (off || m.owner === S.user.key);
+  return `<div class="mrow ${dimKind ? `dim dim-${dimKind}` : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${dimTitle ? ' (' + dimTitle + ')' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}
-    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div>${spec}</div>
+    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}${loa ? '<span class="tag loa" title="Approved leave of absence covering this event">LoA</span>' : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div>${spec}
+    ${canToggleLoa ? `<div class="loa-inline"><button class="btn sm loa-toggle" data-act="loa-override" data-ev="${o.ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Remove override' : 'Attend anyway'}</button></div>` : ''}</div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
@@ -1215,7 +1254,11 @@ function memberRow(m, at, o) {
 // not counted toward its 12-party cap). members.length is the raw assigned count, not confirmed/attending,
 // matching how both of those checks read parties.
 function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length <= 3; }
-function partyCard(ctx, parties, p, i, ev) {
+// clearOn (the "Clear" switch on the board - see board() below): when on, this card shows only confirmed,
+// attending members and drops the dimmed "Not confirmed" sub-list entirely - and if that leaves nobody to
+// show, the whole party card is skipped (see board(), which filters out whatever this returns falsy for),
+// so a screen full of placeholder parties and unconfirmed sign-ups collapses down to just who is actually in.
+function partyCard(ctx, parties, p, i, ev, clearOn) {
   const off = isOfficer();
   const at = `data-kind="${ctx.kind}" data-owner="${ctx.id}" data-i="${i}"`;
   const ms = p.members.map((id) => byId(S.members, id)).filter(Boolean);
@@ -1225,8 +1268,13 @@ function partyCard(ctx, parties, p, i, ev) {
   // event - so once loaded into an event, anyone in the party who has not confirmed attending (and is not a
   // mercenary, who was placed here deliberately rather than loaded from a saved line-up) is shown separately,
   // dimmed, at the bottom of their own party - still visibly part of the plan, but clearly not confirmed.
-  const notAttending = ev ? ms.filter((m) => !m.mercenary && ev.rsvps[m.id] !== 'yes') : [];
-  const attending = ev ? ms.filter((m) => m.mercenary || ev.rsvps[m.id] === 'yes') : ms;
+  // Someone on an approved leave of absence covering the event's date gets the same treatment, even if they
+  // did say Going - a party they were already dragged into (before the leave was approved, say) should not go
+  // on quietly looking full once they are actually away, unless they (or an officer) overrode it (loaOverridden).
+  const loa = (m) => !m.mercenary && onLeaveAt(m.owner, Date.parse(ev && ev.start)) && !loaOverridden(ev, m.owner);
+  const attending = ev ? ms.filter((m) => m.mercenary || (ev.rsvps[m.id] === 'yes' && !loa(m))) : ms;
+  if (clearOn && !attending.length) return '';
+  const notAttending = (clearOn || !ev) ? [] : ms.filter((m) => !m.mercenary && (ev.rsvps[m.id] !== 'yes' || loa(m)));
   return `<div class="party" data-party="${i}">
     <div class="phead">
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
@@ -1260,6 +1308,12 @@ function board(ctx, parties, ev) {
   const off = isOfficer();
   const used = new Set(parties.flatMap((p) => p.members));
   const total = parties.reduce((a, p) => a + p.members.filter((id) => byId(S.members, id)).length, 0);
+  // "Clear" (per-board, so a preset and an event each remember their own) - hides every dimmed row (not
+  // confirmed, declined, on leave) and every party that has nobody left to show once those are hidden, for a
+  // clean look at who is actually confirmed and in. Off by default; purely a display switch, not saved to the
+  // server, same as the other view-only UI bits (UI.fold and friends).
+  const clearKey = `clear_${ctx.kind}_${ctx.id}`;
+  const clearOn = !!UI[clearKey];
   // Mercenaries are not "active" (that is what keeps them off every other page - the member list, loot,
   // attendance, all of it already filter on active) but they still need to appear here, in the one place they
   // are relevant: the pool for the specific event they signed up to help with.
@@ -1269,19 +1323,32 @@ function board(ctx, parties, ev) {
   // to Going first (on the Attendance or Events page), rather than dragging them in from here regardless of
   // their answer. Presets have no event at all, so there is no RSVP to filter by - every active member stays
   // available there, same as always.
+  //
+  // Someone on an approved leave of absence covering this event's date still shows up here (even though they
+  // said Going) rather than being excluded outright - memberRow dims them and marks them "LoA" automatically,
+  // same as it does once they're placed in a party, so an officer can still drag them in if they decide to
+  // (loaOverridden lets the person, or an officer, say "attending anyway" and drop the dimming entirely).
   const active = (ev ? S.members.filter((m) => m.active && ev.rsvps[m.id] === 'yes') : S.members.filter((m) => m.active)).concat(mercs);
   const pools = S.cfg.roles.map((r) => {
     const all = active.filter((m) => m.role === r);
-    const free = all.filter((m) => !used.has(m.id)).sort((a, b) => a.name.localeCompare(b.name));
+    let free = all.filter((m) => !used.has(m.id)).sort((a, b) => a.name.localeCompare(b.name));
+    if (clearOn) free = free.filter((m) => m.mercenary || !onLeaveAt(m.owner, Date.parse(ev && ev.start)) || loaOverridden(ev, m.owner));
     return `<div class="pool" style="--c:${roleColor(r)}"><div class="pool-head"><span>${esc(r)}</span><span>${free.length}/${all.length}</span></div>
       <div class="pool-list">${free.map((m) => memberRow(m, `data-kind="${ctx.kind}" data-owner="${ctx.id}"`, { from: 'pool', parties, ev })).join('') || '<div class="pempty">Everyone is placed</div>'}</div></div>`;
   }).join('');
+  const cards = parties.map((p, i) => partyCard(ctx, parties, p, i, ev, clearOn)).filter(Boolean).join('');
   return `<div class="board ${off ? '' : 'ro'}" data-kind="${ctx.kind}" data-owner="${ctx.id}">
     ${off ? `<aside class="pools" data-drop="pool">${pools}</aside>` : ''}
     <section class="pboard">
       <div class="pboard-head"><h3>${parties.length} ${parties.length === 1 ? 'Party' : 'Parties'} <span class="muted">(${total} members)</span></h3>
-        ${off ? `<button class="btn sm" data-act="party-add" data-kind="${ctx.kind}" data-owner="${ctx.id}">Add party</button>` : ''}</div>
-      ${parties.length ? `<div class="parties">${parties.map((p, i) => partyCard(ctx, parties, p, i, ev)).join('')}</div>` : '<div class="muted">No parties yet. Add one, then drag members in.</div>'}
+        <span class="pboard-actions">
+          ${off ? `<button class="btn sm" data-act="party-add" data-kind="${ctx.kind}" data-owner="${ctx.id}">Add party</button>` : ''}
+          <label class="switch-row" title="Hide anyone not confirmed and any party with nobody left to show">
+            <span class="switch"><input type="checkbox" data-ui="${clearKey}" ${clearOn ? 'checked' : ''}><span class="slider"></span></span> Clear
+          </label>
+        </span>
+      </div>
+      ${parties.length ? `<div class="parties">${cards || '<div class="muted">Nothing to show with "Clear" on - every party is either empty or everyone in it is unconfirmed. Switch it off to see them.</div>'}</div>` : '<div class="muted">No parties yet. Add one, then drag members in.</div>'}
     </section></div>`;
 }
 
@@ -1826,6 +1893,7 @@ document.addEventListener('click', async (e) => {
   else if (a === 'duty-del') act(() => api('/api/duties/' + d.id, 'DELETE'));
   else if (a === 'toggle-past') { UI.showPast = !UI.showPast; render(); }
   else if (a === 'rsvp') rsvpNow(d.ev, d.m, d.s);
+  else if (a === 'loa-override') act(() => api(`/api/events/${d.ev}/loa-override`, 'POST', { owner: d.owner, override: d.ov === '1' }), d.ov === '1' ? 'Marked as attending despite the leave.' : 'Leave override removed.');
   else if (a === 'parties-build') {
     const e2 = ev(); if (e2.parties.length && !confirm('Replace the current parties?')) return;
     const p = autoParties(e2);
@@ -2027,6 +2095,10 @@ document.addEventListener('change', (e) => {
 });
 document.addEventListener('input', (e) => {
   if (e.target.matches('textarea[data-autogrow]')) autosizeTextarea(e.target);
+  if (e.target.matches('textarea[data-counts]')) {
+    const c = document.getElementById(e.target.id + '-count');
+    if (c) c.textContent = `${e.target.value.length} / ${e.target.maxLength}`;
+  }
   const k = e.target.dataset.ui;
   if (k === 'rosterQ' || k === 'lootQ' || k === 'lootCompareQ') {
     UI[k] = e.target.value; const pos = e.target.selectionStart; render();
@@ -2632,13 +2704,22 @@ ACTIONS['vod-delete'] = (el, d) => { if (confirm('Delete this VOD? This also rem
 // per-timestamp coaching points above are for pointing at exact moments, this is the wrap-up. Writing a note
 // here does not by itself mark the VOD as finished any more - that is its own separate, undoable toggle (see
 // the "Mark as finished" button next to this one).
+// Kept in sync with REVIEW_NOTE_MAX in server-coaching.js - the server is what actually enforces it (clean()
+// silently truncates past it), this is just so the textarea's own maxlength and the live counter below it
+// agree with what will actually be saved, instead of letting someone type right up against a wall the server
+// quietly moved on them.
+const REVIEW_NOTE_MAX = 1700;
+// A live "n / max" readout under a capped textarea, kept current by the generic `input` listener below -
+// without this, hitting the textarea's maxlength just stops accepting keystrokes with no explanation, which
+// is exactly what a coach trying to write a long review note ran into (see REVIEW_NOTE_MAX's own comment).
+const charCounter = (id, len, max) => `<div id="${id}-count" class="muted small" style="text-align:right;margin-top:2px">${len} / ${max}</div>`;
 function vodReviewDialog(vodId) {
   const v = (S.vods || []).find((x) => x.id === Number(vodId));
   if (!v) return;
   const already = Array.isArray(v.reviews) && v.reviews.length;
   openDialog(`<form data-form="vod-review" data-id="${v.id}"><h2>${already ? 'Add review' : 'Write a review'}</h2>
       <div class="muted small" style="margin:-4px 0 10px">${already ? 'Adds another review note and DMs the player again.' : 'Lets the player know their VOD has been reviewed.'}${(v.markers || []).length ? ` There ${(v.markers || []).length === 1 ? 'is' : 'are'} ${(v.markers || []).length} coaching point${(v.markers || []).length === 1 ? '' : 's'} on this VOD.` : ''}</div>
-      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" placeholder="What should they take away from this?" data-autogrow required autofocus></textarea></div>
+      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="${REVIEW_NOTE_MAX}" placeholder="What should they take away from this?" data-autogrow data-counts required autofocus></textarea>${charCounter('vr-note', 0, REVIEW_NOTE_MAX)}</div>
       <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">${already ? 'Add review' : 'Write a review'}</button></div>
     </form>`);
 }
@@ -2652,7 +2733,7 @@ ACTIONS['vod-review-edit'] = (el, d) => {
   const r = v && (v.reviews || []).find((x) => x.id === Number(d.reviewId));
   if (!r) return;
   openDialog(`<form data-form="vod-review-edit" data-id="${d.vodId}" data-review-id="${d.reviewId}"><h2>Edit review note</h2>
-      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="1000" data-autogrow required autofocus>${esc(r.note)}</textarea></div>
+      <div class="field"><label for="vr-note">Overall note</label><textarea id="vr-note" name="note" maxlength="${REVIEW_NOTE_MAX}" data-autogrow data-counts required autofocus>${esc(r.note)}</textarea>${charCounter('vr-note', r.note.length, REVIEW_NOTE_MAX)}</div>
       <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
     </form>`);
 };

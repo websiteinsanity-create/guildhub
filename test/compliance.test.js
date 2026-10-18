@@ -133,6 +133,25 @@ withServer('leave of absence: players ask, the leadership decides, past days and
   assert.equal((await ask('ann', { from: dateOf(10), to: dateOf(12) })).body.status, 'approved', 'no approval needed when the leadership switched it off');
 });
 
+withServer('leave-of-absence override: a player (or an officer for them) can mark "attending anyway" for one event, without ending the leave itself', async (s) => {
+  const c = await cast(s);
+  await s.call('/api/leaves', 'POST', { ownerKey: 'Ann', from: dateOf(1), to: dateOf(5) }, s.officer);
+  const ev = (await s.call('/api/events', 'POST', { type: 'Archboss', title: 'Covered by leave', start: inDays(3) }, s.officer)).body;
+  await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: c.ann, status: 'yes' }, s.ann);
+  assert.deepEqual(ev.loaOverride, [], 'starts with nobody overridden');
+  assert.equal((await s.call(`/api/events/${ev.id}/loa-override`, 'POST', { owner: 'Ann', override: true }, s.bob)).status, 403, 'only the player themselves or an officer can flip it for someone');
+  assert.equal((await s.call(`/api/events/${ev.id}/loa-override`, 'POST', { override: true }, s.ann)).status, 400, 'needs an owner to flip it for');
+  const r1 = await s.call(`/api/events/${ev.id}/loa-override`, 'POST', { owner: 'Ann', override: true }, s.ann);
+  assert.deepEqual(r1.body.loaOverride, ['Ann'], 'Ann can mark herself as attending anyway');
+  const r2 = await s.call(`/api/events/${ev.id}/loa-override`, 'POST', { owner: 'Ann', override: false }, s.ann);
+  assert.deepEqual(r2.body.loaOverride, [], 'and undo it again');
+  const r3 = await s.call(`/api/events/${ev.id}/loa-override`, 'POST', { owner: 'Ann', override: true }, s.officer);
+  assert.deepEqual(r3.body.loaOverride, ['Ann'], 'an officer can set it on her behalf too, e.g. from the party builder');
+  // The leave itself, and compliance's own reading of it, are untouched - this is purely a display/party-
+  // placement switch (see the "Going" list and board() in public/app.js).
+  assert.equal((await state(s, 'officer')).leaves.length, 1, 'the leave record itself was never touched');
+});
+
 // ---------------------------------------------------------------- the reason pop-up, warnings, expiry, disqualification
 withServer('too many no-shows: pop-up asks for a reason, the leadership answers, warnings are handed out once per new offence', async (s) => {
   const c = await cast(s);

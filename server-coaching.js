@@ -389,11 +389,19 @@ module.exports = function install(ctx) {
   // One append-only list per VOD. Writing a note here no longer marks the VOD as finished by itself (see the
   // dedicated /finished route below) - a coach can leave a note any time, including a quick one on a VOD they
   // are not done looking at yet, without it jumping the folder to "finished" behind their back.
+  //
+  // The note gets wrapped in a notify() DM to the player (see below) - Discord rejects any message content
+  // over 2000 characters outright, and notify() is fire-and-forget (never surfaces that failure back to the
+  // coach), so this has to stay comfortably under that limit even after the "<name> reviewed your VOD ..."
+  // wrapper text and the link at the end are added on top of it. 300 characters of headroom covers that
+  // wrapper with room to spare. Same idea as the 1900-char cap on the Discord party-post text in
+  // server-community.js, just with more of a margin here since this one has more text wrapped around it.
+  const REVIEW_NOTE_MAX = 1700;
   route('POST', '/api/vods/:id/reviews', ({ body, user, params }) => {
     const D = db(), v = D.vods.find((x) => x.id === Number(params.id));
     need(v, 404, 'VOD not found.');
     need(canReviewVod(user, v), 403, 'Only a coach or officer can review this VOD.');
-    const note = clean(body.note, 1000);
+    const note = clean(body.note, REVIEW_NOTE_MAX);
     need(note, 400, 'Add a note before saving the review.');
     if (!Array.isArray(v.reviews)) v.reviews = [];
     const isFirst = v.reviews.length === 0;
@@ -417,7 +425,7 @@ module.exports = function install(ctx) {
     // Only the coach/officer who actually wrote this entry can touch it - not even another officer, and not
     // the VOD's own owner, matching canReviewVod's "the one being told, not the one confirming it" split.
     need(review.by === user.key, 403, 'You can only edit your own review note.');
-    const note = clean(body.note, 1000);
+    const note = clean(body.note, REVIEW_NOTE_MAX);
     need(note, 400, 'Add a note.');
     review.note = note;
     review.editedAt = now();
