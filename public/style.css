@@ -572,11 +572,34 @@ td.wpn { min-width: 340px; }
 .mrow.before { box-shadow: inset 0 3px 0 var(--accent-text); }
 /* A party loaded from a preset can include people who have not actually confirmed Going for this particular
    event - shown dimmed and set apart, under their own party, rather than looking identical to someone who is
-   really coming. */
-.mrow.not-attending { opacity: .5; background: var(--panel); border-left-color: var(--line); }
-.mrow.not-attending:hover { opacity: .8; }
+   really coming. Three different reasons get three different colours (same palette as .seg-no/.seg-none/
+   .seg-leave), so an officer can tell which applies without opening anyone's profile: red for someone who
+   actively said not attending, grey for someone who just hasn't answered, blue for someone on an approved
+   leave of absence covering the event (also used in the pool and in a party they're already placed in, not
+   just this "not confirmed" sub-list - see memberRow). */
+.mrow.dim { opacity: .55; background: var(--panel); border-left-color: var(--line); }
+.mrow.dim:hover { opacity: .85; }
+.mrow.dim-declined { border-left-color: #e2685c; background: color-mix(in srgb, #e2685c 16%, var(--panel)); }
+.mrow.dim-noreply { border-left-color: #8b95a7; }
+.mrow.dim-loa { border-left-color: #5fb8e8; background: color-mix(in srgb, #5fb8e8 16%, var(--panel)); }
 .pnotattending { border-top: 1px dashed var(--line); margin-top: 2px; }
 .pnotattending > .muted.small { padding: 5px 8px 3px; }
+.tag.loa { border: 1px solid #5fb8e8; color: #5fb8e8; border-radius: 20px; padding: 0 6px; }
+.loa-inline { margin-top: 3px; }
+.loa-toggle { font-size: 11px; padding: 2px 8px; }
+.loa-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 8px; }
+/* "Clear" switch on the party board (board()) - a small on/off toggle, off by default, that hides every
+   dimmed row and any party left with nothing to show once those are hidden. */
+.pboard-head { flex-wrap: wrap; }
+.pboard-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.switch-row { display: inline-flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; font-size: 14px; color: var(--muted); user-select: none; }
+.switch { position: relative; display: inline-block; width: 34px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; }
+.switch .slider { position: absolute; inset: 0; background: var(--line); border-radius: 20px; transition: background .15s; }
+.switch .slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: var(--panel); border-radius: 50%; transition: transform .15s; }
+.switch input:checked + .slider { background: var(--accent-text); }
+.switch input:checked + .slider::before { transform: translateX(14px); }
+.switch input:focus-visible + .slider { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .mtxt { flex: 1; min-width: 0; line-height: 1.25; }
 .mname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mmeta { font-size: 13px; color: color-mix(in srgb, var(--text) 72%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

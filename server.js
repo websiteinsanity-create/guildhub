@@ -427,6 +427,8 @@ function migrate() {
     // same as pinWindowMinutes/signupCloseMinutes already do a few lines up.
     if (ev.pinOffsetMinutes === undefined) ev.pinOffsetMinutes = db.settings.pinOffsetMinutes;
     if (ev.voiceTrackStartOffsetMinutes === undefined) ev.voiceTrackStartOffsetMinutes = db.settings.voiceTrackStartOffsetMinutes;
+    // Event from before the leave-of-absence override existed: nobody has overridden anything yet.
+    if (!Array.isArray(ev.loaOverride)) ev.loaOverride = [];
   }
 }
 migrate();
@@ -779,7 +781,7 @@ function applyPresetRule(ev) {
   if (p) ev.parties = normParties(clone(p.parties));
 }
 route('POST', '/api/events', ({ body, user }) => {
-  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceTracked: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], ...pickEvent(body) };
+  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceTracked: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], loaOverride: [], ...pickEvent(body) };
   applyPresetRule(ev);
   db.events.push(ev);
   audit.log(user, 'event.create', { type: 'event', id: ev.id, name: ev.title }, `${user.name} created the event "${ev.title}" (${ev.type}, ${ev.start}).`);
@@ -846,6 +848,25 @@ route('POST', '/api/events/:id/rsvp', ({ body, user, params }) => {
       if (attendingCount > config.partySize) { ev.parties[idx] = dropFromParty(ev.parties[idx], m.id); ev.partiesVersion = (ev.partiesVersion || 0) + 1; }
     }
   }
+  save();
+  return eventFor(ev, user);
+});
+
+// Someone on an approved leave of absence that covers this event's date is normally left out of the "Going"
+// list and shown dimmed in the party builder - this is how they (or an officer acting for them) say "I'm
+// coming to this one anyway" without having to cancel the leave itself. Scoped per-event, per-owner (not
+// per-character: a leave is already per-owner, see server-compliance.js's isOnLeave), and purely a display/
+// party-placement switch - it does not touch the leave record, and does not change how compliance's own
+// attendance-percentage accounting treats the event (resolveOutcome still reads it as a leave either way).
+route('POST', '/api/events/:id/loa-override', ({ body, user, params }) => {
+  const ev = findEvent(params.id);
+  need(ev, 404, 'Event not found.');
+  const owner = clean(body.owner, 40);
+  need(owner, 400, 'Pick a player.');
+  need(isOfficer(user) || owner === user.key, 403, 'You can only do this for yourself.');
+  ev.loaOverride = ev.loaOverride || [];
+  if (body.override) { if (!ev.loaOverride.includes(owner)) ev.loaOverride.push(owner); }
+  else ev.loaOverride = ev.loaOverride.filter((o) => o !== owner);
   save();
   return eventFor(ev, user);
 });

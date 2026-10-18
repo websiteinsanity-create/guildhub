@@ -429,6 +429,34 @@ test('finishing a review DMs the player, mentions any coaching points, and a sec
   assert.equal((await state('student')).vods.find((x) => x.id === v.id).reviews.length, 2);
 });
 
+test('a review note can run well past the old 1000-character limit, and the DM it triggers still fits inside one Discord message', async () => {
+  const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck011', type: 'Siege', recordedDate: '2026-10-03' }, 'student')).body;
+
+  // Longer than the old cap (1000), well under the new one (1700) - a coach writing a genuinely long review
+  // must not have it silently cut off mid-sentence any more.
+  const longNote = 'Paragraph one, several sentences about the overall rotation and positioning. '.repeat(10)
+    + '\n\nParagraph two, after a blank line used as a separator, about cooldown usage specifically. '.repeat(5);
+  assert.ok(longNote.length > 1000 && longNote.length < 1700, `test note should sit between the old and new caps (was ${longNote.length})`);
+
+  fake.state.dms.length = 0;
+  const r = await call(`/api/vods/${v.id}/reviews`, 'POST', { note: longNote }, 'coach');
+  assert.equal(r.status, 200);
+  // clean() trims leading/trailing whitespace (same as every other free-text field), so compare against the
+  // trimmed form - nothing in the middle (the blank-line separator included) is touched.
+  assert.equal(r.body.note, longNote.trim(), 'the full note is kept, not truncated at the old 1000-character limit');
+  assert.equal((await state('student')).vods.find((x) => x.id === v.id).reviews[0].note, longNote.trim());
+
+  const dm = await waitFor(() => fake.state.dms.find((d) => d.to === STUDENT));
+  assert.ok(dm.content.includes(longNote.trim()), 'the DM carries the whole note, blank-line separator included');
+  assert.ok(dm.content.length <= 2000, `the wrapped DM must still fit in one Discord message (was ${dm.content.length} characters)`);
+
+  // Past the new cap, it is truncated the same way everything clean() touches always has been - silently, at
+  // save time - rather than being rejected outright.
+  const hugeNote = 'B'.repeat(2500);
+  const r2 = await call(`/api/vods/${v.id}/reviews`, 'POST', { note: hugeNote }, 'officer');
+  assert.equal(r2.body.note.length, 1700, 'truncated to the new cap, not saved in full and not rejected');
+});
+
 test('marking a VOD as finished is its own explicit, undoable choice - separate from writing a review note', async () => {
   const v = (await call('/api/vods', 'POST', { url: 'https://youtu.be/revcheck015', type: 'Siege', recordedDate: '2026-10-03' }, 'student')).body;
   assert.equal(v.finished, false, 'a freshly posted VOD starts out not finished');
