@@ -442,10 +442,10 @@ function voiceTestDialogHtml(t) {
     ${step('starting', 'Starting bots…')}
     ${step('waiting', t.channels.length ? `Bots are active${channelNames ? ` (${channelNames})` : ''}` : 'Bots are active')}
     ${t.phase === 'waiting' ? `<div class="muted small" style="margin:3px 0 3px 22px">Waiting ${waitLeft.replace(/^in /, '')} before tracking starts…</div>` : ''}
-    ${step('tracking', t.phase === 'ended' ? 'Tracking ended' : 'Tracking now')}
+    ${step('tracking', t.phase === 'ended' ? 'Tracking ended' : `Tracking now - quick check ${Math.min((t.checksDone || 0) + 1, t.checksTotal || 3)} of ${t.checksTotal || 3}`)}
     <div style="margin-top:14px"><b>Confirmed players</b>
       ${t.confirmed.length ? `<div class="scrollbox" style="max-height:220px;margin-top:6px">${t.confirmed.map((c) => `<div class="rsvp-row"><span>${esc(c.name)}</span><span class="muted small">${c.mute && c.deaf ? 'Muted + deafened' : c.mute ? 'Muted' : c.deaf ? 'Deafened' : 'Not muted'}</span></div>`).join('')}</div>`
-        : `<div class="muted small" style="margin-top:6px">${t.phase === 'tracking' ? `Nobody confirmed yet - join one of the test channels${channelNames ? `: ${channelNames}` : ''} and stay a moment.` : 'Nobody has been checked yet.'}</div>`}
+        : `<div class="muted small" style="margin-top:6px">${t.phase === 'tracking' ? `Nobody confirmed yet - join one of the test channels${channelNames ? `: ${channelNames}` : ''} before the checks finish.` : 'Nobody has been checked yet.'}</div>`}
     </div>
     <div class="dlg-actions" style="margin-top:14px"><button type="button" class="btn danger" data-act="voicetest-stop">Stop test</button></div>`;
 }

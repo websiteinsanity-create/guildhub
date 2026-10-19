@@ -64,7 +64,7 @@ async function startServer(extraEnv) {
       DISCORD_GUILD_ID: GUILD, DISCORD_BOT_TOKEN: 'bot-token', DISCORD_API_BASE: fake.url,
       SHOTCALLER_URL: bot.url, SHOTCALLER_API_KEY: KEY,
       // Fast enough to actually finish a test suite, slow enough to still observe each phase in order.
-      VOICE_TEST_DELAY_MS: '300', VOICE_TEST_POLL_MS: '100',
+      VOICE_TEST_DELAY_MS: '300', VOICE_TEST_POLL_MS: '100', VOICE_POLL_INTERVAL_MS: '150',
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -102,11 +102,12 @@ withServer('nothing running at first, and the route is officer-only', async (s) 
   assert.equal((await s.call('/api/admin/voice-test/start', 'POST', { channelId: ANCHOR_CHANNEL }, s.member)).status, 403);
 });
 
-withServer('starting creates a 3-channel session, waits the configured delay, then starts tracking - confirming only after 2 sightings within the rolling window, and reporting mute/deaf state', async (s) => {
+withServer('starting creates a 3-channel session, waits the configured delay, then runs the same fixed 3-quick-check cycle real tracking does - confirming anyone seen in any one check, and reporting mute/deaf state', async (s) => {
   const r = await s.call('/api/admin/voice-test/start', 'POST', { channelId: ANCHOR_CHANNEL }, s.officer);
   assert.equal(r.status, 200);
   assert.equal(r.body.phase, 'waiting');
   assert.equal(r.body.channels.length, 3, 'the anchor plus 2 bot-created channels');
+  assert.equal(r.body.checksTotal, 3, 'the same fixed 3-check cycle real tracking uses');
   assert.ok(r.body.trackAt > Date.now(), 'tracking has not opened yet');
 
   // Still "waiting" immediately after - the fake bot's session really is active with 3 real channels.
@@ -118,25 +119,31 @@ withServer('starting creates a 3-channel session, waits the configured delay, th
   await new Promise((res) => setTimeout(res, 150));
   assert.equal((await status(s)).confirmed.length, 0, 'tracking has not opened yet, so nobody is confirmed');
 
-  // Once tracking opens, that same person (still connected) needs to be SEEN AGAIN (>= 2 sightings within the
-  // rolling 30s window) before counting as confirmed - matching the real feature's own rule exactly.
-  const tracked = await poll(s, async () => { const t = await status(s); return t.phase === 'tracking' ? t : null; });
-  assert.equal(tracked.confirmed.length, 0, 'present, but only seen once so far since tracking opened');
+  // Once tracking opens, that same person (still connected) is confirmed off the very first quick check - no
+  // repeat-sighting requirement any more, matching the real feature's own union rule exactly.
   const confirmed = await poll(s, async () => { const t = await status(s); return t.confirmed.length ? t : null; });
+  assert.equal(confirmed.phase, 'tracking', 'confirmed by check 1, but the cycle keeps running for checks 2 and 3');
   assert.equal(confirmed.confirmed[0].ownerId, 'd-early-1');
   assert.equal(confirmed.confirmed[0].mute, false);
   assert.equal(confirmed.confirmed[0].deaf, false);
 
-  // A second, muted-and-deafened person joins a different test channel - also gets confirmed (muting never
-  // blocks confirmation here - the whole point of the test is to show mute state, not filter by it), and their
-  // mute/deaf state is reported accurately.
+  // A second, muted-and-deafened person joins a different test channel partway through - also gets confirmed
+  // on whichever check catches them (muting never blocks confirmation here - the whole point of the test is to
+  // show mute state, not filter by it), and their mute/deaf state is reported accurately.
   const other = r.body.channels[2].channelId;
   s.bot.setConnected(other, [{ id: 'd-muted-1', mute: true, deaf: true }]);
-  const both = await poll(s, async () => { const t = await status(s); return t.confirmed.length >= 2 ? t : null; });
+  const both = await poll(s, async () => { const t = await status(s); return t.confirmed.length >= 2 ? t : null; }, 60, 100);
   const muted = both.confirmed.find((c) => c.ownerId === 'd-muted-1');
   assert.ok(muted, 'a fully muted+deafened tester still gets confirmed');
   assert.deepEqual([muted.mute, muted.deaf], [true, true]);
-}, {});
+
+  // The cycle finishes itself after exactly 3 checks - same as real tracking - with both testers still confirmed.
+  const ended = await poll(s, async () => { const t = await status(s); return t.phase === 'ended' ? t : null; }, 60, 100);
+  assert.equal(ended.checksDone, 3);
+  assert.equal(ended.confirmed.length, 2);
+// A wide, fixed gap between checks (well beyond the default 150ms) so there's a real window to connect the
+// second tester between check 1 and check 2, instead of racing the whole 3-check cycle to finish first.
+}, { VOICE_POLL_INTERVAL_MS: '3000' });
 
 withServer('starting a second test while one is already running is refused; stopping clears it and actually stops the bot session', async (s) => {
   const r1 = await s.call('/api/admin/voice-test/start', 'POST', { channelId: ANCHOR_CHANNEL }, s.officer);

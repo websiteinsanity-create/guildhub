@@ -978,6 +978,17 @@ AFTER_RENDER.push((page) => {
   attPollOnce();
   atTimer = setInterval(attPollOnce, 5000);
 });
+// A separate, client-only 1s clock (no API call) just for the "Xm:Ys left" readout on the dashboard panel -
+// same approach as the event page's own countdown (app.js) - so the countdown ticks every second without
+// polling the live-data endpoint any more often than the 5s poll above already does.
+let atClockTimer = null;
+AFTER_RENDER.push(() => {
+  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  const running = !!(ev && ev.voiceTracking && ev.voiceTracking.active);
+  if (!running) { if (atClockTimer) { clearInterval(atClockTimer); atClockTimer = null; } return; }
+  if (atClockTimer) return;
+  atClockTimer = setInterval(() => { if (route().page === 'dashboard' && !$('#dlg').open) render(); }, 1000);
+});
 function attendanceTrackPanel() {
   if (!isOfficer()) return '';
   attDefaultEvent();
@@ -1015,21 +1026,16 @@ function attendanceTrackPanel() {
   </div>`;
 }
 function attVoiceControls(ev) {
-  const vt = ev.voiceTracking;
-  const running = !!(vt && vt.active);
-  const awaitingSave = !!(vt && !vt.active && vt.startedAt && !vt.finishedAt);
+  const { vt, running, finished, checksDone, checksTotal } = voiceTrackStatus(ev);
   const auto = ev.voiceTrackAuto !== false;
   const live = AT.live || { trackedCount: 0, deafenedCount: 0, noShowCount: 0 };
-  // The dashboard's 5s attendance poll (attPollOnce) re-renders the whole page while a track is running or
-  // awaiting save, which tears this button and data grid down and rebuilds them from scratch every single
-  // time - without this, the one-time "just switched to this state" entrance animations below (the button's
-  // green-to-orange/orange-to-gold morph, the data boxes popping in) would replay in full on every one of
-  // those re-renders. Nothing was actually restarting - the button was just re-playing its start animation
-  // every 5 seconds, which is what looked like "it keeps starting" (and kept doing so for as long as the
-  // track stayed running, matching "continues even after 10 mins"). Play the animation only the first time
-  // this event is seen in a given state (running / awaiting save / neither); a later re-render of the exact
-  // same state settles straight into its end look, no animation.
-  const state = running ? 'running' : awaitingSave ? 'save' : null;
+  // The dashboard's 5s attendance poll (attPollOnce) re-renders the whole page while a track is running,
+  // which tears this button and data grid down and rebuilds them from scratch every single time - without
+  // this, the one-time "just switched to this state" entrance animation below (the button's green-to-orange
+  // morph, the data boxes popping in) would replay in full on every one of those re-renders. Play the
+  // animation only the first time this event is seen in a given state (running / not); a later re-render of
+  // the exact same state settles straight into its end look, no animation.
+  const state = running ? 'running' : null;
   const firstSeen = AT.animSeen[ev.id] !== state;
   AT.animSeen[ev.id] = state;
   const settled = firstSeen ? '' : ' settled';
@@ -1052,16 +1058,15 @@ function attVoiceControls(ev) {
         </div>
       </div>
     </div>
-    ${(running || awaitingSave) && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
+    ${running && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
     <div class="att-sect att-action">
       ${running
-        ? `<button class="btn att-running-btn${settled}" disabled><span class="sc-spinner"></span> Running</button>`
-        : awaitingSave
-          ? `<button class="btn att-save-btn${settled}" data-act="att-save" data-id="${ev.id}">Save track</button>
-             <div class="muted small att-save-hint">Click "Save track" to save all the collected attendance for this event. If you don't, it saves itself automatically after 15 minutes - nothing is lost either way, even on a refresh.</div>`
-          : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>`}
+        ? `<button class="btn att-running-btn${settled}" disabled><span class="sc-spinner"></span> Running - check ${checksDone + 1} of ${checksTotal}</button>
+           <button class="btn sm" data-act="voicetrack-finish" data-id="${ev.id}" style="margin-left:6px">Finish tracking now</button>`
+        : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>
+             ${finished ? '<div class="muted small att-save-hint">✓ Finished tracking. Open the next event above and repeat the cycle whenever you\'re ready - no need to restart the bot.</div>' : ''}`}
     </div>
-    ${running || awaitingSave ? `<div class="att-sect"><div class="sc-data-grid">
+    ${running ? `<div class="att-sect"><div class="sc-data-grid">
         ${dataItem(0, 'Players tracked', live.trackedCount)}
         ${dataItem(1, 'Deafened', live.deafenedCount)}
         ${dataItem(2, 'Did not show up', live.noShowCount)}
@@ -1086,7 +1091,6 @@ FORMS['att-extra'] = (f, fd, id) => {
   act(() => patchEvent(evn, { voiceTrackExtraChannelIds: ids }), 'Channels saved');
 };
 ACTIONS['att-start'] = (el, d) => act(() => api(`/api/events/${d.id}/voice-track/start`, 'POST', {}), 'Tracking started');
-ACTIONS['att-save'] = (el, d) => act(async () => { await api(`/api/events/${d.id}/voice-track/finish`, 'POST', {}); attStopPoll(); AT.live = null; }, 'Track saved');
 
 VIEWS.dashboard = () => {
   const { order, hidden } = dashPrefs(), off = isOfficer();
@@ -1109,7 +1113,7 @@ VIEWS.dashboard = () => {
   const sideHasInfo = showInfo && !infoInLeadership;
   const side = showNext || sideHasInfo || showShotcaller;
   const panels = {
-    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.jpg" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
+    announcement: hidden.has('announcement') ? '' : `<div class="full"><div class="announce2"><img class="announce2-art" src="/img/announce-banner.png" alt="Announcement"><div class="announce2-box"><div class="announce2-text" data-announce-text>${esc(announceText)}</div></div></div></div>`,
     stats: hidden.has('stats') ? '' : `<div class="full">${statsOrHeroHtml()}</div>`,
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
