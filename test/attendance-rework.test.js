@@ -125,6 +125,35 @@ withServer('per-event pinOffsetMinutes and voiceTrackStartOffsetMinutes are inde
   assert.equal(fresh.pinOffsetMinutes, 30, 'a brand new event still picks up whatever the guild default is NOW');
 });
 
+withServer(
+  'a recurring series saved before per-event timing overrides existed backfills them on load, instead of handing materialize() an undefined that turns into a crash the moment anyone reads the generated event',
+  async (s) => {
+    const r = await s.call('/api/state', 'GET', null, s.officer);
+    assert.equal(r.status, 200, 'the server did not crash just loading state with a legacy series present');
+    const se = r.body.series.find((x) => x.id === 1);
+    assert.ok(se, 'the legacy series itself survived migration');
+    assert.equal(se.pinOffsetMinutes, 7, "backfilled from the guild default, not left undefined");
+    assert.equal(se.voiceTrackStartOffsetMinutes, -3, "backfilled from the guild default, not left undefined");
+    const ev = r.body.events.find((e) => e.seriesId === 1);
+    assert.ok(ev, 'materialize() generated at least one occurrence from the legacy series');
+    assert.equal(ev.pinOffsetMinutes, 7, "the generated event's own copy, not undefined/NaN");
+    assert.equal(ev.voiceTrackStartOffsetMinutes, -3);
+    assert.ok(!isNaN(Date.parse(ev.pinInfo.scheduledAt)), 'pinInfo computed a real date instead of throwing');
+  },
+  {
+    nextId: 50,
+    settings: { pinOffsetMinutes: 7, voiceTrackStartOffsetMinutes: -3 },
+    series: [{
+      id: 1, createdBy: 'Boss', at: new Date().toISOString(), skipped: [],
+      weekdays: [0, 1, 2, 3, 4, 5, 6], intervalWeeks: 1, time: '12:00', tz: 'UTC', startDate: '2020-01-01', endDate: '',
+      title: 'Legacy Weekly Raid', type: 'Archboss', description: '', points: 10, mandatory: true, pinEnabled: true,
+      maxSignups: 0, signupCloseMinutes: 30, pinWindowMinutes: 15, reminders: true, shotcallerAutoStart: false,
+      // Deliberately no pinOffsetMinutes/voiceTrackStartOffsetMinutes - this is a series saved before that
+      // per-event-override feature existed, which is exactly the shape that used to crash every read.
+    }],
+  },
+);
+
 withServer('GET /api/attendance-stats: an officer sees every player, a member sees only themselves', async (s) => {
   const m1 = (await s.call('/api/members', 'POST', { name: 'Ann', role: 'DPS', owner: 'Owner1' }, s.officer)).body;
   const m2 = (await s.call('/api/members', 'POST', { name: 'Bob', role: 'DPS' }, s.member)).body;

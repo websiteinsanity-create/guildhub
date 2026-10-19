@@ -1102,13 +1102,45 @@ function pinControlsBlock(ev) {
         : `<div class="muted small">The PIN is switched off for this event (see "Attendance PIN" below) - nothing is sent automatically, but you can still create and send one by hand with the button above.</div>`}`;
 }
 
+// Shared by the event page's own voice panel (below) and the dashboard's Attendance Tracking card
+// (attVoiceControls, features.js) so "running"/"finished" never look or behave differently depending on
+// which surface an officer happens to be on. A track is now a short, fixed thing - up to 3 checks, 10 seconds
+// apart - so there's no duration/countdown to compute client-side any more; checksDone/checksTotal (from
+// ev.voiceTracking, set server-side) are all there is to show progress with.
+function voiceTrackStatus(ev) {
+  const vt = ev.voiceTracking;
+  const running = !!(vt && vt.active);
+  const finished = !!(vt && vt.finishedAt);
+  return { vt, running, finished, checksDone: (vt && vt.checksDone) || 0, checksTotal: 3 };
+}
+// Keeps the panel up to date while a track is running, on whichever page currently has it open - the checks
+// themselves happen on the server's own clock, so the client needs to actually re-fetch (not just
+// re-render) to notice checksDone advancing or the track finishing, rather than waiting on the normal 30s
+// background refresh and feeling stuck for most of a track that's over in well under a minute.
+let voiceTrackClockTimer = null, voiceTrackClockFor = null;
+AFTER_RENDER.push(() => {
+  const r = route();
+  const evId = r.page === 'events' && r.id ? Number(r.id) : null;
+  const ev = evId ? byId(S.events, evId) : null;
+  const running = !!(ev && ev.voiceTracking && ev.voiceTracking.active);
+  if (!running) {
+    if (voiceTrackClockTimer) { clearInterval(voiceTrackClockTimer); voiceTrackClockTimer = null; voiceTrackClockFor = null; }
+    return;
+  }
+  if (voiceTrackClockFor === evId && voiceTrackClockTimer) return;
+  if (voiceTrackClockTimer) clearInterval(voiceTrackClockTimer);
+  voiceTrackClockFor = evId;
+  voiceTrackClockTimer = setInterval(() => { if (route().page === 'events' && !$('#dlg').open) refresh(true).catch(() => {}); }, 2000);
+});
+ACTIONS['voicetrack-finish'] = (el, d) => act(() => api(`/api/events/${d.id}/voice-track/finish`, 'POST', {}), 'Tracking finished');
+
 // Admin-only, voice mode's counterpart to the PIN panel above. Lets an officer see (and, if "automatic
 // tracking" is switched off for this event, control by hand) when Shotcaller voice tracking actually starts
 // crediting attendance, and pick extra channels to track for this one event besides whatever Shotcaller
 // creates for it.
 function voiceTrackPanel(ev) {
   const auto = ev.voiceTrackAuto !== false;
-  const tracking = !!(ev.voiceTracking && ev.voiceTracking.active);
+  const { running, finished, checksDone, checksTotal } = voiceTrackStatus(ev);
   const tracked = !!ev.attendanceTracked;
   const seen = Object.values((ev.voiceTracking && ev.voiceTracking.seen) || {});
   return `<div class="panel"><div class="ev-title"><h3>Voice channel tracking and Reminders</h3>
@@ -1122,8 +1154,11 @@ function voiceTrackPanel(ev) {
     </label>
     <div class="muted small" style="margin:-2px 0 10px">${auto
       ? 'Tracking starts on its own the moment Shotcaller is started for this event (posting its parties with "Also start Shotcaller" ticked).'
-      : tracking ? 'Tracking is already running for this event.' : 'Automatic tracking is off for this event - Shotcaller can still be started as usual, but attendance is only tracked once you start it by hand below.'}</div>
-    ${!auto && !tracking ? `<button class="btn sm" data-act="voicetrack-start" data-id="${ev.id}">Start tracking now</button>` : ''}
+      : running ? 'Tracking is already running for this event.' : 'Automatic tracking is off for this event - Shotcaller can still be started as usual, but attendance is only tracked once you start it by hand below.'}</div>
+    ${!auto && !running ? `<button class="btn sm" data-act="voicetrack-start" data-id="${ev.id}">Start tracking now</button>` : ''}
+    ${running ? `<div class="muted small" style="margin:0 0 10px">Running - quick check ${checksDone + 1} of ${checksTotal}. Anyone seen in any of these checks counts as attended.
+        <button class="btn sm" data-act="voicetrack-finish" data-id="${ev.id}" style="margin-left:6px">Finish tracking now</button></div>` : ''}
+    ${finished && !running ? `<div class="muted small" style="margin:0 0 10px">✓ Finished tracking. Move on to the next event's own page and start tracking there whenever you're ready - this bot session never needs to be restarted for it.</div>` : ''}
     <div class="field" style="margin-top:14px"><label>Other channels tracked for this event (besides whatever Shotcaller creates)</label>
       <form data-form="voicetrack-extra" data-id="${ev.id}">
         ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(ev.voiceTrackExtraChannelIds || []) : ''}
@@ -1136,15 +1171,17 @@ function voiceTrackPanel(ev) {
 // The "Who got tracked" popup: every player seen in any of this event's tracked voice channels this session,
 // credited or not, muted/deafened state included - not just the ones the ignoreMuted/ignoreDeafened settings
 // would actually credit. Miss-reason is worked out here at read time, not stored, from the same final "seen"
-// entry the server keeps (server-shotcaller.js's pollVoiceAttendance): not recognized as any active/mercenary
-// character for this event, muted/deafened and excluded by the guild's own tracking settings, or seen too
-// briefly to be confirmed (fewer than the 2-sightings-in-30-seconds the server requires before crediting).
+// entry the server keeps (server-shotcaller.js's runCheck): not recognized as any active/mercenary character
+// for this event, or muted/deafened and excluded by the guild's own tracking settings. Being seen in any one
+// of the track's (at most 3) checks is now enough to be credited, so there's no "seen too briefly" case left
+// once someone is both recognized and not excluded - the fallback below only guards an edge case that
+// shouldn't actually happen.
 function voiceSeenReason(entry) {
   if (entry.credited) return '';
   if (!entry.memberId) return 'Connected, but not recognized as one of this event\'s characters.';
   if (entry.muted && S.settings.voiceAttendanceIgnoreMuted) return 'Muted - excluded by your tracking settings.';
   if (entry.deafened && S.settings.voiceAttendanceIgnoreDeafened) return 'Deafened - excluded by your tracking settings.';
-  return 'Seen too briefly to be confirmed yet.';
+  return 'Connected, but not credited this track.';
 }
 const muteDeafLabel = (muted, deafened) => [muted ? 'Muted' : '', deafened ? 'Deafened' : ''].filter(Boolean).join(', ') || 'Not muted or deafened';
 function voiceSeenDialog(ev) {
@@ -1803,6 +1840,7 @@ function adminEventRules() {
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-off">Create the PIN (minutes after start, negative = before)</label><input id="er-off" name="pinOffsetMinutes" type="number" min="-1440" max="1440" value="${st.pinOffsetMinutes}" ${voice ? '' : 'required'}></div>
       <div class="field" data-attn="pin" ${voice ? 'style="display:none"' : ''}><label for="er-win">PIN window (minutes players can enter it)</label><input id="er-win" name="pinWindowDefault" type="number" min="1" max="720" value="${st.pinWindowDefault}" ${voice ? '' : 'required'}></div>
       <div class="field" data-attn="voice" ${voice ? '' : 'style="display:none"'}><label for="er-track-off">Voice tracking starts (minutes after the event begins, negative = before)</label><input id="er-track-off" name="voiceTrackStartOffsetMinutes" type="number" min="-1440" max="1440" value="${st.voiceTrackStartOffsetMinutes ?? 0}"></div>
+      <div class="field muted small" data-attn="voice" style="align-self:flex-end;padding-bottom:10px${voice ? '' : ';display:none'}">Each track is a quick, fixed check (once, then twice more 10 seconds apart) - anyone seen in any of the three counts as attended. Nothing to configure here.</div>
       <div class="field" data-attn="voice" style="display:flex;flex-direction:column;gap:6px${voice ? '' : ';display:none'}">
         <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="voiceAttendanceIgnoreMuted" ${st.voiceAttendanceIgnoreMuted ? 'checked' : ''}> Don't count a player muted (no mic) in voice as attended</label>
         <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:0"><input type="checkbox" name="voiceAttendanceIgnoreDeafened" ${st.voiceAttendanceIgnoreDeafened ? 'checked' : ''}> Don't count a player deafened (not listening) in voice as attended</label>

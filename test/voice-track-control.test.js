@@ -360,3 +360,69 @@ withServer('"Start tracking now" still tracks every party after an earlier party
   const finalEv = await attendedOf(s, ev.id);
   assert.ok(finalEv.attended.includes(memberD.id), "party D is still tracked on its own real channel after an earlier party's placeholder status changed, with no leader to go by at all");
 });
+
+// ---------------------------------------------------------------- back-to-back events on one Shotcaller session
+withServer(
+  "a track finishes itself after its 3 quick checks - so the next event can start tracking on the still-running session with no restart",
+  async (s) => {
+    await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+    const { ev: evA, anchorMembers: membersA } = await makeTrackedEvent(s, -5);
+    const r = await s.call(`/api/events/${evA.id}/post-parties`, 'POST', postBody({}), s.officer);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+
+    s.bot.setConnected(VOICE_CHANNEL, membersA.map((m) => m.owner));
+    await poll(s, async () => { const e = await attendedOf(s, evA.id); return e.attended.length === membersA.length ? e : null; });
+
+    // The 3 quick checks (VOICE_POLL_INTERVAL_MS=150 in this test, see startServer) run their course on
+    // their own - no duration setting to wait out, just the fixed 3-check cycle finishing itself.
+    await poll(s, async () => { const e = await attendedOf(s, evA.id); return (e.voiceTracking.active === false && e.voiceTracking.finishedAt) ? e : null; }, 40, 100);
+    const curA = await attendedOf(s, evA.id);
+    assert.equal(curA.voiceTracking.active, false, "event A's own track finished itself once its 3 checks were done");
+    assert.ok(curA.voiceTracking.finishedAt, 'finished immediately, not left "awaiting save"');
+    assert.ok(curA.attended.includes(membersA[0].id), 'the attendance it already earned is untouched');
+
+    // The bot/session was never stopped or restarted - event B can start tracking on it immediately by hand,
+    // exactly the back-to-back workflow this quick-check model is for.
+    const { ev: evB, anchorMembers: membersB } = await makeTrackedEvent(s, -1, { voiceTrackAuto: false });
+    const startB = await s.call(`/api/events/${evB.id}/voice-track/start`, 'POST', {}, s.officer);
+    assert.equal(startB.status, 200, JSON.stringify(startB.body), 'the session is still live, so this needs no restart');
+    s.bot.setConnected(VOICE_CHANNEL, membersB.map((m) => m.owner));
+    await poll(s, async () => { const e = await attendedOf(s, evB.id); return e.attended.length === membersB.length ? e : null; });
+  },
+);
+
+withServer(
+  'finishing a track by hand before its 3 checks are done lets an officer move straight on to the next event',
+  async (s) => {
+    await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+    const { ev: evA, anchorMembers: membersA } = await makeTrackedEvent(s, -5);
+    // Connected BEFORE Shotcaller starts (and tracking begins) so the very first of the 3 checks already
+    // sees everyone - and VOICE_POLL_INTERVAL_MS is overridden to a much longer gap for this test alone, so
+    // checks #2/#3 (on a real wall-clock timer, ticking regardless of how long the surrounding request takes)
+    // can't race ahead and finish the track on their own before this test gets to finish it by hand.
+    s.bot.setConnected(VOICE_CHANNEL, membersA.map((m) => m.owner));
+    const r = await s.call(`/api/events/${evA.id}/post-parties`, 'POST', postBody({}), s.officer);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    // ev.attended itself is not updated until the track actually finishes (natural or by hand) - while it's
+    // still running, whoever has been SEEN so far only lives in voiceTracking.sessionSeen. Poll on that.
+    await poll(s, async () => { const e = await attendedOf(s, evA.id); return (e.voiceTracking.sessionSeen || []).length >= membersA.length ? e : null; });
+    const stillRunning = await attendedOf(s, evA.id);
+    assert.equal(stillRunning.voiceTracking.active, true, 'confirming it is genuinely still running, not already stopped');
+    assert.equal(stillRunning.attended.length, 0, 'seen, but not yet credited to attendance - that only happens once the track finishes');
+
+    const finish = await s.call(`/api/events/${evA.id}/voice-track/finish`, 'POST', {}, s.officer);
+    assert.equal(finish.status, 200, JSON.stringify(finish.body));
+    assert.equal(finish.body.voiceTracking.active, false);
+    assert.ok(finish.body.voiceTracking.finishedAt, 'finished immediately by hand, while the session was still live');
+    for (const m of membersA) assert.ok(finish.body.attended.includes(m.id), 'finishing by hand credits everyone seen so far, not just whoever would have been seen by check 3');
+
+    const { ev: evB, anchorMembers: membersB } = await makeTrackedEvent(s, -1, { voiceTrackAuto: false });
+    s.bot.setConnected(VOICE_CHANNEL, membersB.map((m) => m.owner));
+    const startB = await s.call(`/api/events/${evB.id}/voice-track/start`, 'POST', {}, s.officer);
+    assert.equal(startB.status, 200, JSON.stringify(startB.body), 'no restart needed - the session never stopped');
+    await poll(s, async () => { const e = await attendedOf(s, evB.id); return (e.voiceTracking.sessionSeen || []).length >= membersB.length ? e : null; });
+    await s.call(`/api/events/${evB.id}/voice-track/finish`, 'POST', {}, s.officer);
+    assert.equal((await attendedOf(s, evA.id)).attended.length, membersA.length, "event A keeps what it earned, undisturbed by B's track starting");
+  },
+  { VOICE_POLL_INTERVAL_MS: '5000' },
+);

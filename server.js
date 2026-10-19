@@ -392,7 +392,17 @@ function migrate() {
     m.builds = m.builds || [];
     m.mode = m.mode || config.buildModes?.[0] || 'PvE';
   }
-  for (const se of db.series) { se.skipped = se.skipped || []; }
+  for (const se of db.series) {
+    se.skipped = se.skipped || [];
+    // Series from before per-event timing overrides existed: its template never got these two fields, so
+    // every event materialize() generates from it keeps copying that same "undefined" forward (see the note
+    // in applyTemplate below) - undefined * 60000 is NaN, and `new Date(NaN).toISOString()` throws, crashing
+    // the moment anyone reads that event. Fixing this only in applyTemplate is not enough: it can only copy
+    // whatever is already on the series, so the series record itself has to be backfilled too, same as every
+    // existing event already is a few lines down.
+    if (se.pinOffsetMinutes === undefined) se.pinOffsetMinutes = db.settings.pinOffsetMinutes;
+    if (se.voiceTrackStartOffsetMinutes === undefined) se.voiceTrackStartOffsetMinutes = db.settings.voiceTrackStartOffsetMinutes;
+  }
   for (const l of db.loot) if (!l.type) l.type = LOOT_DEFAULT_TYPE;
   for (const p of db.presets) p.parties = normParties(p.parties);
   db.presetRules = db.presetRules.filter((r) => db.presets.some((p) => p.id === r.presetId));
@@ -766,7 +776,7 @@ function pickEvent(b, ex) {
   };
 }
 // What actually governs this one event: its own override if it has one, otherwise the guild-wide default.
-// Shared by tick()'s auto-PIN gate, server-shotcaller.js's beginVoiceTracking/pollVoiceAttendance, and the
+// Shared by tick()'s auto-PIN gate, server-shotcaller.js's beginVoiceTracking/runCheck, and the
 // client (eventFor exposes attendanceModeOverride so public/app.js can compute the same thing from
 // S.settings.attendanceMode without a round trip).
 function effectiveAttendanceMode(ev) {
