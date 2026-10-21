@@ -210,7 +210,11 @@ module.exports = function install(ctx) {
     // can't start, and no half-done state to untangle afterward either.
     const sc = body.shotcaller && (body.shotcaller.enabled === true || body.shotcaller.enabled === 'true') ? body.shotcaller : null;
     if (sc) {
-      const missing = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+      // Party 1 (the anchor) is exempt from this, same as it's exempt from the placeholder-based skip decision
+      // below (computePartyChannels in server-shotcaller.js) - its channel is the one the officer just picked
+      // directly and is never renamed by Shotcaller, so there is nothing a leader's name would ever be used
+      // for there, unlike every other party (named "<leader>'s Party" by the bot).
+      const missing = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p) && !p.leader);
       need(!missing.length, 400, `Pick a leader for ${missing.map((p) => `"${p.name}"`).join(', ')} first, or mark ${missing.length === 1 ? 'it' : 'them'} as a placeholder (party menu > "Mark as placeholder"), before starting Shotcaller with this post.`);
       need(shotcallerApi.configured(), 400, 'Shotcaller is not set up yet. See Admin > Shotcaller.');
       need(/^\d{15,25}$/.test(String(sc.channelId || '')), 400, 'Pick a voice channel for Shotcaller.');

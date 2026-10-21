@@ -119,12 +119,15 @@ withServer('posting without the shotcaller field behaves exactly as before (unaf
   assert.equal(r.body.shotcaller, null);
 });
 
-withServer('enabling shotcaller blocks the WHOLE post when a non-placeholder party (more than 3 members) has no leader', async (s) => {
-  const ev = await makeEventWithParties(s, [{ members: 6, leader: false }, { members: 2, leader: false }]);
+withServer('enabling shotcaller blocks the WHOLE post when ANY non-anchor real party has no leader, however small (a small real party is never auto-exempt)', async (s) => {
+  // Party 1 (the anchor, index 0) is always exempt from the leader check - its channel is the one already
+  // picked directly, never renamed by Shotcaller, so it needs no leader regardless of size (see the "the picked
+  // anchor channel" test below). Give it a leader anyway here so this test is only exercising Party 2 and 3.
+  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 6, leader: false }, { members: 2, leader: false }]);
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
   assert.equal(r.status, 400);
-  assert.match(r.body.error, /Party 1/);
-  assert.doesNotMatch(r.body.error, /Party 2/, 'Party 2 has only 2 members, so it is auto-exempt and should not be named');
+  assert.match(r.body.error, /Party 2/);
+  assert.match(r.body.error, /Party 3/, 'Party 3 has real members (just 2 of them) and needs a leader too - a small party is not automatically exempt');
   assert.equal(s.fake.state.posts.length, 0, 'nothing was posted to Discord - the whole action was blocked');
   assert.equal(s.bot.calls.length, 0, 'the Shotcaller bot was never even contacted');
 });
@@ -139,27 +142,23 @@ withServer('a manually-flagged placeholder party is exempt from the leader check
   assert.equal(sent.body.partyNames.length, 0);
 });
 
-withServer('a party with 3 or fewer members is skipped from Shotcaller automatically, same as an explicitly-flagged one', async (s) => {
-  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: false }]);
+withServer('a small (3-or-fewer-member) party with a leader is tracked by Shotcaller like any other real party - it is never silently skipped just for being small', async (s) => {
+  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: true }]);
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
   assert.equal(r.status, 200);
   assert.equal(r.body.shotcaller.ok, true);
   const sent = s.bot.calls.find((c) => c.url.endsWith('/session/start'));
-  assert.equal(sent.body.count, 1, 'the 2-member party is auto-placeholder and gets no channel');
+  assert.equal(sent.body.count, 2, 'both real parties get a channel - a 2-member party is a real party, not an automatic placeholder');
+  assert.equal(sent.body.partyNames.length, 1);
 });
 
-withServer('an officer can override a ≤3-member party to NOT be a placeholder, so it is included (and then needs a leader like any other real party)', async (s) => {
-  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: false, placeholderOverride: true, placeholder: false }]);
-  const blocked = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
-  assert.equal(blocked.status, 400, 'forced out of placeholder status, this 2-member party now needs a leader too');
-  assert.match(blocked.body.error, /Party 2/);
-
-  const ev2 = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: true, placeholderOverride: true, placeholder: false }]);
-  const r = await s.call(`/api/events/${ev2.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
-  assert.equal(r.status, 200);
-  const sent = s.bot.calls.filter((c) => c.url.endsWith('/session/start')).pop();
-  assert.equal(sent.body.count, 2, 'the override makes it a real party, so it gets its own channel despite having only 2 members');
-  assert.equal(sent.body.partyNames.length, 1);
+withServer('only a genuinely empty (0-member) party is an automatic placeholder - an officer can still explicitly flag a small-but-real party as one on purpose, to skip it anyway', async (s) => {
+  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 2, leader: false, placeholderOverride: true, placeholder: true }]);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
+  assert.equal(r.status, 200, 'exempt from the leader check despite having no leader, because it is explicitly flagged as a placeholder');
+  const sent = s.bot.calls.find((c) => c.url.endsWith('/session/start'));
+  assert.equal(sent.body.count, 1, 'only the anchor party - the explicitly-flagged small party still gets no channel');
+  assert.equal(sent.body.partyNames.length, 0);
 });
 
 withServer('a valid combined post actually posts to Discord AND starts Shotcaller, with party names from the leaders', async (s) => {

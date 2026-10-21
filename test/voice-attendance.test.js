@@ -497,3 +497,41 @@ withServer('several officers watching the same tracked event at once does not mu
   await s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer);
   assert.ok(sessionCallsSoFar() > afterMore, 'after the cache window passes, a read gets a fresh answer from the bot again');
 }, { SHOTCALLER_SESSION_CACHE_MS: '200' });
+
+// Reproduces the exact live-production report: an officer started Shotcaller from the standalone panel
+// (public/shotcaller.js's "Start Shotcaller session" dialog with no event selected, i.e. no body.eventId) with
+// a generic party count bigger than this event's own real line-up - same shape as "started with 12 default
+// parties" when the event itself only has a couple of real parties. With no eventId, startSession's own
+// snapshotVoiceSession call never runs (see /api/shotcaller/start above - it's skipped whenever body.eventId
+// is falsy), so when tracking is later started by hand there is no frozen snapshot to fall back on, and
+// computePartyChannels has to guess channels for this event's real parties purely by position - leaving every
+// bot-created channel beyond that guessed range (c2+ here) completely unreferenced by
+// ev.voiceTracking.partyChannels, even though the bot is reporting live presence for ALL of them. Before the
+// fix, only channels that made it into partyChannels were ever consulted for crediting, so anyone actually
+// standing in one of those left-over channels was silently never credited - no matter how long they waited,
+// unmuted, from the start. The fix credits from every channel the bot reports for the live session, full stop.
+withServer("a party's members standing in a voice channel the officer's standalone Shotcaller start never tied to any specific party still get credited - the exact 'started with more default parties than real ones' scenario reported in production", async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev, anchorMembers, party2Members } = await makeTrackedEvent(s);
+
+  // Standalone start, no eventId at all - count=5 gives the bot 5 channels (c0..c4) even though this event
+  // only has one real party besides the anchor. No partyNames either, so there is nothing for name-matching
+  // to latch onto - computePartyChannels falls straight to guessing by position.
+  const started = await s.call('/api/shotcaller/start', 'POST', { channelId: VOICE_CHANNEL, count: 5 }, s.officer);
+  assert.equal(started.status, 200, JSON.stringify(started.body));
+  assert.equal(ev.voiceSessionSnapshot, undefined, 'sanity check: a standalone start with no eventId must not have snapshotted anything for this event');
+
+  const trackStart = await s.call(`/api/events/${ev.id}/voice-track/start`, 'POST', null, s.officer);
+  assert.equal(trackStart.status, 200, JSON.stringify(trackStart.body));
+  // Party 2 gets guessed into c1 by position (anchor is always c0) - confirming that, then putting its real
+  // members in c3 instead (an entirely different, "leftover" channel the bot created but nothing ever claimed)
+  // is what reproduces "officer created more channels than real parties, and people didn't land where Guild
+  // Hall's own guess expected them to."
+  assert.deepEqual(trackStart.body.voiceTracking.partyChannels.map((pc) => pc.channelId), ['c0', 'c1'], 'sanity check: only 2 of the 5 bot-created channels ever made it into partyChannels');
+
+  s.bot.setConnected('c3', party2Members.map((m) => m.owner));
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return party2Members.every((m) => e.attended.includes(m.id)) ? e : null; });
+
+  const finalEv = await attendedOf(s, ev.id);
+  for (const m of party2Members) assert.ok(finalEv.attended.includes(m.id), `${m.owner}, standing in channel c3 (never matched to any party by Guild Hall's own guess), should still be credited for being in the live session at all`);
+});
