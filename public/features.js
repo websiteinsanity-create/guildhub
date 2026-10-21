@@ -2013,8 +2013,9 @@ ACTIONS['parties-post'] = async (el, d) => {
   // Missing leaders no longer disable the checkbox here - submitting the form (FORMS.postparties below) checks
   // for them itself and, if Shotcaller is ticked, the leader-check dialog it opens only offers "assign
   // automatically" (never "continue without them"), so a real party without a leader can no longer reach the
-  // server still missing one when Shotcaller is about to need it.
-  const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+  // server still missing one when Shotcaller is about to need it. Party 1 (the anchor) is skipped here too -
+  // see the matching comment in server-community.js's post-parties route.
+  const missingLeaders = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p) && !p.leader);
   const st = S.settings.shotcaller || {};
   const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   const scLastId = scLast && scChannels.some((c) => c.id === scLast.channelId) ? scLast.channelId : (scChannels[0] || {}).id;
@@ -2076,10 +2077,11 @@ FORMS.postparties = (f, fd, id) => {
   const scOn = f.elements.scEnabled && f.elements.scEnabled.checked;
   const shotcaller = scOn ? { enabled: true, channelId: fd.scChannelId, dedicatedCallerId: fd.scDedicatedCallerId || null } : undefined;
   const opts = { text: fd.text, channelId: fd.channelId, channelName: name, scOn, shotcaller };
-  // Placeholder parties (3 or fewer members) are never part of this check - there's no one to really ask about
-  // for a stand-in party, they always get a leader assigned silently (finishPostParties -> autoAssignMissingLeaders
-  // handles that unconditionally). This only asks about real parties an officer actually built.
-  const missingLeaders = ev.parties.filter((p) => !partyIsPlaceholder(p) && !p.leader);
+  // Placeholder (empty) parties are never part of this check - there's no one to really ask about for a
+  // stand-in party, they always get a leader assigned silently (finishPostParties -> autoAssignMissingLeaders
+  // handles that unconditionally). Party 1 (the anchor) is skipped too - see the matching comment in
+  // server-community.js's post-parties route. This only asks about real parties an officer actually built.
+  const missingLeaders = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p) && !p.leader);
   if (missingLeaders.length) {
     PENDING_POST_PARTIES = (autoAssign) => finishPostParties(Number(id), opts, autoAssign);
     openLeaderCheckDialog(ev, missingLeaders, scOn);

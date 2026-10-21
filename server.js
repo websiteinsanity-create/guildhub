@@ -335,13 +335,18 @@ function normParties(arr) {
       }
     }
     // placeholder / placeholderOverride: whether this party is a real line-up yet. Left alone
-    // (placeholderOverride: false), a party counts as a placeholder automatically once it has 3 or fewer
-    // members - see partyIsPlaceholder() below. placeholderOverride: true means an officer explicitly toggled
-    // it (party menu > "Mark/Unmark as placeholder"), and placeholder then says which way, overriding the
-    // automatic member-count rule either direction - including forcing a 3-or-fewer party to NOT count as one.
-    // Used by the "post to Discord + start Shotcaller" leader check (server-community.js) and by Shotcaller
-    // itself to decide which parties get skipped entirely (no voice channel, not counted toward its 12-party
-    // cap) - see server-community.js's post-parties route and public/shotcaller.js's Start dialog.
+    // (placeholderOverride: false), a party counts as a placeholder automatically only once it has ZERO
+    // members - see partyIsPlaceholder() below. A party with even one real person in it is never silently
+    // treated as empty: that person could be in voice, on time, unmuted, and still get skipped from Shotcaller
+    // entirely (no channel created, so never checked for voice attendance) under an older, broader "3 or fewer
+    // members" version of this rule - fixed because a small-but-real party (often exactly the kind with nobody
+    // bothered to assign as leader) was being silently excluded from tracking with nothing on screen to explain
+    // why. placeholderOverride: true means an officer explicitly toggled it (party menu > "Mark/Unmark as
+    // placeholder"), and placeholder then says which way, overriding the automatic rule either direction -
+    // including forcing an empty party to still count as a real one, or a populated party to be skipped on
+    // purpose. Used by the "post to Discord + start Shotcaller" leader check (server-community.js) and by
+    // Shotcaller itself to decide which parties get skipped entirely (no voice channel, not counted toward its
+    // 12-party cap) - see server-community.js's post-parties route and public/shotcaller.js's Start dialog.
     const placeholder = !Array.isArray(p) && !!(p && p.placeholder);
     // Back-compat: data saved before placeholderOverride existed only ever stored a bare `placeholder`
     // boolean, and the only way it could be `true` was an officer's explicit "Mark as placeholder" click (the
@@ -357,7 +362,7 @@ function normParties(arr) {
 }
 // Single source of truth for "is this party a placeholder right now" - mirrored in public/app.js's copy of the
 // same function (keep both in sync; each is commented to point at the other).
-function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length <= 3; }
+function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length === 0; }
 // Brings data written by older versions up to date. Runs on start and after a backup is restored.
 function migrate() {
   db.duties = db.duties || [];

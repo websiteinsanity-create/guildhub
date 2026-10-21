@@ -1183,13 +1183,49 @@ function voiceSeenReason(entry) {
   if (entry.deafened && S.settings.voiceAttendanceIgnoreDeafened) return 'Deafened - excluded by your tracking settings.';
   return 'Connected, but not credited this track.';
 }
+// Short, inline form of the same reason, for the per-channel breakdown below ("Not Credited - deafened")
+// rather than the full sentence the table view uses.
+function voiceSeenShortReason(entry) {
+  if (entry.credited) return '';
+  if (!entry.memberId) return 'unrecognized';
+  if (entry.muted && S.settings.voiceAttendanceIgnoreMuted) return 'muted';
+  if (entry.deafened && S.settings.voiceAttendanceIgnoreDeafened) return 'deafened';
+  return 'not credited';
+}
 const muteDeafLabel = (muted, deafened) => [muted ? 'Muted' : '', deafened ? 'Deafened' : ''].filter(Boolean).join(', ') || 'Not muted or deafened';
+// Groups the same "seen" entries the table above lists by the voice channel they were actually last seen in
+// (entry.channelId/channelLabel, set alongside every other field on each sighting - server-shotcaller.js's
+// runCheck) - this is what makes it possible to tell "channel 7 never got checked" apart from "channel 7 was
+// checked and really was empty", which the flat list above can't show on its own. ev.voiceTracking.channels
+// is the full, ordered list of every channel the bot actually reported this track (built fresh each check),
+// so a channel with nobody in it still gets its own "empty" row here instead of just not appearing.
+function voiceSeenByChannel(ev, seen) {
+  const channels = (ev.voiceTracking && ev.voiceTracking.channels) || [];
+  const byChannel = new Map(channels.map((c) => [c.channelId, []]));
+  const stray = []; // a sighting whose channel isn't in the current channel list (track just started, or the bot dropped that channel) - shown as its own group rather than silently dropped
+  for (const s of seen) {
+    if (s.channelId && byChannel.has(s.channelId)) byChannel.get(s.channelId).push(s);
+    else stray.push(s);
+  }
+  const groups = channels.map((c) => ({ label: c.label, entries: byChannel.get(c.channelId) }));
+  if (stray.length) groups.push({ label: 'Other', entries: stray });
+  return groups;
+}
+function voiceSeenEntryLabel(s) {
+  const name = esc(s.memberName || `(unrecognized: ${s.ownerId})`);
+  return s.credited ? `${name} (Credited)` : `${name} (Not Credited - ${esc(voiceSeenShortReason(s))})`;
+}
 function voiceSeenDialog(ev) {
   const seen = Object.entries((ev.voiceTracking && ev.voiceTracking.seen) || {})
     .map(([ownerId, entry]) => ({ ownerId, ...entry }))
     .sort((a, b) => (b.credited - a.credited) || String(a.memberName || a.ownerId).localeCompare(String(b.memberName || b.ownerId)));
+  const groups = voiceSeenByChannel(ev, seen);
   openDialog(`<h2>Who got tracked</h2>
     <div class="muted small" style="margin:-8px 0 12px">Everyone seen in this event's tracked voice channels, credited or not. Muted/deafened state is captured at the moment someone is credited, not live - except for anyone not yet credited, which is their most recent sighting.</div>
+    ${groups.length ? `<div class="muted small" style="margin:0 0 10px"><b>By channel</b></div>
+    <div style="margin:0 0 16px">${groups.map((g) => `<div style="margin:0 0 6px">
+        <b>${esc(g.label)}:</b> ${g.entries.length ? g.entries.map(voiceSeenEntryLabel).join(' , ') : '<span class="muted">empty</span>'}
+      </div>`).join('')}</div>` : ''}
     ${seen.length ? `<div class="tbl-wrap"><table><thead><tr><th>Who</th><th>State</th><th>Result</th></tr></thead><tbody>${seen.map((s) => `<tr>
         <td><b>${esc(s.memberName || `(unrecognized: ${s.ownerId})`)}</b></td>
         <td class="muted small">${s.credited ? muteDeafLabel(s.mutedAtCredit, s.deafenedAtCredit) : muteDeafLabel(s.muted, s.deafened)}</td>
@@ -1283,14 +1319,16 @@ function memberRow(m, at, o) {
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
 
-// A party counts as a placeholder (not a real line-up yet) automatically once it has 3 or fewer members,
+// A party counts as a placeholder (not a real line-up yet) automatically only once it has ZERO members,
 // unless an officer has explicitly overridden that (party menu > "Mark/Unmark as placeholder") - which can go
-// either way, including forcing a 3-or-fewer party to NOT count as one. Mirrors server.js's partyIsPlaceholder()
-// (keep both in sync; each is commented to point at the other). Used by the "post to Discord + start
-// Shotcaller" leader check and by Shotcaller itself to skip placeholder parties entirely (no voice channel,
-// not counted toward its 12-party cap). members.length is the raw assigned count, not confirmed/attending,
-// matching how both of those checks read parties.
-function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length <= 3; }
+// either way, including forcing an empty party to still count as a real one. (An older "3 or fewer members"
+// version of this rule silently skipped small-but-real parties from Shotcaller voice tracking entirely - fixed,
+// since a party with even one real person in it is never a placeholder on its own.) Mirrors server.js's
+// partyIsPlaceholder() (keep both in sync; each is commented to point at the other). Used by the "post to
+// Discord + start Shotcaller" leader check and by Shotcaller itself to skip placeholder parties entirely (no
+// voice channel, not counted toward its 12-party cap). members.length is the raw assigned count, not
+// confirmed/attending, matching how both of those checks read parties.
+function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length === 0; }
 // clearOn (the "Clear" switch on the board - see board() below): when on, this card shows only confirmed,
 // attending members and drops the dimmed "Not confirmed" sub-list entirely - and if that leaves nobody to
 // show, the whole party card is skipped (see board(), which filters out whatever this returns falsy for),

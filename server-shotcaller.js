@@ -242,7 +242,7 @@ module.exports = function install(ctx) {
     // chosen, say - so there was never anything to freeze).
     const snap = ev.voiceSessionSnapshot;
     const partyChannels = (snap && snap.channelKey === liveChannelKey(started)) ? snap.partyChannels : computePartyChannels(ev, started, realRest);
-    ev.voiceTracking = { active: true, partyChannels, seen: {}, sessionSeen: [], checksDone: 0, startedAt: Date.now(), finishedAt: null };
+    ev.voiceTracking = { active: true, partyChannels, seen: {}, sessionSeen: [], channels: [], checksDone: 0, startedAt: Date.now(), finishedAt: null };
     if (presenceUnsupported(started)) {
       ev.voiceTracking.presenceUnsupported = true;
       audit({ name: 'Guild Hall' }, 'event.voicetrack.unsupported', { type: 'event', id: ev.id, name: ev.title },
@@ -392,10 +392,15 @@ module.exports = function install(ctx) {
     const ignoreDeafened = !!settings.voiceAttendanceIgnoreDeafened;
     const byChannel = new Map();
     const rawByChannel = new Map();   // channelId -> every raw connected state (mute/deaf included), BEFORE the ignoreMuted/ignoreDeafened filter - for the "who got tracked, muted or not" popup, which needs to show everyone seen, not just who was eligible to be credited
+    // channelLabels preserves the live session's own party order ("Channel 1", "Channel 2", ...) for the
+    // popup's per-channel grouping below - built fresh every check from status.parties itself, so a channel
+    // the bot reports with nobody in it still gets its own "empty" row instead of silently disappearing.
+    const channelLabels = new Map();
     for (const p of status.parties || []) {
       const states = p.connectedStates || (p.connectedUserIds || []).map((id) => ({ id }));
       rawByChannel.set(p.channelId, states);
       byChannel.set(p.channelId, presentIds(states, ignoreMuted, ignoreDeafened));
+      if (p.channelId) channelLabels.set(p.channelId, `Channel ${p.index}`);
     }
     // Extra channels (guild-wide, Admin > Events, plus this event's own picker) are never part of the session
     // itself, so they're read through the bot's own channel-agnostic endpoint instead.
@@ -408,15 +413,29 @@ module.exports = function install(ctx) {
         for (const c of r.channels || []) if (c.found) { rawExtraByChannel.set(c.channelId, c.connectedStates || []); extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened)); }
       } catch { /* extra channels are a bonus, not a reason to skip the party channels below */ }
     }
+    let extraNum = 0;
+    for (const id of evExtraIds) { extraNum++; if (!channelLabels.has(id)) channelLabels.set(id, `Extra channel ${extraNum}`); }
     ev = findEvent(evId);
     if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt) return;
-    // Every owner currently connected to ANY of this event's own tracked channels - every party channel
-    // Shotcaller created for this session, plus whichever extra channels apply - no matter which party, if
-    // any, they are actually assigned to. Being present in the session IS the signal, not which exact channel
-    // within it, and not whether the character was ever placed into a party at all.
+    // Keep the popup's channel list (id + label + whether it currently has anyone in it) fresh every check -
+    // this is what lets "Who got tracked" show an empty channel as empty rather than just omitting it.
+    ev.voiceTracking.channels = [...channelLabels.entries()].map(([channelId, label]) => ({
+      channelId, label, empty: !(rawByChannel.get(channelId) || rawExtraByChannel.get(channelId) || []).length,
+    }));
+    // Every owner currently connected to ANY channel of this live session - every channel the bot actually
+    // reported just now (byChannel, built above from status.parties in full), plus whichever extra channels
+    // apply - regardless of whether ev.voiceTracking.partyChannels' own name/position matching ever managed to
+    // attach a Guild Hall party to that specific channel. partyChannels exists for DISPLAY purposes only (the
+    // dashboard's per-party deafened-count readout, and the "who got tracked" popup's grouping) - it is not,
+    // and must not be, the gate on who gets credited. Matching a channel to a named party can fail or guess
+    // wrong (no leader to match by name, and no snapshot because the session wasn't started tied to this
+    // event) without that ever meaning "stop looking at this channel" - every channel in THIS live session
+    // belongs to this event's track by definition (only one event is ever actively tracked against a given
+    // session at a time - see the "any OTHER event still flagged as active" cleanup in beginVoiceTracking), so
+    // there is no risk of crediting someone from an unrelated session by simply checking all of them.
     const sessionOwners = new Set();
     for (const ids of extraPresence.values()) for (const owner of ids) sessionOwners.add(owner);
-    for (const pc of ev.voiceTracking.partyChannels) for (const owner of (byChannel.get(pc.channelId) || [])) sessionOwners.add(owner);
+    for (const ids of byChannel.values()) for (const owner of ids) sessionOwners.add(owner);
     ev.voiceTracking.sessionSeen = ev.voiceTracking.sessionSeen || [];
     ev.voiceTracking.seen = ev.voiceTracking.seen || {};
     const creditedOwnerOf = new Map();   // memberId -> owner id, for the raw sighting pass below
@@ -433,15 +452,19 @@ module.exports = function install(ctx) {
       if (!ev.voiceTracking.sessionSeen.includes(m.id)) ev.voiceTracking.sessionSeen.push(m.id);
     }
     // The "who got tracked" popup's own log: every raw sighting this check, muted/deafened included, for
-    // anyone present in ANY of this event's channels - not just the ones the ignoreMuted/ignoreDeafened
-    // settings would actually credit. Reset to {} on every beginVoiceTracking (a fresh ev.voiceTracking
-    // object each time), so "Track again" naturally clears it too. credited flips true (and mutedAtCredit/
-    // deafenedAtCredit freeze) only for a sighting that actually passed the owner's filter this check - a
-    // muted player under ignoreMuted still shows up here, just never credited.
+    // anyone present in ANY of this event's channels (the full live session, same reasoning as sessionOwners
+    // above - not just whichever subset partyChannels' own matching happened to attach a party name to) - not
+    // just the ones the ignoreMuted/ignoreDeafened settings would actually credit. Reset to {} on every
+    // beginVoiceTracking (a fresh ev.voiceTracking object each time), so "Track again" naturally clears it too.
+    // credited flips true (and mutedAtCredit/deafenedAtCredit freeze) only for a sighting that actually passed
+    // the owner's filter this check - a muted player under ignoreMuted still shows up here, just never credited.
+    // Each raw sighting keeps the channel it was actually seen in this check (channelId/channelLabel,
+    // overwritten right alongside lastSeenAt/muted/deafened below) - this is what the "Who got tracked" popup
+    // groups by, so an officer can see not just who was tracked but which specific channel they were in.
     const rawStates = [];
-    for (const states of rawExtraByChannel.values()) for (const s of states) rawStates.push(s);
-    for (const pc of ev.voiceTracking.partyChannels) for (const s of (rawByChannel.get(pc.channelId) || [])) rawStates.push(s);
-    for (const s of rawStates) {
+    for (const [channelId, states] of rawExtraByChannel) for (const s of states) rawStates.push({ s, channelId });
+    for (const [channelId, states] of rawByChannel) for (const s of states) rawStates.push({ s, channelId });
+    for (const { s, channelId } of rawStates) {
       const ownerId = s.id;
       const m = db().members.find((x) => x.owner === ownerId && x.active) || db().members.find((x) => x.owner === ownerId && x.mercenary && x.mercFor === ev.id);
       const entry = (ev.voiceTracking.seen[ownerId] = ev.voiceTracking.seen[ownerId] || { credited: false });
@@ -450,6 +473,8 @@ module.exports = function install(ctx) {
       entry.deafened = !!s.deaf;
       entry.memberId = m ? m.id : null;
       entry.memberName = m ? m.name : null;
+      entry.channelId = channelId;
+      entry.channelLabel = channelLabels.get(channelId) || null;
       if (!entry.credited && m && creditedOwnerOf.get(m.id) === ownerId) {
         entry.credited = true;
         entry.mutedAtCredit = !!s.mute;

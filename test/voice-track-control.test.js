@@ -256,6 +256,42 @@ withServer('every sighting - credited or not, muted or not - is logged in voiceT
   assert.equal(missed.credited, false);
   assert.equal(missed.muted, true, 'logged anyway, so the popup can say why this one was missed');
   assert.equal(missed.memberId, anchorMembers[1].id, 'resolved to the actual character, not just a bare Discord id');
+
+  // The new per-channel breakdown the "Who got tracked" popup groups by: both sightings landed in the same
+  // (anchor) channel, so both entries should carry that same channelId/channelLabel, and the live channel
+  // list on voiceTracking.channels should include it (not marked empty, since two people are actually there).
+  assert.equal(credited.channelId, missed.channelId, 'both sightings were in the same channel');
+  assert.ok(credited.channelLabel, 'each sighting should carry a human-readable channel label for the popup');
+  const chans = final.voiceTracking.channels;
+  assert.ok(Array.isArray(chans) && chans.length >= 1, 'the live channel list should be published for the popup to group by');
+  const theChan = chans.find((c) => c.channelId === credited.channelId);
+  assert.ok(theChan, 'the channel both sightings landed in should be in the published list');
+  assert.equal(theChan.empty, false, 'a channel with two people actually in it is not empty');
+});
+
+// A channel the bot created but where nobody ever showed up should still appear in the popup's channel
+// list, marked empty - this is the whole point of publishing the full channel list separately from the
+// sighting log (which, by definition, only ever has entries for channels someone was actually seen in).
+withServer("an empty voice channel the bot created shows up in voiceTracking.channels as empty, not just missing", async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s, -5);
+  // Add a second, real party - this file's own makeTrackedEvent only ever sets up the anchor, so a second
+  // party has to be added explicitly here to get the bot to create more than one channel at all.
+  const party2Member = (await s.call('/api/members', 'POST', { name: 'P2-' + ev.id, role: 'DPS', owner: 'd-p2-' + ev.id }, s.officer)).body;
+  await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [
+    { name: 'Anchor', members: anchorMembers.map((m) => m.id), leader: anchorMembers[0].id },
+    { name: 'Party 2', members: [party2Member.id], leader: party2Member.id },
+  ] }, s.officer);
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  // Only the anchor's own channel gets anyone at all - party 2's channel (c1) stays completely empty.
+  s.bot.setConnected(VOICE_CHANNEL, anchorMembers.map((m) => m.owner));
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.includes(anchorMembers[0].id) ? e : null; });
+  const final = await attendedOf(s, ev.id);
+  const chans = final.voiceTracking.channels;
+  assert.ok(chans.length >= 2, 'both the anchor channel and party 2\'s empty channel should be published');
+  const emptyOnes = chans.filter((c) => c.empty);
+  assert.ok(emptyOnes.length >= 1, 'party 2\'s channel, which nobody ever joined, should be listed and marked empty');
 });
 
 // Reproduces the reported bug: party 1-8 got tracked, party 11 did not. The manual "Start tracking now"
@@ -275,8 +311,9 @@ withServer('"Start tracking now" still finds the right channel for a party after
   const memberC = await make(`partyc-${n}`);
   const ev = (await s.call('/api/events', 'POST', { type: 'Castle Siege', start: new Date(Date.now() - 300000).toISOString(), voiceTrackAuto: false }, s.officer)).body;
   // placeholderOverride/placeholder force these small (1-member) parties to count as real line-ups, not
-  // placeholders (which the default <=3-member rule would otherwise treat them as) - same override an
-  // officer gets from the party menu's "Mark/Unmark as placeholder".
+  // placeholders - belt-and-suspenders here since they're already non-placeholder by the default rule too
+  // (only a genuinely empty party is), but this is also exactly the override an officer gets from the party
+  // menu's "Mark/Unmark as placeholder", which this test exercises on purpose.
   await s.call(`/api/events/${ev.id}/parties`, 'POST', { parties: [
     { name: 'Anchor', members: [anchor1.id], leader: null },
     { name: 'Party B', members: [memberB.id], leader: memberB.id, placeholderOverride: true, placeholder: false },
