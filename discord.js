@@ -218,7 +218,10 @@ function createDiscord(env = process.env) {
     if (!botEnabled) return { ok: false, error: 'No bot token set.' };
     const r = await api(`/guilds/${cfg.guildId}/channels`, { bot: true });
     if (!r.ok) return { ok: false, error: (r.data && r.data.code === 10004) || r.status === 404 ? 'The bot is not in your Discord server yet. Use the invite link below.' : explain(r) };
-    return { ok: true, channels: (r.data || []).filter((c) => c.type === 0 || c.type === 5).sort((a, b) => (a.position || 0) - (b.position || 0)).map((c) => ({ id: c.id, name: c.name })) };
+    // Discord can answer 200 with something that is not a list (an HTML page from a proxy, an empty body that
+    // api() turns into {}) - treat that as an error, never let it throw out of the route.
+    if (!Array.isArray(r.data)) return { ok: false, error: 'Discord sent back something unexpected when listing channels. Try again in a moment.' };
+    return { ok: true, channels: r.data.filter((c) => c.type === 0 || c.type === 5).sort((a, b) => (a.position || 0) - (b.position || 0)).map((c) => ({ id: c.id, name: c.name })) };
   }
   async function botInfo() {
     if (!botEnabled) return { ok: false, error: 'No bot token set.' };
@@ -244,7 +247,8 @@ function createDiscord(env = process.env) {
   }
   async function listRoles() {
     const r = await api(`/guilds/${cfg.guildId}/roles`, { bot: true });
-    return r.ok ? { ok: true, roles: (r.data || []).map((x) => ({ id: x.id, name: x.name, position: x.position || 0 })) } : { ok: false, error: explain(r) };
+    if (r.ok && !Array.isArray(r.data)) return { ok: false, error: 'Discord sent back something unexpected when listing roles. Try again in a moment.' };
+    return r.ok ? { ok: true, roles: r.data.map((x) => ({ id: x.id, name: x.name, position: x.position || 0 })) } : { ok: false, error: explain(r) };
   }
   async function botMember(botId) {
     const r = await api(`/guilds/${cfg.guildId}/members/${botId}`, { bot: true });
