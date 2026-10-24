@@ -5,7 +5,7 @@ const S = { cfg: null, user: null, members: [], events: [], points: [], duties: 
 // scrolling - this only picks the starting view; "Week"/"Month" stay one tap away and stick for the rest of
 // the session once chosen.
 const isMobileViewport = () => window.matchMedia('(max-width: 860px)').matches;
-const UI = { vodJump: null, vodRestore: null, lootCompare: [], lootCompareOpen: false, lootCompareQ: '', rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: isMobileViewport() ? 'day' : 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '' };
+const UI = { vodJump: null, vodRestore: null, lootCompare: [], lootCompareOpen: false, lootCompareQ: '', rosterQ: '', rosterRole: '', rosterWeapon: '', rosterInactive: false, rosterSort: 'name', pointsFocus: null, showPast: false, calView: isMobileViewport() ? 'day' : 'week', calRef: null, presetId: null, lootOnlyOk: false, lootOpen: {}, rulesOpen: false, lootQ: '', lootPlayer: '', lootType: '', lootFormType: '', lootMember: '', lootDate: '', gearThreadsQ: '', gearThreadsRole: '', gearThreadsClass: '' };
 // Pages, click actions, change handlers and form handlers can be added from features.js.
 const AFTER_RENDER = [];  // functions run after a page was drawn (page name as argument)
 // Textareas marked data-autogrow (the coaching-point note and the VOD review note, both places you write a
@@ -75,7 +75,7 @@ function tzToIso(str, tz = TZ()) {
 const dayRef = (y, m, d) => Date.parse(tzToIso(`${y}-${pad(m)}-${pad(d)}T12:00`));
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: TZ() });
 
-async function api(path, method = 'GET', body) {
+async function apiRequest(path, method = 'GET', body) {
   const res = await fetch(path, {
     method,
     // Discord sign-in has no bearer token at all (readToken() falls back to the gh_session cookie set by
@@ -91,6 +91,27 @@ async function api(path, method = 'GET', body) {
   if (res.status === 401 && path !== '/api/login') { logout(); throw new Error(data.error || 'Signed out.'); }
   if (!res.ok) { const e = new Error(data.error || 'Something went wrong.'); e.status = res.status; throw e; }
   return data;
+}
+const plannerSave = { pending: 0, failed: false, text: 'Changes save automatically' };
+function paintPlannerSave() {
+  document.querySelectorAll('.planner-save-status').forEach(el => {
+    el.textContent = plannerSave.text;
+    el.classList.toggle('save-error', plannerSave.failed && !plannerSave.pending);
+  });
+}
+async function api(path, method = 'GET', body) {
+  const tracked = method !== 'GET' && (/^\/api\/presets(?:\/|$)/.test(path) || /^\/api\/events\/[^/]+\/parties$/.test(path) || /party-builder-note|preset-rules/.test(path));
+  if (!tracked) return apiRequest(path, method, body);
+  if (!plannerSave.pending) plannerSave.failed = false;
+  plannerSave.pending++;
+  plannerSave.text = 'Saving…'; paintPlannerSave();
+  try { return await apiRequest(path, method, body); }
+  catch (error) { plannerSave.failed = true; throw error; }
+  finally {
+    plannerSave.pending--;
+    plannerSave.text = plannerSave.pending ? 'Saving…' : plannerSave.failed ? 'Save failed — check the error message' : 'Saved';
+    paintPlannerSave();
+  }
 }
 function toast(msg, bad) {
   const t = $('#toast');
@@ -334,6 +355,7 @@ const NAV = [
   { key: 'member', label: () => 'Member', hide: 'member' },
   { key: 'loot', label: () => 'Loot', hide: 'loot' },
   { key: 'vods', label: () => 'VODs', hide: 'vods' },
+  { key: 'gearthreads', label: () => 'Gear Threads', coach: true },
   { key: 'events', label: () => 'Events' },
   { key: 'parties', label: () => 'Parties', hide: 'parties' },
   { key: 'points', label: () => (pointsOn() ? 'Points' : 'Attendance'), hide: 'points' },
@@ -345,34 +367,54 @@ const NAV = [
   { key: 'auditlog', label: () => 'Audit log', officer: true },
   { key: 'admin', label: () => 'Admin', officer: true },
   { key: 'profile', label: () => 'My profile', gap: true },
+  { key: 'mygearthread', label: () => 'My Gear Thread' },
 ];
 const hiddenFromMembers = (key) => (S.settings.hiddenSections || []).includes(key);
-function canSee(page) {
+// The one active, non-mercenary character the signed-in user themselves owns, if any - what "My Gear Thread"
+// links straight into. A mercenary-only account (or one with no character at all yet) has nothing to open, so
+// the nav entry itself is hidden rather than linking to a broken/empty thread - see renderNav's filter below.
+const myGearThreadId = () => { const m = S.members.find((x) => x.owner === S.user.key && x.active && !x.mercenary); return m ? m.id : null; };
+function canSee(page, id) {
   if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc' || page === 'guest-coach' || (page === 'vods' && S.isCoach);       // not accepted: only the application, a mercenary signup link they followed, the guest-coach page, or (once they are a guest coach) the VODs they coach
   if (page === 'apply') return false;
   const n = NAV.find((x) => x.key === page);
   if (!n) return page === 'roster';
+  if (page === 'gearthreads') {
+    if (isOfficer() || S.isCoach) return true;         // the full index, or any one thread, for officers and real coaches
+    // everyone else may only ever open their OWN thread, by its own id - never the index (no id), and never
+    // someone else's id reached by hand-editing the URL hash.
+    const mine = myGearThreadId();
+    return mine != null && id != null && String(mine) === String(id);
+  }
   if (n.officer) return isOfficer();
+  if (n.coach) return isOfficer() || S.isCoach;      // a real, in-guild class coach (isCoach(u) already treats every officer as a coach too server-side, but checking isOfficer() here as well keeps this readable without relying on that)
   return isOfficer() || !(n.hide && hiddenFromMembers(n.hide));
 }
-function renderNav(page) {
+function renderNav(page, id) {
   // "merc" is the one nav entry that needs an id in its link (which event) - shown at all only once someone
   // actually is a mercenary (S.mercEventId set by applicantState() server-side), not to every applicant.
   // "guest-coach" is similar: shown once someone actually is one (S.isCoach, since the only way an applicant
   // has that is by joining), not to a random applicant who has never touched the invite link.
-  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key) && (n.key !== 'merc' || S.mercEventId) && (n.key !== 'guest-coach' || (S.user.role === 'applicant' && S.isCoach))).map((n) => {
+  // "mygearthread" is the same shape as "merc": a fixed nav slot whose link is actually a dynamic id (here,
+  // the viewer's own character), shown at all only once they actually have one to open.
+  const myThread = myGearThreadId();
+  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key, n.key === 'mygearthread' ? myThread : undefined) && (n.key !== 'merc' || S.mercEventId) && (n.key !== 'guest-coach' || (S.user.role === 'applicant' && S.isCoach)) && (n.key !== 'mygearthread' || myThread != null)).map((n) => {
     const b = n.badge ? n.badge() : 0;
-    const href = n.key === 'merc' ? `#/merc/${S.mercEventId}` : `#/${n.key}`;
-    return `<a class="nav ${n.key === page ? 'active' : ''} ${n.gap ? 'gap' : ''}" href="${href}" data-nav="${n.key}">${esc(n.label())}${b ? `<span class="count">${b}</span>` : ''}</a>`;
+    const href = n.key === 'merc' ? `#/merc/${S.mercEventId}` : n.key === 'mygearthread' ? `#/gearthreads/${myThread}` : `#/${n.key}`;
+    // "mygearthread" never itself becomes the active "page" (its link resolves to the "gearthreads" page), so
+    // it is highlighted by matching on that instead - but only when the thread open is genuinely the viewer's
+    // own, not when an officer/coach is browsing someone else's via the index.
+    const active = n.key === page || (n.key === 'mygearthread' && page === 'gearthreads' && myThread != null && String(id) === String(myThread));
+    return `<a class="nav ${active ? 'active' : ''} ${n.gap ? 'gap' : ''}" href="${href}" data-nav="${n.key}">${esc(n.label())}${b ? `<span class="count">${b}</span>` : ''}</a>`;
   }).join('');
 }
 function render() {
   let { page, id } = route();
   if (page === 'roster') page = 'member';
   if (S.user.role === 'applicant' && page !== 'merc' && page !== 'guest-coach' && !(page === 'vods' && S.isCoach)) page = 'apply';
-  if (!canSee(page) || !VIEWS[page]) page = 'dashboard';
+  if (!canSee(page, id) || !VIEWS[page]) page = 'dashboard';
   applyBranding();
-  renderNav(page);
+  renderNav(page, id);
   $('#who').innerHTML = `${avatarImg(S.user)}<b>${esc(S.user.name)}</b>${isOfficer() ? '<span class="badge-officer">Officer</span>' : S.user.role === 'applicant' ? '<span class="badge-officer" style="color:var(--muted);border-color:var(--muted)">Applicant</span>' : ''}`;
   $('#brand-name').textContent = guildName(); $('#brand-tag').textContent = guildTag();
   // Re-rendering the VOD review page while the exact same VOD is already open (a coaching point was just saved
@@ -1313,8 +1355,8 @@ function memberRow(m, at, o) {
   const dimTitle = { loa: 'on an approved leave covering this event', declined: 'said not attending', noreply: 'has not answered yet' }[dimKind] || '';
   const canToggleLoa = onLeave && (off || m.owner === S.user.key);
   return `<div class="mrow ${dimKind ? `dim dim-${dimKind}` : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${dimTitle ? ' (' + dimTitle + ')' : ''}">
-    ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}
-    <div class="mtxt"><div class="mname">${esc(m.name)}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}${loa ? '<span class="tag loa" title="Approved leave of absence covering this event">LoA</span>' : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div>${spec}
+    ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}
+    <div class="mtxt"><div class="mname">${esc(m.name)}${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}${loa ? '<span class="tag loa" title="Approved leave of absence covering this event">LoA</span>' : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div>${spec}
     ${canToggleLoa ? `<div class="loa-inline"><button class="btn sm loa-toggle" data-act="loa-override" data-ev="${o.ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Remove override' : 'Attend anyway'}</button></div>` : ''}</div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
@@ -1350,7 +1392,7 @@ function partyCard(ctx, parties, p, i, ev, clearOn) {
   const attending = ev ? ms.filter((m) => m.mercenary || (ev.rsvps[m.id] === 'yes' && !loa(m))) : ms;
   if (clearOn && !attending.length) return '';
   const notAttending = (clearOn || !ev) ? [] : ms.filter((m) => !m.mercenary && (ev.rsvps[m.id] !== 'yes' || loa(m)));
-  return `<div class="party" data-party="${i}">
+  return `<div class="party ${ms.length >= size ? 'party-full' : ''}" data-party="${i}">
     <div class="phead">
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
       ${off ? `<input class="party-name" ${at} data-act="party-rename" value="${esc(p.name)}" maxlength="40" aria-label="Party name">` : `<span class="party-title">${esc(p.name)}</span>`}
@@ -1361,10 +1403,12 @@ function partyCard(ctx, parties, p, i, ev, clearOn) {
         <button data-act="party-placeholder-toggle" ${at}>${ph ? 'Unmark as placeholder' : 'Mark as placeholder'}</button>
         <button data-act="p-clear" ${at}>Remove all members</button><button class="danger" data-act="party-del" ${at}>Delete party</button></div></details>` : ''}
     </div>
+    <div class="party-composition">${S.cfg.roles.map(r => `<span style="--c:${roleColor(r)}">${attending.filter(m => effectiveBuild(m, p).role === r).length} ${esc(r)}</span>`).join('')} ${ms.length >= size ? '<span class="full-label">Full</span>' : ''}</div>
     <div class="pdrop" ${off ? 'data-drop="party"' : ''} data-i="${i}">
-      ${attending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev })).join('') || (notAttending.length ? '' : `<div class="pempty">${off ? 'Drop members here' : 'Empty'}</div>`)}
+      ${attending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev })).join('')}
       ${notAttending.length ? `<div class="pnotattending"><div class="muted small">Not confirmed for this event</div>
         ${notAttending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev, dim: true })).join('')}</div>` : ''}
+      ${Array.from({ length: Math.max(0, size - ms.length) }, (_, slot) => `<div class="party-slot"><span>＋</span><span>Open slot</span></div>`).join('')}
     </div></div>`;
 }
 
@@ -1388,7 +1432,7 @@ function board(ctx, parties, ev) {
   // clean look at who is actually confirmed and in. Off by default; purely a display switch, not saved to the
   // server, same as the other view-only UI bits (UI.fold and friends).
   const clearKey = `clear_${ctx.kind}_${ctx.id}`;
-  const clearOn = !!UI[clearKey];
+  const clearOn = !!ev && !!UI[clearKey];
   // Mercenaries are not "active" (that is what keeps them off every other page - the member list, loot,
   // attendance, all of it already filter on active) but they still need to appear here, in the one place they
   // are relevant: the pool for the specific event they signed up to help with.
@@ -1408,22 +1452,22 @@ function board(ctx, parties, ev) {
     const all = active.filter((m) => m.role === r);
     let free = all.filter((m) => !used.has(m.id)).sort((a, b) => a.name.localeCompare(b.name));
     if (clearOn) free = free.filter((m) => m.mercenary || !onLeaveAt(m.owner, Date.parse(ev && ev.start)) || loaOverridden(ev, m.owner));
-    return `<div class="pool" style="--c:${roleColor(r)}"><div class="pool-head"><span>${esc(r)}</span><span>${free.length}/${all.length}</span></div>
-      <div class="pool-list">${free.map((m) => memberRow(m, `data-kind="${ctx.kind}" data-owner="${ctx.id}"`, { from: 'pool', parties, ev })).join('') || '<div class="pempty">Everyone is placed</div>'}</div></div>`;
+    return `<details data-fold="pool-${ctx.kind}-${ctx.id}-${esc(r)}" ${!UI.fold || UI.fold['pool-' + ctx.kind + '-' + ctx.id + '-' + r] !== false ? 'open' : ''} class="pool ${free.length ? '' : 'pool-empty'}" style="--c:${roleColor(r)};--pool-rows:${Math.min(free.length, 3)}"><summary class="pool-head"><span>${esc(r)}</span><span>${free.length} available</span></summary>
+      <div class="pool-list">${free.map((m) => memberRow(m, `data-kind="${ctx.kind}" data-owner="${ctx.id}"`, { from: 'pool', parties, ev })).join('') || '<div class="pempty">Everyone is placed</div>'}</div></details>`;
   }).join('');
   const cards = parties.map((p, i) => partyCard(ctx, parties, p, i, ev, clearOn)).filter(Boolean).join('');
   return `<div class="board ${off ? '' : 'ro'}" data-kind="${ctx.kind}" data-owner="${ctx.id}">
-    ${off ? `<aside class="pools" data-drop="pool">${pools}</aside>` : ''}
+    ${off ? `<details class="pool-sidebar" data-fold="pool-sidebar-${ctx.kind}-${ctx.id}" ${UI.fold && Object.prototype.hasOwnProperty.call(UI.fold, 'pool-sidebar-' + ctx.kind + '-' + ctx.id) ? (UI.fold['pool-sidebar-' + ctx.kind + '-' + ctx.id] ? 'open' : '') : (!isMobileViewport() ? 'open' : '')}><summary>Available members</summary><aside class="pools" data-drop="pool"><div class="pool-caption"><small>Drag here to unassign</small></div><input type="search" class="pool-search" aria-label="Search available members" placeholder="Search members…" value="${esc(UI['poolSearch_' + ctx.kind + '_' + ctx.id] || '')}">${pools}</aside></details>` : ''}
     <section class="pboard">
-      <div class="pboard-head"><h3>${parties.length} ${parties.length === 1 ? 'Party' : 'Parties'} <span class="muted">(${total} members)</span></h3>
-        <span class="pboard-actions">
+      <div class="pboard-head"><h3><span class="party-heading-mark">▸</span> ${parties.length} ${parties.length === 1 ? 'Party' : 'Parties'} <span class="muted">(${total} members)</span></h3>
+        <span class="pboard-actions"><span class="planner-save-status" role="status" aria-live="polite">${esc(plannerSave.text)}</span>
           ${off ? `<button class="btn sm" data-act="party-add" data-kind="${ctx.kind}" data-owner="${ctx.id}">Add party</button>` : ''}
-          <label class="switch-row" title="Hide anyone not confirmed and any party with nobody left to show">
-            <span class="switch"><input type="checkbox" data-ui="${clearKey}" ${clearOn ? 'checked' : ''}><span class="slider"></span></span> Clear
-          </label>
+          ${ev ? `<label class="switch-row" title="Hide anyone not confirmed and any party with nobody left to show">
+            <span class="switch"><input type="checkbox" data-ui="${clearKey}" ${clearOn ? 'checked' : ''}><span class="slider"></span></span> Confirmed only
+          </label>` : ''}
         </span>
       </div>
-      ${parties.length ? `<div class="parties">${cards || '<div class="muted">Nothing to show with "Clear" on - every party is either empty or everyone in it is unconfirmed. Switch it off to see them.</div>'}</div>` : '<div class="muted">No parties yet. Add one, then drag members in.</div>'}
+      ${parties.length ? `<div class="parties">${cards || '<div class="muted">Nothing to show with "Confirmed only" on - every party is either empty or everyone in it is unconfirmed. Switch it off to see them.</div>'}</div>` : '<div class="muted">No parties yet. Add one, then drag members in.</div>'}
     </section></div>`;
 }
 
@@ -1431,24 +1475,22 @@ function viewParties() {
   const off = isOfficer();
   const p = byId(S.presets, UI.presetId) || S.presets[0];
   const upcoming = S.events.filter((e) => new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start));
-  return `
-  <div class="page-head"><div><h1>Parties</h1><div class="muted">Drag members from the role lists into parties. Save line-ups as presets and load them into events.</div></div></div>
-  <div class="pbar">
-    ${off ? '<button class="btn primary" data-act="preset-new">+ New preset</button>' : ''}
-    ${S.presets.length ? `<select class="preset-select" data-ui="presetId" aria-label="Choose a preset">${S.presets.map((x) => `<option value="${x.id}" ${p && x.id === p.id ? 'selected' : ''}>${esc(x.name)}${off && x.hidden ? ' (hidden)' : ''}</option>`).join('')}</select>` : ''}
-    ${off && p ? `<button class="btn" data-act="preset-dup" data-id="${p.id}">Duplicate</button><button class="btn danger" data-act="preset-del" data-id="${p.id}">Delete</button>
-      <select data-act="preset-apply" data-id="${p.id}" style="width:auto;max-width:100%" aria-label="Load this preset into an event"><option value="">Load into event</option>${upcoming.map((e) => `<option value="${e.id}">${esc(e.title)} (${fmtShort(e.start)})</option>`).join('')}</select>` : ''}
+  return `<div class="party-workspace">
+  <div class="page-head"><div><h1 class="party-planner-title"><img src="/img/party-formation.png" width="64" height="64" alt="" aria-hidden="true"> <span>Party planner</span></h1></div>
+  ${off ? '<button class="btn primary" data-act="preset-new">+ New preset</button>' : ''}</div>
+  <div class="planner-toolbar">
+    <label class="preset-picker"><span>ACTIVE PRESET</span><select class="preset-select" data-ui="presetId" aria-label="Choose a preset">${S.presets.map((x) => `<option value="${x.id}" ${p && x.id === p.id ? 'selected' : ''}>${esc(x.name)}${off && x.hidden ? ' (hidden)' : ''}</option>`).join('')}</select></label>
+    ${off && p ? `<div class="planner-tools"><button class="btn" data-act="preset-dup" data-id="${p.id}">Duplicate</button><button class="btn danger" data-act="preset-del" data-id="${p.id}">Delete</button><select data-act="preset-apply" data-id="${p.id}" aria-label="Load this preset into an event"><option value="">Load into event…</option>${upcoming.map((e) => `<option value="${e.id}">${esc(e.title)} (${fmtShort(e.start)})</option>`).join('')}</select></div>` : ''}
   </div>
-  ${p ? `<div class="panel" style="margin-bottom:16px">
-      ${off ? `<input class="preset-name" data-act="preset-rename" data-id="${p.id}" value="${esc(p.name)}" maxlength="60" aria-label="Preset name"><br>
-        <input class="preset-desc" data-act="preset-desc" data-id="${p.id}" value="${esc(p.description || '')}" maxlength="200" placeholder="Add a note, for example who this line-up is for" aria-label="Preset note">
-        <label class="tagpick" style="margin:8px 0 0"><input type="checkbox" data-act="preset-hidden" data-id="${p.id}" ${p.hidden ? 'checked' : ''}> Hidden from normal members (only the leadership sees this preset)</label>`
-        : `<h2>${esc(p.name)}</h2>${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}`}
-    </div>
-    ${off ? presetRulesPanel(p) : ''}
-    ${partyBuilderNotePanel()}
+  ${p ? `<div class="preset-overview"><div><span>${esc(p.description || 'Your saved party line-up')}</span></div><span class="visibility-badge">${p.hidden ? 'Leadership only' : 'Guild visible'}</span></div>
+    ${off ? `<details class="planner-settings fold" data-fold="planner-settings" ${UI.fold && UI.fold['planner-settings'] ? 'open' : ''}><summary>Preset settings & officer notes</summary><div class="planner-settings-body">
+    <label>Preset name<input class="preset-name" data-act="preset-rename" data-id="${p.id}" value="${esc(p.name)}" maxlength="60"></label>
+    <label>Description<input class="preset-desc" data-act="preset-desc" data-id="${p.id}" value="${esc(p.description || '')}" maxlength="200" placeholder="Add a line-up note"></label>
+    <label class="tagpick"><input type="checkbox" data-act="preset-hidden" data-id="${p.id}" ${p.hidden ? 'checked' : ''}> Visible to leadership only</label>
+    ${presetRulesPanel(p)}${partyBuilderNotePanel()}</div></details>` : ''}
     <div class="boardwrap">${board({ kind: 'preset', id: p.id }, p.parties, null)}</div>`
-    : `<div class="empty">No presets yet.${off ? ' Click "+ New preset", or build parties on an event and choose "Save as preset".' : ''}</div>`}`;
+    : '<div class="empty">No presets yet. Create a preset to start building your line-up.</div>'}
+  </div>`;
 }
 
 // Use a preset for all upcoming events of one type, and for the ones created later.
@@ -2702,6 +2744,67 @@ function vodRow(v) {
     ${v.canManage ? `<button class="btn sm danger" data-act="vod-delete" data-id="${v.id}">Delete</button>` : ''}
   </div>`;
 }
+// ---------------------------------------------------------------- Gear threads (admin index)
+// Sits right below VODs in the main nav, visible to officers (everyone's thread) and to real, in-guild class
+// coaches (only the students of whatever class(es) they coach - the exact same scoping VODs already uses for
+// "my students", via S.myStudents/coachingState on the server). An officer who also happens to coach a class
+// just gets the full officer view, same as everywhere else coach access is a subset of officer access.
+// The thread page itself (what each row actually opens into) is its own, later build - this is just the index
+// and the nav entry it hangs off of, so clicking into one for now shows a plain placeholder rather than
+// pretending the real page already exists.
+function viewGearThreads() {
+  const off = isOfficer();
+  const q = (UI.gearThreadsQ || '').toLowerCase();
+  const myClasses = S.myCoachClasses || [];
+  // Officers see one row per character (every build is theirs to open). A coach sees one row per BUILD whose
+  // class they coach, since a character's Warden build and Predator build can have different coaches.
+  const rows = [];
+  for (const m of S.members.filter((x) => x.active && !x.mercenary)) {
+    if (off) { rows.push({ m, b: null }); continue; }
+    if (classOf(m) && myClasses.includes(classOf(m))) rows.push({ m, b: null });
+    for (const b of (m.builds || [])) if (classOf(b) && myClasses.includes(classOf(b))) rows.push({ m, b });
+  }
+  const clsOf = (r) => classOf(r.b || r.m);
+  const list = rows.filter((r) =>
+    (!off || !UI.gearThreadsRole || r.m.role === UI.gearThreadsRole) &&
+    (!off || !UI.gearThreadsClass || clsOf(r) === UI.gearThreadsClass || (r.m.builds || []).some((b) => classOf(b) === UI.gearThreadsClass)) &&
+    (!q || [r.m.name, ownerName(r.m.owner), clsOf(r), r.b ? r.b.name : ''].join(' ').toLowerCase().includes(q)))
+    .sort((a, b) => a.m.name.localeCompare(b.m.name) || (a.b ? 1 : 0) - (b.b ? 1 : 0));
+  return `
+  <div class="gearthreads-banner"><h1 class="sr-only">Gear Threads</h1></div>
+  ${!off ? `<div class="muted small" style="margin-top:10px">Showing builds in the class${myClasses.length === 1 ? '' : 'es'} you coach.</div>` : ''}
+  <div class="toolbar" style="margin-top:12px">
+    <input type="search" placeholder="Search name, class or Discord" value="${esc(UI.gearThreadsQ || '')}" data-ui="gearThreadsQ" aria-label="Search">
+    ${off ? `<select data-ui="gearThreadsRole" aria-label="Role">${opts(S.cfg.roles, UI.gearThreadsRole, 'All roles')}</select>
+    <select data-ui="gearThreadsClass" aria-label="Subclass">${opts((S.cfg.classes || []).map((c) => c.name), UI.gearThreadsClass, 'All subclasses')}</select>` : ''}
+  </div>
+  ${list.length ? `<div class="tbl-wrap"><table>
+    <thead><tr><th>Character</th><th>Weapons</th><th>Owner</th><th>Last updated</th></tr></thead>
+    <tbody>${list.map((r) => `<tr class="click" data-act="gearthreads-open" data-id="${r.m.id}" data-build="${r.b ? r.b.id : 'main'}">
+      <td><b>${esc(r.m.name)}</b>${r.b ? ` <span class="muted small">· ${esc(r.b.name)}</span>` : ''}${off && (r.m.builds || []).length ? ` <span class="muted small">· ${(r.m.builds.length + 1)} builds</span>` : ''}</td>
+      <td class="wpn">${weaponLine(r.b || r.m)}</td>
+      <td class="muted small">${esc(ownerName(r.m.owner))}</td>
+      <td class="muted small">Not started yet</td>
+    </tr>`).join('')}</tbody></table></div>`
+    : `<div class="empty">${rows.length ? `No characters match. ${off ? 'Clear the filters to see everyone.' : 'Clear the search to see your students.'}` : (off ? 'Nothing in the roster yet.' : 'You are not currently linked to a class to coach - ask an officer to link you.')}</div>`}`;
+}
+// How many distinct classes the current (non-officer) coach is linked to, purely for the "class" vs "classes"
+// wording above - S.myStudents is already the flattened owner list, not grouped by class, so this recomputes
+// the grouping client-side from whichever classes actually have a student showing up in that list right now.
+function classesCoachedLabel() {
+  const owners = new Set(S.myStudents || []);
+  const classes = new Set(S.members.filter((m) => m.active && owners.has(m.owner)).map((m) => classOf(m)).filter(Boolean));
+  return { count: classes.size || 1 };
+}
+ACTIONS['gearthreads-open'] = (el, d) => { UI.gearBuildPref = UI.gearBuildPref || {}; if (d.build) UI.gearBuildPref[String(d.id)] = d.build; if (typeof GEARTHREAD !== 'undefined' && GEARTHREAD.id === String(d.id)) GEARTHREAD = { id: null, data: null }; location.hash = '#/gearthreads/' + d.id; };
+// Stand-in for a single thread until that page is actually built - keeps the rows/links above honest about
+// what exists right now instead of silently landing back on the dashboard. The "back" link only ever points
+// at the index for someone who can actually see it (officer/coach); a plain member got here straight from
+// "My Gear Thread" under My profile, not from any index they have access to, so they get no back link at all.
+// The real content page (chat, screenshots, skill cores, questlog, folder) lives in geargear.js as
+// viewGearThread() - a per-thread fetch-then-render page, the same shape as the loot/compliance stats
+// refresh() already does, since a single thread's content has no reason to ride along on every /api/state.
+VIEWS.gearthreads = (id) => id ? viewGearThread(id) : viewGearThreads();
 VIEWS.vods = (id) => id ? viewVodReview(id) : viewVods();
 VIEWS.member = () => viewRoster();
 VIEWS.parties = () => viewParties();
@@ -2854,3 +2957,43 @@ function checkAlert() {
 }
 document.addEventListener('DOMContentLoaded', () => { const box = $('#alert'); if (box) box.addEventListener('cancel', (e) => e.preventDefault()); });
 FORMS.explain = (f, fd) => act(async () => { await api('/api/explanations', 'POST', fd); $('#alert').close(); }, 'Sent. The leadership will look at it.');
+
+// Filter each role independently without replacing the focused search field.
+function filterPartyPool(input) {
+  const query = input.value.trim().toLowerCase();
+  input.closest('.pools').querySelectorAll('.mrow').forEach(row => {
+    row.hidden = !row.textContent.toLowerCase().includes(query);
+  });
+  input.closest('.pools').querySelectorAll('.pool').forEach(pool => {
+    const count = pool.querySelectorAll('.mrow:not([hidden])').length;
+    pool.style.setProperty('--pool-rows', Math.min(count, 3));
+    pool.classList.toggle('pool-no-results', count === 0);
+    if (query && count) pool.open = true;
+  });
+  sizePartyPools(input.closest('.pool-sidebar'));
+}
+document.addEventListener('input', e => {
+  if (!e.target.matches('.pool-search')) return;
+  const board = e.target.closest('.board');
+  UI['poolSearch_' + board.dataset.kind + '_' + board.dataset.owner] = e.target.value;
+  filterPartyPool(e.target);
+});
+AFTER_RENDER.push(() => document.querySelectorAll('.pool-search').forEach(filterPartyPool));
+
+// Show up to three complete cards per role, independently of viewport height.
+function sizePartyPools(sidebar) {
+  if (!sidebar) return;
+  sidebar.querySelectorAll('.pool').forEach(pool => {
+    const count = pool.querySelectorAll('.mrow:not([hidden])').length;
+    const rows = Math.min(count, 3);
+    pool.style.setProperty('--pool-rows', rows);
+    let hint = pool.querySelector('.pool-scroll-hint');
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.className = 'pool-scroll-hint';
+      pool.appendChild(hint);
+    }
+    hint.hidden = count <= rows;
+    hint.textContent = rows + ' visible · ' + count + ' total · Scroll ↕';
+  });
+}

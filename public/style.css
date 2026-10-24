@@ -201,6 +201,57 @@ tr.click:hover td { background: var(--panel-2); }
   position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 1672 / 941;
   background-image: url('/img/members-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
 }
+/* "Gear Threads" banner - same self-contained-strip treatment as .members-banner above (native
+   proportions, nothing overlaid on the art itself), just its own image and aspect ratio (2212x711). */
+.gearthreads-banner {
+  position: relative; overflow: hidden; border-radius: 8px; aspect-ratio: 2212 / 711;
+  background-image: url('/img/gearthreads-banner.png'); background-size: 100% auto; background-position: top center; background-repeat: no-repeat;
+}
+
+/* A single character's gear thread: the five-section grid the user sketched out - a full-width screenshots
+   strip on top, a tall chat column and a stack of three smaller panels (skill cores / questlog / folder)
+   underneath it. One column on a narrow screen, in source order (screenshots, chat, then the side stack). */
+.geargear-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.geargear-screens { grid-column: 1 / -1; }
+.geargear-side { display: flex; flex-direction: column; gap: 20px; }
+@media (max-width: 900px) { .geargear-grid { grid-template-columns: 1fr; } }
+
+/* Screenshots: a horizontal scroll-snap strip, one full-width slide per topic, with tab buttons above that
+   just scroll the matching slide into view - no extra state to track, so it keeps working across a re-render
+   (e.g. right after saving a note) without having to remember which slide was showing. */
+.gear-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.gear-tab { background: var(--panel-2); border: 1px solid var(--line); border-radius: 20px; padding: 4px 14px; cursor: pointer; font-size: 14px; color: var(--text); }
+.gear-tab:hover { border-color: var(--muted); }
+.gear-tab.active { border-color: var(--accent, #c9a14a); color: var(--accent, #c9a14a); font-weight: 600; }
+.gear-slides { display: flex; gap: 20px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; }
+.gear-slide { flex: 0 0 100%; scroll-snap-align: start; display: flex; flex-direction: column; gap: 10px; }
+.gear-slide-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.gear-shot { width: 100%; max-height: 420px; object-fit: contain; border-radius: 8px; border: 1px solid var(--line); background: #000; }
+.gear-slide textarea { min-height: 60px; }
+
+/* Chat: a scrolling message list over a fixed-height panel, newest at the bottom (see the AFTER_RENDER hook
+   in geargear.js that scrolls it down after every render, same idea as autosizeAll already runs there). */
+.geargear-chat { display: flex; flex-direction: column; }
+.gear-chat-list { flex: 1; min-height: 320px; max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.gear-chat-msg { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--panel-2); }
+.gear-chat-msg.me { border-color: var(--accent); }
+.gear-chat-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 3px; }
+.gear-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.gear-chat-form { display: flex; gap: 8px; align-items: flex-end; }
+.gear-chat-form textarea { flex: 1; min-height: 38px; }
+
+/* Upload popup's drag-and-drop zone (shared by the screenshot Upload/Replace button; see gearUploadDialog()
+   in geargear.js). .over is toggled by the delegated dragover/dragleave listeners while a file is dragged
+   over it. */
+.gear-dropzone { border: 2px dashed var(--line); border-radius: 10px; padding: 36px 16px; text-align: center; transition: border-color .15s, background .15s; }
+.gear-dropzone.over { border-color: var(--accent); background: var(--panel-2); }
+.gear-dropzone-inner { display: flex; flex-direction: column; align-items: center; }
+
+/* Folder: admins/coaches post, the player only ever views - see canPostFolder() server-side, which is why
+   the composer below is simply absent from the HTML entirely for a plain member, not just disabled. */
+.gear-folder-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.gear-folder-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.gear-folder-form textarea { min-height: 50px; margin-bottom: 8px; }
 /* The dashboard's compact "Member" header bar (above the class columns) uses the same artwork as
    a background, but cropped tight to just its top ~40% - the "MEMBERS" wordmark, its ornamental
    border and a little of the castle scene below - rather than the whole scene, since this is a
@@ -1182,3 +1233,187 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 .att-running-btn.settled, .att-save-btn.settled { animation: none; }
 .sc-data-item.settled .sc-data-label, .sc-data-item.settled .sc-data-box { animation: none; opacity: 1; transform: none; }
 .att-warn { background: rgba(224,18,79,.12); border: 1px solid rgba(224,18,79,.4); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+
+/* Party planner v2: shared by presets and event boards. */
+.party-workspace { --planner-line:#30313c; }
+.party-workspace .page-head { align-items:center; margin-bottom:24px; gap:16px; }
+.party-workspace h1 { font-family:var(--body); font-size:30px; font-weight:700; letter-spacing:-1px; margin:5px 0; }
+.party-eyebrow { color:#b6a0cf; font-size:10px; letter-spacing:2px; font-weight:700; }
+.party-workspace .page-head .muted { font-size:14px; }
+.planner-toolbar { display:flex; align-items:end; justify-content:space-between; flex-wrap:wrap; gap:14px; padding:16px; background:#19171f; border:1px solid var(--planner-line); border-radius:12px; }
+.preset-picker { display:flex; flex-direction:column; gap:6px; flex:1 1 240px; max-width:400px; }
+.preset-picker > span { font-size:10px; letter-spacing:1.5px; color:#a7a0b1; font-weight:700; }
+.preset-picker select { width:100%; min-width:0; }
+.planner-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.planner-tools select { width:220px; max-width:100%; }
+.preset-overview { display:flex; justify-content:space-between; gap:12px; padding:18px 3px 12px; align-items:center; }
+.preset-overview strong { display:block; font-size:15px; }
+.preset-overview span { color:#aaa3b2; font-size:12px; }
+.preset-overview .visibility-badge { border:1px solid #3b3547; padding:4px 9px; border-radius:20px; white-space:nowrap; font-size:10px; }
+.planner-settings { margin:0 0 18px; border-bottom:1px solid #302b36; padding-bottom:12px; }
+.planner-settings > summary { cursor:pointer; color:#b4a9c4; font-size:12px; }
+.planner-settings-body { display:grid; gap:12px; padding:18px 0 0; }
+.planner-settings-body > label { font-size:12px; color:var(--muted); }
+.planner-settings-body input:not([type=checkbox]) { display:block; font-family:var(--body); font-size:14px; margin:6px 0 0; padding:9px; max-width:100%; }
+.planner-settings-body .panel { margin:0!important; padding:12px; }
+.board, .board:not(.ro), .board.ro { display:flex; flex-direction:column; gap:16px; align-items:stretch; min-width:0; }
+.board .pools { position:static; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; max-height:none; overflow:visible; padding:12px; border:1px solid #30313c; border-radius:10px; background:#15151c; }
+.pool-caption { grid-column:1/-1; display:flex; justify-content:space-between; gap:8px; font-size:12px; font-weight:600; color:#d2cbdc; }
+.pool-caption small { color:#888392; font-weight:400; }
+.board .pool { min-width:0; border:1px solid #30313b; background:#181920; border-radius:7px; }
+.board .pool-head { background:transparent; color:var(--c); padding:8px 10px; font-size:12px; border:0; }
+.board .pool-head span:last-child { color:#a7a3af; font-weight:400; font-size:11px; }
+.board .pool-list { min-height:0; height:auto; max-height:240px; overflow:auto; padding:6px; display:flex; flex-direction:column; gap:5px; }
+.board .pool-empty .pool-list { display:none; }
+.board .pboard { min-width:0; padding:0; border:0; background:transparent; }
+.board .pboard-head { align-items:center; gap:12px; padding:0; margin-bottom:12px; }
+.board .pboard-head h3 { margin:0; color:#ede8f3; font-family:var(--body); font-size:16px; font-weight:600; }
+.board .pboard-head h3 .muted { margin-left:6px; font-size:12px; font-weight:400; }
+.party-heading-mark { display:none; }
+.board .parties { grid-template-columns:repeat(auto-fit,minmax(min(100%,265px),1fr)); gap:14px; align-items:stretch; }
+.board .party { border:1px solid #35323f; border-radius:12px; background:#14141b; min-width:0; }
+.board .phead { padding:12px; min-height:54px; background:#201c28; border:0; border-bottom:1px solid #35303f; border-radius:12px 12px 0 0; gap:8px; }
+.board .party-name,.board .party-title { font-family:var(--body); font-size:14px; font-weight:650; color:#ece5f4; }
+.board .phead > .muted { font-size:11px; background:#302939; padding:3px 7px; border-radius:5px; white-space:nowrap; }
+.board .pdrop { min-height:100px; padding:9px; display:flex; flex-direction:column; gap:7px; }
+.board .mrow { min-width:0; min-height:80px; margin:0; box-sizing:border-box; border:1px solid #33333e; border-left:3px solid var(--c); border-radius:7px; padding:8px; background:color-mix(in srgb,var(--c) 5%,#1d1d26); gap:8px; }
+.board .mrow:hover { border-top-color:#5b5269; border-right-color:#5b5269; border-bottom-color:#5b5269; }
+.board .mtxt { min-width:0; flex:1; }
+.board .mname { display:flex; align-items:center; gap:7px; font-size:14px; line-height:19px; }
+.board .crown { flex:none; width:12px; height:12px; }
+.board .mmeta { display:flex; align-items:center; margin-top:3px; font-size:11px; min-height:20px; }
+.board .mmeta .cls { color:#c1bacd; font-weight:400; }
+.board .wicon { width:20px; height:20px; }
+.board .wicons { margin-right:6px; gap:3px; }
+.board .mspec { color:#8f899c; font-size:10px; line-height:14px; margin-top:2px; }
+.board .grip { opacity:.4; flex:none; }
+.board .mrow .menu { margin-left:auto; }
+.party-slot { box-sizing:border-box; min-height:80px; display:flex; align-items:center; justify-content:center; gap:10px; border:1px dashed #38313f; border-radius:7px; color:#888092; font-size:12px; pointer-events:none; }
+.party-slot > span:first-child { font-size:22px; color:#645870; }
+.party-slot small { display:block; font-size:10px; color:#645e70; margin-top:3px; }
+.board .pdrop.over,.board .pools.over { outline:2px dashed #b594dd; background:#241c30; }
+@media(max-width:700px) {
+ .party-workspace .page-head { flex-wrap:wrap; margin-bottom:16px; }
+ .party-workspace h1 { font-size:26px; }
+ .planner-toolbar { padding:12px; }
+ .preset-picker { max-width:none; }
+ .planner-tools { width:100%; }
+ .planner-tools select { flex:1 1 100%; width:100%; }
+ .preset-overview { align-items:start; }
+ .board .pools { gap:6px; padding:9px; }
+ .board .pool-head { flex-wrap:wrap; gap:4px; padding:8px; }
+ .board .pool:has(.mrow) { grid-column:1/-1; }
+ .board .parties { grid-template-columns:1fr; }
+ .board .pboard-head { flex-wrap:wrap; }
+ .board .mrow,.party-slot { min-height:80px; }
+ .board .menu summary { min-width:28px; min-height:32px; }
+}
+
+/* v3: roster alongside the party grid. */
+.party-workspace .page-head { margin-bottom:12px; }
+.party-workspace h1 { font-size:25px; margin:0; }
+.planner-toolbar { padding:10px 12px; gap:10px; }
+.preset-picker { gap:4px; }
+.preset-overview { padding:9px 2px; }
+.planner-settings { margin-bottom:12px; padding-bottom:8px; }
+.planner-settings summary, .pool-sidebar summary { font-family:var(--body); }
+.board:not(.ro) { display:grid; grid-template-columns:250px minmax(0,1fr); align-items:start; gap:16px; }
+.pool-sidebar { position:static; border:1px solid #35313f; border-radius:10px; background:#15151c; min-width:0; }
+.pool-sidebar > summary { padding:12px; cursor:pointer; font-size:13px; font-weight:600; }
+.board .pools { display:flex; flex-direction:column; border:0; padding:0 9px 10px; max-height:none; overflow:visible; gap:9px; }
+.pool-caption { justify-content:flex-start; }
+.pool-search { width:100%; min-width:0; font-size:12px; padding:8px; }
+.board .pool-head { cursor:pointer; display:flex; justify-content:space-between; gap:6px; font-family:var(--body); }
+.board .pool-head::after { content:'⌄'; }
+.board .pool:not([open]) .pool-head::after { content:'›'; }
+.board .pool { flex:0 0 auto; overflow:visible; }
+.board .pool-list { height:auto; max-height:none; overflow:visible; }
+.board .pool-list .mrow { flex-shrink:0; }
+.board .pool-empty .pool-list { display:block; }
+.board .pool-empty .pempty { font-size:11px; padding:6px; }
+.board .parties { grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr)); gap:10px; }
+.board .phead { padding:9px; min-height:43px; }
+.party-composition { display:flex; flex-wrap:wrap; gap:8px; padding:7px 10px; border-bottom:1px solid #302b38; font-size:10px; }
+.party-composition > span { color:var(--c); }
+.party-composition .full-label { color:#c9badc; margin-left:auto; }
+.board .mrow { min-height:62px; padding:6px; }
+.board .mrow[hidden] { display:none; }
+.board .mname { font-size:13px; }
+.board .mmeta .cls { color:#d1cadb; font-size:12px; }
+.board .mspec { color:#b3aabe; font-size:11px; }
+.board .mtxt { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:6px; }
+.board .mname,.board .mmeta { grid-column:1/-1; }
+.board .mspec { grid-column:2; grid-row:1; align-self:center; }
+.board .mname:has(~ .mspec) { grid-column:1; }
+.board .pdrop { gap:6px; padding:7px; }
+.party-slot { min-height:38px; font-size:11px; gap:7px; }
+.party-slot > span:first-child { font-size:16px; }
+.board .party:has(.pdrop.over) { outline:2px solid #b994e1; box-shadow:0 0 0 4px #b994e122; }
+.board .party-full:has(.pdrop.over) { outline-color:#edae56; }
+.board .party-full .pdrop.over { outline-color:#edae56; background:#30251b; }
+@media(max-width:1050px) and (min-width:701px) {
+ .board:not(.ro) { grid-template-columns:215px minmax(0,1fr); }
+}
+@media(max-width:700px) {
+ .board:not(.ro) { display:flex; }
+ .pool-sidebar { position:static; }
+ .board .pools { max-height:none; overflow:visible; }
+ .board .parties { grid-template-columns:1fr; }
+ .party-workspace .page-head { margin-bottom:12px; }
+ .board .mrow { min-height:66px; }
+ .board .mspec { font-size:10px; }
+ .planner-tools { gap:6px; }
+}
+
+/* Selected Formation emblem, shared by demo and production. */
+.party-workspace .party-planner-title { display:flex; align-items:center; gap:12px; }
+.party-planner-title img { display:block; width:64px; height:64px; object-fit:contain; flex:none; }
+@media(max-width:700px) {
+ .party-planner-title img { width:48px; height:48px; }
+ .party-workspace .party-planner-title { gap:9px; }
+}
+
+/* Whole-card roster viewports: up to 3 cards for every role. */
+.board .pools { max-height:none; overflow:visible; }
+.board .pool { flex:none; overflow:hidden; }
+.board .pool-list {
+ --roster-card-height:76px;
+ display:flex; gap:6px; padding:6px;
+ height:calc(var(--pool-rows) * (var(--roster-card-height) + 6px) + 6px);
+ min-height:0; max-height:none; overflow-y:auto; overflow-x:hidden;
+ scroll-snap-type:y mandatory; scroll-padding-block:6px;
+ scrollbar-width:thin; scrollbar-color:#80728f #19171f;
+ scrollbar-gutter:stable;
+}
+.board .pool-list .mrow {
+ height:var(--roster-card-height); min-height:var(--roster-card-height);
+ flex:0 0 var(--roster-card-height); scroll-snap-align:start; scroll-snap-stop:always;
+}
+.board .pool-list .mtxt { display:block; }
+.board .pool-list .mspec { margin-top:1px; font-size:10px; }
+.board .pool-empty .pool-list,.board .pool-no-results .pool-list { display:none; }
+.board .pool-list::-webkit-scrollbar { width:7px; }
+.board .pool-list::-webkit-scrollbar-thumb { background:#80728f; border-radius:8px; }
+.party-workspace details.planner-settings > summary,
+.party-workspace .planner-settings-body summary { font-family:var(--body); font-size:13px; }
+.planner-save-status { font-size:11px; color:#a7bca5; }
+.planner-save-status.save-error { color:#ff978e; }
+.inactive-member { color:#e5b76b; font-size:9px; flex:none; }
+
+/* Compact cards with the same fixed three-card limit for all three roles. */
+.board .pool-list { --roster-card-height:62px; }
+.board .pool-list .mtxt { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:5px; }
+.board .pool-list .mspec { grid-column:2; grid-row:1; margin:0; font-size:10px; align-self:center; }
+.board .pool-list .mname:has(~ .mspec) { grid-column:1; }
+.board .pool-list .mname { overflow:hidden; white-space:nowrap; font-size:12px; }
+.board .pool-list .mmeta { font-size:11px; }
+.board .pool-list .cls { font-size:11px; }
+.board .pool-list .wicon { width:18px; height:18px; }
+.pool-scroll-hint { padding:3px 6px 6px; color:#b5a9c3; font-size:10px; text-align:center; }
+.pool-scroll-hint[hidden] { display:none; }
+
+/* Not-confirmed rows in a party (event boards): the redesign's `.board .mrow` look would otherwise flatten the
+   difference between "said not attending" (red), "no reply yet" (grey) and "on leave" (blue). */
+.board .mrow.dim-declined { border-left-color:#e2685c; background:color-mix(in srgb,#e2685c 8%,#1d1d26); }
+.board .mrow.dim-noreply { border-left-color:#8b95a7; background:#1d1d26; }
+.board .mrow.dim-loa { border-left-color:#5fb8e8; background:color-mix(in srgb,#5fb8e8 8%,#1d1d26); }

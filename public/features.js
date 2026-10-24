@@ -1792,6 +1792,36 @@ function coachesAdmin() {
       : (coaches.length ? '<div class="muted small">No classes linked yet.</div>' : '')}
   </div>`;
 }
+// ---------------------------------------------------------------- Gear Threads: screenshot topics
+// The admin-configurable list the user asked for ("I want to add more and more over time") - each topic gets
+// its own screenshot+note slot on the swipeable strip at the top of every player's gear thread (see
+// gearScreensHtml() in geargear.js). Kept by stable id (not label) server-side specifically so a rename here
+// never orphans a screenshot already uploaded under the old name - see server-geargear.js's own comment.
+function gearSectionsAdmin() {
+  const list = S.gearSectionTypes || [];
+  return `<div class="panel"><h3>Gear Threads: screenshot topics</h3>
+    <div class="muted small" style="margin:-6px 0 10px">Each topic below gets its own screenshot + note slot on every player's gear thread. Renaming a topic keeps whatever is already uploaded under it; removing one deletes it everywhere, for every player, for good.</div>
+    ${list.length ? list.map((t, i) => `<form data-form="gear-section-rename" data-id="${t.id}" class="rule-row">
+      <input name="label" value="${esc(t.label)}" maxlength="40" required style="flex:1" aria-label="Topic name">
+      <button class="btn sm" type="button" data-act="gear-section-move" data-id="${t.id}" data-dir="up" ${i === 0 ? 'disabled' : ''} aria-label="Move up">&uarr;</button>
+      <button class="btn sm" type="button" data-act="gear-section-move" data-id="${t.id}" data-dir="down" ${i === list.length - 1 ? 'disabled' : ''} aria-label="Move down">&darr;</button>
+      <button class="btn sm primary">Save</button>
+      <button class="btn sm danger" type="button" data-act="gear-section-remove" data-id="${t.id}">Remove</button>
+    </form>`).join('') : '<div class="muted small" style="margin-bottom:10px">No screenshot topics yet - add the first one below.</div>'}
+    <form data-form="gear-section-add" class="link-row" style="margin-top:10px">
+      <input name="label" maxlength="40" placeholder="New topic name (e.g. Skillbar)" required>
+      <button class="btn sm primary">Add topic</button>
+    </form>
+  </div>`;
+}
+FORMS['gear-section-add'] = (f, fd) => act(() => api('/api/admin/gear-sections', 'POST', { label: fd.label }), 'Topic added').then((ok) => ok && f.reset());
+FORMS['gear-section-rename'] = (f, fd) => act(() => api(`/api/admin/gear-sections/${f.dataset.id}`, 'PUT', { label: fd.label }), 'Saved');
+ACTIONS['gear-section-move'] = (el, d) => act(() => api(`/api/admin/gear-sections/${d.id}/move`, 'POST', { dir: d.dir }));
+ACTIONS['gear-section-remove'] = (el, d) => {
+  if (confirm("Remove this topic? Every player's screenshot and note under it is deleted too. This cannot be undone."))
+    act(() => api(`/api/admin/gear-sections/${d.id}`, 'DELETE'), 'Removed');
+};
+
 const st_coachLinks = () => S.coachLinks || [];
 const nameOfUser = (id) => { const u = (S.users || []).find((x) => x.id === id); return u ? u.name : id; };
 FORMS.coaches = (f) => act(() => api('/api/admin/coaches', 'PUT', {
@@ -2260,6 +2290,7 @@ VIEWS.admin = () => {
     + dailyScheduleAdmin()
     + officersAdmin()
     + coachesAdmin()
+    + gearSectionsAdmin()
     + shotcallerAdmin()
     + mercenariesAdmin()
     + adminPlayersList()
