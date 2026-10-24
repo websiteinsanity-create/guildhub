@@ -582,6 +582,18 @@ module.exports = function install(ctx) {
     return null;          // deliberately no SVG: it can carry scripts
   };
   const dropFile = (name) => { if (name) fs.rmSync(path.join(UPLOAD_DIR, name), { force: true }); };
+  // Event artwork is stored separately from guild branding and attached when the event is saved.
+  route('POST', '/api/events/artwork', ({ body }) => {
+    const buf = Buffer.from(String(body.data || '').replace(/^data:[^,]*,/, ''), 'base64');
+    need(buf.length > 100, 400, 'That does not look like an image.');
+    need(buf.length <= 3e6, 413, 'Event images can be up to 3 MB.');
+    const ext = sniff(buf);
+    need(ext, 400, 'Only PNG, JPEG, GIF or WebP pictures are allowed.');
+    const imageFile = 'event-' + crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12) + '.' + ext;
+    fs.writeFileSync(path.join(UPLOAD_DIR, imageFile), buf);
+    return { imageFile, url: '/uploads/' + imageFile };
+  }, { officer: true });
+
   route('POST', '/api/admin/upload', ({ body }) => {
     const D = db(), b = D.settings.branding;
     need(['icon', 'background'].includes(body.kind), 400, 'Icon or background.');

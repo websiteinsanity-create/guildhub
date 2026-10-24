@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createDiscord } = require('./discord');
+const eventAttendanceSummary = require('./event-attendance-summary');
 const pkg = require('./package.json');   // app version only - shown to officers in Admin, so they can tell at a glance which code a deployment is actually running
 
 // Optional .env file next to server.js (one KEY=value per line). Real environment variables always win.
@@ -638,6 +639,7 @@ function eventFor(ev, user) {
   // Computed once, here, so no client surface has to reimplement effectiveAttendanceMode()'s
   // override-vs-guild-default logic itself (part of the attendance-tracking consolidation).
   const out = { ...ev, pinInfo: pinInfo(ev), signupClosesAt: new Date(closeAt(ev)).toISOString(), effectiveAttendanceMode: effectiveAttendanceMode(ev) };
+  out.attendanceSummary = eventAttendanceSummary(ev, db.members, db.leaves || [], guildDate(Date.parse(ev.start)), out.pinInfo.state === 'open');
   if (!isOfficer(user)) { delete out.pin; delete out.pinEntries; delete out.reminderLog; delete out.remindersSent; delete out.partyPosts; delete out.voiceTracking; delete out.attendanceUndo; }
   else {
     // Officers get just enough to show "Undo all saved attendance (last touched 2 minutes ago by Ash)" - the
@@ -740,8 +742,12 @@ function pickEvent(b, ex) {
   const title = clean(b.title, 80) || type.name;                 // no title typed: the type becomes the title
   const int = (v, dflt, lo, hi) => { const n = Math.round(Number(v)); return v === undefined || v === '' || v === null || !Number.isFinite(n) ? dflt : Math.min(hi, Math.max(lo, n)); };
   const mandatory = b.mandatory === undefined ? !!type.mandatory : b.mandatory === true || b.mandatory === 'true';
+  const imageFile = b.imageFile === undefined ? (ex && ex.imageFile || '') : String(b.imageFile || '');
+  need(!imageFile || (/^event-[a-f0-9]{12}\.(png|jpg|gif|webp)$/.test(imageFile) && fs.existsSync(path.join(UPLOAD_DIR, imageFile))), 400, 'Choose an uploaded event image.');
+  const artworkPreset = b.artworkPreset === undefined ? (ex && ex.artworkPreset || 'auto') : String(b.artworkPreset);
+  need(['auto','siege','stone','boss','raid','training','insanity'].includes(artworkPreset), 400, 'Choose a valid event artwork preset.');
   return {
-    title, type: type.name, start: start.toISOString(),
+    title, type: type.name, start: start.toISOString(), imageFile, artworkPreset,
     description: clean(b.description, 1500),
     points: Math.max(0, Math.round(num(b.points, type.points))),
     mandatory,
@@ -1653,7 +1659,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
 const shotcallerApi = require('./server-shotcaller')({
-  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, findEvent, eventFor, syncAttendancePoints, setAttended, effectiveAttendanceMode, partyIsPlaceholder,
+  route, need, HttpError, save, isOfficer, audit: audit.log, findMember, findEvent, eventFor, syncAttendancePoints, setAttended, effectiveAttendanceMode, partyIsPlaceholder, tickHooks,
   shotcaller: { url: SHOTCALLER_URL, apiKey: SHOTCALLER_API_KEY, get guildId() { return discord.cfg.guildId; } },
   get db() { return db; },
 });
@@ -1876,7 +1882,7 @@ http.createServer(async (req, res) => {
         need(!r.officer || isOfficer(user), 403, 'Officers only.');
         need(user.role !== 'applicant' || r.applicant, 403, 'Your application has to be accepted first.');       // applicants can reach nothing but the application
       }
-      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || /\/post-parties$/.test(url.pathname) || /^\/api\/gearthreads\/[^/]+\/(screens\/[^/]+|folder)$/.test(url.pathname) ? 9e6 : 2e6);
+      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || url.pathname === '/api/events/artwork' || /\/post-parties$/.test(url.pathname) || /^\/api\/gearthreads\/[^/]+\/(screens\/[^/]+|folder)$/.test(url.pathname) ? 9e6 : 2e6);
       const out = await r.handler({ body, user, params, ip, query: Object.fromEntries(url.searchParams) });
       return send(res, 200, out, url.pathname === '/api/export'
         ? { 'Content-Disposition': 'attachment; filename="guild-backup.json"' } : {});

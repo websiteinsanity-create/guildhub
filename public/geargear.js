@@ -11,6 +11,7 @@
 // the viewer scrolls up - see loadOlderGearChat) and polled for live updates independently of everything
 // else on the page, which only ever needs a full reload.
 let GEARTHREAD = { id: null, data: null };
+let gearThreadLoadSerial = 0;
 let gearFolderImage = null;   // pending base64 image for the folder composer, attached separately from the text form (see CHANGES['gear-folder-image'] below)
 
 // Chat scroll bookkeeping. gearChatLastScroll is kept up to date purely by the delegated scroll listener
@@ -27,14 +28,18 @@ const gearBuildKey = () => (GEARTHREAD.data && GEARTHREAD.data.buildKey) || 'mai
 const onGearThreadPage = (id) => route().page === 'gearthreads' && String(route().id) === String(id);
 
 function loadGearThread(id, build) {
+  const serial = ++gearThreadLoadSerial;
+  gearFolderImage = null;
   gearChatLastScroll = null; gearChatStickBottom = true;   // fresh thread: no scroll history to carry over
   api('/api/gearthreads/' + id + (build ? '?build=' + encodeURIComponent(build) : '')).then((full) => {
+    if (serial !== gearThreadLoadSerial) return;
     const { chat, chatHasMore, ...data } = full;
     GEARTHREAD = { id: String(id), data, chat, chatHasMore, chatLoadingOlder: false };
     if (onGearThreadPage(id)) render();
     if (data.buildKey && UI.gearBuildPref) UI.gearBuildPref[String(id)] = data.buildKey;
     startGearChatPoll(id);
   }).catch((e) => {
+    if (serial !== gearThreadLoadSerial) return;
     GEARTHREAD = { id: String(id), data: null, error: e.message || 'Could not load this gear thread.', chat: [], chatHasMore: false };
     if (onGearThreadPage(id)) render();
   });
@@ -43,7 +48,8 @@ function loadGearThread(id, build) {
 // threadFor()'s own comment server-side), and re-renders. Same shape as act() elsewhere, just without act()'s
 // full /api/state refresh, which this page has no use for.
 async function gearAct(fn) {
-  try { Object.assign(GEARTHREAD.data, await fn()); render(); return true; }
+  const thread = GEARTHREAD;
+  try { const result = await fn(); if (GEARTHREAD === thread) { Object.assign(thread.data, result); render(); } return true; }
   catch (e) { toast(e.message, true); return false; }
 }
 
@@ -54,6 +60,7 @@ async function loadOlderGearChat() {
   t.chatLoadingOlder = true;
   try {
     const { messages, hasMore } = await api(`/api/gearthreads/${t.id}/chat?before=${t.chat[0].id}&${gearBuildQ()}`);
+    if (GEARTHREAD !== t) return;
     t.chat = [...messages, ...t.chat];
     t.chatHasMore = hasMore;
   } catch (e) { toast(e.message, true); }
@@ -69,11 +76,12 @@ function startGearChatPoll(id) {
     if (!onGearThreadPage(id)) { stopGearChatPoll(); return; }
     if (document.hidden) return;
     try {
-      const { messages } = await api(`/api/gearthreads/${id}/chat?${gearBuildQ()}`);
       const t = GEARTHREAD;
+      const { messages } = await api(`/api/gearthreads/${id}/chat?${gearBuildQ()}`);
+      if (GEARTHREAD !== t || !onGearThreadPage(id)) return;
       const newestId = t.chat.length ? t.chat[t.chat.length - 1].id : 0;
       const fresh = messages.filter((m) => m.id > newestId);
-      if (fresh.length) { t.chat.push(...fresh); gearChatStickBottom = true; render(); }
+      if (fresh.length) { t.chat.push(...fresh); render(); }
     } catch { /* quiet - the next tick just tries again */ }
   }, 8000);
 }
@@ -96,16 +104,36 @@ AFTER_RENDER.push((page) => {
 });
 
 function viewGearThread(id) {
-  const m = S.members.find((x) => String(x.id) === String(id));
+  const m = S.members.find(x => String(x.id) === String(id));
   const canSeeIndex = isOfficer() || S.isCoach;
   UI.gearBuildPref = UI.gearBuildPref || {};
   if (GEARTHREAD.id !== String(id)) { GEARTHREAD = { id: String(id), data: null, chat: [], chatHasMore: false }; loadGearThread(id, UI.gearBuildPref[String(id)]); }
-  const sel = m && GEARTHREAD.data && GEARTHREAD.data.buildKey !== 'main' ? (m.builds || []).find((x) => String(x.id) === GEARTHREAD.data.buildKey) : null;   // the header follows the build being viewed
-  const head = `<div class="page-head"><div><h1>${esc(m ? m.name : 'Gear thread')}</h1><div class="muted">${m ? `${esc(ownerName(m.owner))} · ${weaponLine(sel || m)}` : ''}</div></div>
-    ${canSeeIndex ? `<a class="btn" href="#/gearthreads">&larr; Back to Gear Threads</a>` : ''}</div>`;
+  const t = GEARTHREAD.data, sel = m && t && t.buildKey !== 'main' ? (m.builds || []).find(x => String(x.id) === t.buildKey) : null;
+  const head = `<div class="gear-workspace-head"><div>${canSeeIndex ? '<a class="gear-back-link" href="#/gearthreads">← Back to Gear Threads</a>' : ''}<div class="gear-person"><span class="gear-person-initial" aria-hidden="true">${esc((t?.name || m?.name || '?').slice(0,2).toUpperCase())}</span><div><h1>${esc(t?.name || m?.name || 'Gear thread')}</h1><div class="muted">${t?.buildClass ? esc(t.buildClass) : ''}${m ? `${t?.buildClass ? ' · ' : ''}${weaponLine(sel || m)}` : ''}</div></div></div></div>${t ? gearBuildTabsHtml(t) : ''}</div>`;
   if (GEARTHREAD.error) return `${head}<div class="empty">${esc(GEARTHREAD.error)}</div>`;
-  if (!GEARTHREAD.data) return `${head}<div class="empty">Loading…</div>`;
-  return head + renderGearThread(GEARTHREAD.data, GEARTHREAD.chat, GEARTHREAD.chatHasMore, GEARTHREAD.chatLoadingOlder);
+  if (!t) return `${head}<div class="empty">Loading…</div>`;
+  return '<section class="gear-workspace">' + head + renderGearThread(t, GEARTHREAD.chat, GEARTHREAD.chatHasMore, GEARTHREAD.chatLoadingOlder) + '</section>';
+}
+// Keep unsaved text per viewer/thread/build when chat polling or other writes redraw the workspace.
+const gearDrafts = new Map();
+const gearDraftKey = (t, kind, section = '') => JSON.stringify([S.user.key, String(t.memberId), t.buildKey || 'main', kind, String(section)]);
+const gearDraftValue = (t, kind, field, fallback = '', section = '') => gearDrafts.get(gearDraftKey(t,kind,section))?.[field] ?? fallback;
+function gearClearSubmittedDraft(t, kind, fields, section = '') {
+  const key = gearDraftKey(t,kind,section), draft = gearDrafts.get(key);
+  if (!draft) return;
+  for (const [field,value] of Object.entries(fields)) if (draft[field] === value) delete draft[field];
+  if (!Object.keys(draft).length) gearDrafts.delete(key);
+}
+document.addEventListener('input', e => {
+  const field = e.target, f = field.closest?.('form[data-form]'), t = GEARTHREAD.data;
+  if (!t || !f || !['gear-note','gear-chat','gear-folder-post'].includes(f.dataset.form) || !field.name) return;
+  const key = gearDraftKey(t,f.dataset.form,f.dataset.section || '');
+  gearDrafts.set(key,{...gearDrafts.get(key),[field.name]:field.value});
+});
+const gearTopicKey = t => JSON.stringify([S.user.key,String(t.memberId),t.buildKey || 'main']);
+function gearSelectedTopic(t) {
+  const selected = UI.gearTopicPref?.[gearTopicKey(t)];
+  return String(t.screens.find(s => String(s.sectionId) === selected)?.sectionId ?? t.screens[0]?.sectionId ?? '');
 }
 
 /* ---- screenshots (section 2: a swipeable strip, one slide per topic) ----
@@ -113,23 +141,37 @@ function viewGearThread(id) {
    in features.js. Each slide here is keyed by the topic's stable sectionId, not its label, so a rename there
    never loses what's already uploaded under it. */
 function gearScreensHtml(t) {
-  if (!t.screens.length) return '<div class="muted small">No screenshot topics have been set up yet - an officer can add some in Admin &gt; Gear Threads.</div>';
-  const tabs = t.screens.map((s) => `<button type="button" class="gear-tab" data-act="gear-slide" data-section="${s.sectionId}">${esc(s.label)}</button>`).join('');
-  const slides = t.screens.map((s) => `
-    <div class="gear-slide" id="gslide-${s.sectionId}">
-      <div class="gear-slide-head"><b>${esc(s.label)}</b>
-        <button type="button" class="btn sm" data-act="gear-screen-upload-open" data-section="${s.sectionId}" data-label="${esc(s.label)}">${s.image ? 'Replace' : 'Upload'}</button>
-      </div>
-      ${s.image ? `<img class="gear-shot" src="${esc(s.image)}" alt="${esc(s.label)}">` : `<div class="empty" style="padding:40px 16px">No screenshot yet</div>`}
-      <form data-form="gear-note" data-id="${t.memberId}" data-section="${s.sectionId}">
-        <textarea name="note" maxlength="1000" placeholder="Notes for ${esc(s.label)} - anything the screenshot doesn't already show" data-autogrow>${esc(s.note)}</textarea>
-        <button class="btn sm primary">Save note</button>
+  if (!t.screens.length) return '<div class="empty">No screenshot topics yet. An officer can set them up in Admin → Gear Threads.</div>';
+  const selected = gearSelectedTopic(t);
+  const tabs = t.screens.map(s => `<button type="button" role="tab" id="gear-topic-${s.sectionId}" aria-controls="gslide-${s.sectionId}" aria-selected="${String(s.sectionId) === selected}" tabindex="${String(s.sectionId) === selected ? 0 : -1}" class="gear-tab ${String(s.sectionId) === selected ? 'active' : ''}" data-act="gear-slide" data-section="${s.sectionId}">${esc(s.label)}</button>`).join('');
+  const slides = t.screens.map(s => `<div class="gear-slide" role="tabpanel" aria-labelledby="gear-topic-${s.sectionId}" id="gslide-${s.sectionId}" ${String(s.sectionId) === selected ? '' : 'hidden'}>
+      <div class="gear-screenshot-preview">${s.image ? `<a href="${esc(s.image)}" target="_blank" rel="noopener noreferrer" aria-label="${esc('Open full-size ' + s.label + ' screenshot')}"><img class="gear-shot" src="${esc(s.image)}" alt="${esc(s.label)}"></a>` : '<div class="empty">No screenshot yet. Upload an image of your current setup.</div>'}</div>
+      <div class="gear-slide-head"><button type="button" class="btn sm" data-act="gear-screen-upload-open" data-section="${s.sectionId}" data-label="${esc(s.label)}">${s.image ? 'Replace image' : 'Upload image'}</button><span class="muted small">Images up to 6 MB</span></div>
+      <form data-form="gear-note" data-id="${t.memberId}" data-section="${s.sectionId}" class="gear-screenshot-note">
+        <label for="gear-note-${s.sectionId}">Screenshot note</label><div class="gear-note-controls"><textarea id="gear-note-${s.sectionId}" name="note" maxlength="1000" placeholder="Anything the screenshot does not show…" data-autogrow>${esc(gearDraftValue(t,'gear-note','note',s.note,s.sectionId))}</textarea><button class="btn sm primary">Save note</button></div>
       </form>
       ${s.updatedAt ? `<div class="muted small">Updated by ${esc(s.updatedByName)} · ${new Date(s.updatedAt).toLocaleString()}</div>` : ''}
     </div>`).join('');
-  return `<div class="gear-tabs">${tabs}</div><div class="gear-slides">${slides}</div>`;
+  return `<div class="gear-tabs gear-topic-tabs" role="tablist" aria-label="Screenshot topics">${tabs}</div><div class="gear-slides">${slides}</div>`;
 }
-ACTIONS['gear-slide'] = (el, d) => { const s = document.getElementById('gslide-' + d.section); if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' }); };
+ACTIONS['gear-slide'] = (el, d) => {
+  const t = GEARTHREAD.data;
+  if (!t || !t.screens.some(s => String(s.sectionId) === String(d.section))) return;
+  (UI.gearTopicPref ||= {})[gearTopicKey(t)] = String(d.section);
+  for (const s of t.screens) {
+    const active = String(s.sectionId) === String(d.section), panel = document.getElementById('gslide-' + s.sectionId), button = document.getElementById('gear-topic-' + s.sectionId);
+    if (panel) { panel.hidden = !active; if (active) autosizeAll(panel); }
+    if (button) { button.classList.toggle('active',active); button.setAttribute('aria-selected',String(active)); button.tabIndex = active ? 0 : -1; }
+  }
+};
+document.addEventListener('keydown', e => {
+  if (!e.target?.matches?.('.gear-topic-tabs [role="tab"]') || !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+  const buttons = [...document.querySelectorAll('.gear-topic-tabs [role="tab"]')];
+  if (!buttons.length) return;
+  e.preventDefault(); const index = buttons.indexOf(e.target);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length-1 : (index + (e.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length;
+  buttons[next].focus(); ACTIONS['gear-slide'](buttons[next],buttons[next].dataset);
+});
 
 // The upload/replace button opens a small popup with a drag-and-drop zone plus a "choose a file" button,
 // rather than triggering the OS file picker directly - gearUploadDialog() below is shared with anywhere else
@@ -168,12 +210,15 @@ document.addEventListener('drop', (e) => {
 function gearUploadScreenFile(sectionId, file) {
   if (!/^image\//.test(file.type)) { toast('That is not an image file.', true); return; }
   if (file.size > 6e6) { toast('That picture is too large (limit 6 MB).', true); return; }
-  const id = GEARTHREAD.id;
+  const thread = GEARTHREAD, id = thread.id, build = gearBuildKey();
   const r = new FileReader();
-  r.onload = () => { closeDialog(); gearAct(() => api(`/api/gearthreads/${id}/screens/${sectionId}`, 'PUT', { image: r.result, build: gearBuildKey() })).then((ok) => ok && toast('Screenshot uploaded')); };
+  r.onload = () => { if (GEARTHREAD !== thread) return; closeDialog(); gearAct(() => api(`/api/gearthreads/${id}/screens/${sectionId}`, 'PUT', { image: r.result, build })).then((ok) => ok && toast('Screenshot uploaded')); };
   r.readAsDataURL(file);
 }
-FORMS['gear-note'] = (f, fd) => gearAct(() => api(`/api/gearthreads/${f.dataset.id}/screens/${f.dataset.section}`, 'PUT', { note: fd.note, build: gearBuildKey() })).then((ok) => ok && toast('Note saved'));
+FORMS['gear-note'] = (f, fd) => {
+  const t = GEARTHREAD.data;
+  return gearAct(async () => { const result = await api(`/api/gearthreads/${f.dataset.id}/screens/${f.dataset.section}`, 'PUT', { note: fd.note, build: t.buildKey || 'main' }); gearClearSubmittedDraft(t,'gear-note',{note:fd.note},f.dataset.section); return result; }).then(ok => ok && toast('Note saved'));
+};
 
 /* ---- chat (section 1) - paged (infinite-scroll-up) and live-polled; see the module comment up top ---- */
 function gearChatHtml(t, chat, chatHasMore, chatLoadingOlder) {
@@ -186,18 +231,24 @@ function gearChatHtml(t, chat, chatHasMore, chatLoadingOlder) {
     </div>`).join('') : '<div class="muted small">No messages yet - say hello.</div>';
   return `<div class="gear-chat-list">${top}${list}</div>
     <form data-form="gear-chat" data-id="${t.memberId}" class="gear-chat-form">
-      <textarea name="text" maxlength="20000" placeholder="Message ${esc(t.name)}'s thread..." required data-autogrow></textarea>
-      <button class="btn primary">Send</button>
+      <textarea name="text" maxlength="20000" aria-label="Message" placeholder="Write a message…" required data-autogrow>${esc(gearDraftValue(t,'gear-chat','text'))}</textarea>
+      <button class="btn primary" ${gearChatSending.has(gearDraftKey(t,'gear-chat')) ? 'disabled' : ''}>Send</button>
     </form>`;
 }
-FORMS['gear-chat'] = (f, fd) => {
-  if (!fd.text || !fd.text.trim()) return;
-  api(`/api/gearthreads/${f.dataset.id}/chat`, 'POST', { text: fd.text, build: gearBuildKey() }).then((msg) => {
-    GEARTHREAD.chat.push(msg);
-    gearChatStickBottom = true;
-    f.reset();
-    render();
-  }).catch((e) => toast(e.message, true));
+const gearChatSending = new Set();
+FORMS['gear-chat'] = async (f, fd) => {
+  const thread = GEARTHREAD, t = thread.data;
+  if (!t || !fd.text || !fd.text.trim()) return;
+  const key = gearDraftKey(t,'gear-chat');
+  if (gearChatSending.has(key)) return;
+  gearChatSending.add(key);
+  const button = f.querySelector('button'); if (button) button.disabled = true;
+  try {
+    const msg = await api(`/api/gearthreads/${t.memberId}/chat`, 'POST', {text:fd.text,build:t.buildKey || 'main'});
+    gearClearSubmittedDraft(t,'gear-chat',{text:fd.text});
+    if (GEARTHREAD === thread) { thread.chat.push(msg); gearChatStickBottom = true; }
+  } catch (e) { toast(e.message,true); }
+  finally { gearChatSending.delete(key); if (GEARTHREAD === thread && onGearThreadPage(thread.id)) render(); }
 };
 
 /* ---- skill cores (section 3) ---- */
@@ -205,10 +256,10 @@ FORMS['gear-chat'] = (f, fd) => {
 // Until then there is nothing real to pick from, so this says so plainly instead of showing an empty, useless
 // checklist.
 function gearSkillcoresHtml(t) {
-  if (!t.skillcores.catalog.length) return `<div class="muted small">Your officers haven't added the skill core list yet. Once they do, you'll be able to mark which ones you own and which are active on your gear right now.</div>`;
+  if (!t.skillcores.catalog.length) return '<div class="gear-not-configured">Not configured yet</div><p class="muted small">The skill core catalogue is not available in this version.</p>';
   // Built once real catalog data exists (see the module comment above) - two checkbox columns, "Owned" and
   // "Active", with Active implicitly limited to whatever is already ticked as Owned.
-  return `<div class="muted small">Skill core picker goes here.</div>`;
+  return '<div class="gear-not-configured">Not available yet</div><p class="muted small">Skill core editing is not implemented in this version.</p>';
 }
 
 /* ---- questlog (section 4) - the same field a character's own edit form already has ---- */
@@ -241,9 +292,9 @@ function gearFolderHtml(t) {
     </div>`).join('') : '<div class="muted small">Nothing posted here yet.</div>';
   const composer = t.canPostFolder ? `
     <form data-form="gear-folder-post" data-id="${t.memberId}" class="gear-folder-form">
-      <textarea name="text" maxlength="1000" placeholder="Add a note, with an optional link or image attached" data-autogrow></textarea>
+      <textarea name="text" maxlength="1000" placeholder="Add a note, with an optional link or image attached" data-autogrow>${esc(gearDraftValue(t,'gear-folder-post','text'))}</textarea>
       <div class="row">
-        <div class="field" style="flex:1"><input name="url" type="url" placeholder="https://... (optional link)" maxlength="300"></div>
+        <div class="field" style="flex:1"><input name="url" type="url" aria-label="Resource link" value="${esc(gearDraftValue(t,'gear-folder-post','url'))}" placeholder="https://... (optional link)" maxlength="300"></div>
         <label class="btn sm" style="margin:0">Attach image<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-act="gear-folder-image" class="hidden"></label>
       </div>
       <div class="muted small" id="gear-folder-imgname"></div>
@@ -254,8 +305,9 @@ function gearFolderHtml(t) {
 CHANGES['gear-folder-image'] = (el) => {
   const file = el.files[0]; if (!file) return;
   if (file.size > 6e6) { toast('That picture is too large (limit 6 MB).', true); el.value = ''; return; }
+  const thread = GEARTHREAD;
   const r = new FileReader();
-  r.onload = () => { gearFolderImage = r.result; const n = $('#gear-folder-imgname'); if (n) n.textContent = 'Attached: ' + file.name; };
+  r.onload = () => { if (GEARTHREAD !== thread) return; gearFolderImage = r.result; const n = $('#gear-folder-imgname'); if (n) n.textContent = 'Attached: ' + file.name; };
   r.readAsDataURL(file);
 };
 FORMS['gear-folder-post'] = (f, fd) => {
@@ -266,7 +318,8 @@ FORMS['gear-folder-post'] = (f, fd) => {
   else if (text) body = { kind: 'text', text };
   else { toast('Write something, paste a link, or attach an image first.', true); return; }
   body.build = gearBuildKey();
-  gearAct(() => api(`/api/gearthreads/${f.dataset.id}/folder`, 'POST', body)).then((ok) => { if (ok) { f.reset(); gearFolderImage = null; } });
+  const draftThread = GEARTHREAD.data;
+  gearAct(async () => { const result = await api(`/api/gearthreads/${f.dataset.id}/folder`, 'POST', body); gearClearSubmittedDraft(draftThread,'gear-folder-post',{text:fd.text || '',url:fd.url || ''}); return result; }).then((ok) => { if (ok) { f.reset(); gearFolderImage = null; } });
 };
 ACTIONS['gear-folder-del'] = (el, d) => { if (confirm('Remove this from the folder?')) gearAct(() => api(`/api/gearthreads/${d.id}/folder/${d.item}?${gearBuildQ()}`, 'DELETE')); };
 
@@ -274,7 +327,7 @@ ACTIONS['gear-folder-del'] = (el, d) => { if (confirm('Remove this from the fold
 // One tab per build this person may open (a coach only gets the builds of the class they coach). Each build has
 // its own chat, screenshots, skill cores, build links and folder.
 function gearBuildTabsHtml(t) {
-  if (!t.builds || t.builds.length < 2) return t.builds && t.builds[0] && t.builds[0].class ? `<div class="muted small" style="margin-bottom:8px">${esc(t.builds[0].class)}</div>` : '';
+  if (!t.builds || t.builds.length < 2) return '';
   return `<div class="gear-tabs gear-build-tabs" style="margin-bottom:12px">${t.builds.map((b) =>
     `<button type="button" class="gear-tab ${b.key === t.buildKey ? 'active' : ''}" data-act="gear-build" data-id="${t.memberId}" data-build="${esc(b.key)}">${esc(b.name)}${b.class ? ` · ${esc(b.class)}` : ''}</button>`).join('')}</div>`;
 }
@@ -287,13 +340,13 @@ ACTIONS['gear-build'] = (el, d) => {
   render();
 };
 function renderGearThread(t, chat, chatHasMore, chatLoadingOlder) {
-  return `${gearBuildTabsHtml(t)}<div class="geargear-grid">
-    <div class="panel geargear-screens"><h3>Screenshots</h3>${gearScreensHtml(t)}</div>
-    <div class="panel geargear-chat"><h3>Chat</h3>${gearChatHtml(t, chat, chatHasMore, chatLoadingOlder)}</div>
-    <div class="geargear-side">
-      <div class="panel"><h3>Skill cores</h3>${gearSkillcoresHtml(t)}</div>
-      <div class="panel"><h3>${'Questlog'}</h3>${gearQuestlogHtml(t)}</div>
-      <div class="panel"><h3>Folder</h3>${gearFolderHtml(t)}</div>
+  return `<div class="geargear-grid gear-workspace-grid">
+    <div class="panel geargear-screens"><div class="gear-panel-heading"><h2>Screenshots</h2><span class="muted small">Your current setup</span></div>${gearScreensHtml(t)}</div>
+    <div class="panel geargear-chat"><div class="gear-panel-heading"><h2>Discussion</h2><span class="muted small">Talk through your build</span></div>${gearChatHtml(t, chat, chatHasMore, chatLoadingOlder)}</div>
+    <div class="geargear-side gear-workspace-resources">
+      <div class="panel"><div class="gear-panel-heading"><h2>Questlog</h2><span class="muted small">Build links</span></div>${gearQuestlogHtml(t)}</div>
+      <div class="panel"><div class="gear-panel-heading"><h2>Coach folder</h2><span class="muted small">Notes and resources</span></div>${gearFolderHtml(t)}</div>
+      <div class="panel"><div class="gear-panel-heading"><h2>Skill cores</h2></div>${gearSkillcoresHtml(t)}</div>
     </div>
   </div>`;
 }

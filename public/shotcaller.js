@@ -22,7 +22,8 @@ let scStarting = false;
 async function pollShotcaller() {
   try { SC = { loading: false, data: await api('/api/shotcaller/status'), error: '' }; }
   catch (e) { SC = { loading: false, data: null, error: e.message }; }
-  if (route().page === 'shotcaller' && !$('#dlg').open) render();
+  const editingSetup=UI.scTab==='setup' && document.querySelector('.sc-setup-panel .sc-start-form');
+  if (route().page === 'shotcaller' && !$('#dlg').open && !editingSetup) render();
 }
 // Starts polling every 5s while the Shotcaller page is open (active or inactive, so a /shotcaller command run
 // directly in Discord is picked up here too), and stops the moment the officer navigates elsewhere. Guarded by
@@ -55,201 +56,131 @@ function candidatePickerFor(name, selected = []) {
 }
 const scChip = (id, removeAct) => `<span class="chip">${esc(scName(id))} <span style="opacity:.6;cursor:pointer" data-act="${removeAct}" data-id="${esc(id)}"> ✕</span></span>`;
 
+let scMutePending = null, scStopping = false, scSetupLoading = false, scSetupChannels = null, scStartLoading = false;
+function scPageHeader() {
+ return `<header class="page-head"><div><div class="sc-eyebrow">GUILD VOICE · FOCUSED CONSOLE</div><h1>Shotcaller</h1><p>Live voice control for your guild.</p></div></header>`;
+}
+function scTabs() {
+ const setup=UI.scTab==='setup';
+ return `<nav class="sc-console-tabs" aria-label="Shotcaller sections"><button data-act="sc-tab" data-tab="session" class="${setup?'':'active'}" aria-pressed="${!setup}">${navIcon('shotcaller')} Session</button><button data-act="sc-tab" data-tab="setup" class="${setup?'active':''}" aria-pressed="${setup}">${navIcon('admin')} Session setup</button><span>Setup applies to the next session</span></nav>`;
+}
+function scCallerList(ids,removeAct) {
+ return ids.length?`<div class="sc-caller-list">${ids.map(id=>`<div class="sc-caller-person"><span class="sc-initials" aria-hidden="true">${esc(scName(id).slice(0,2).toUpperCase())}</span><strong>${esc(scName(id))}</strong><button class="btn sm sc-remove" data-act="${removeAct}" data-id="${esc(id)}" aria-label="Remove ${esc(scName(id))}">×</button></div>`).join('')}</div>`:'<p class="sc-secondary">No callers selected</p>';
+}
+function scCallers(d,active,starting) {
+ const next=UI.scSetupDraft?.dedicatedCallerId ?? S.settings.shotcaller?.defaultCallerId;
+ return `<aside class="sc-console-callers"><h2>${navIcon('member')} Callers</h2><section><div class="sc-section-heading"><h3>Dedicated callers</h3>${active?'<button class="btn sm" data-act="sc-dedicated-manage">Manage ›</button>':''}</div><p class="sc-secondary">Heard across all parties.</p>${active?scCallerList(d.dedicated||[],'sc-dedicated-remove'):`<p class="sc-next-caller">${next?esc(scName(next)):'No dedicated caller selected'}<small>Next session</small></p>${!starting?'<button class="btn sm" data-act="sc-tab" data-tab="setup">Choose caller</button>':''}`}</section><section><div class="sc-section-heading"><h3>Extra callers</h3>${active?'<button class="btn sm" data-act="sc-extra-manage">Manage ›</button>':''}</div><p class="sc-secondary">In addition to the configured caller role.</p>${active?scCallerList(d.additionalCallers||[],'sc-extra-remove'):'<p class="sc-secondary">Manage extra callers once the session is active.</p>'}</section></aside>`;
+}
+function scSessionConsole(d={},state='inactive') {
+ const active=state==='active',starting=state==='starting';
+ const parties=active?(d.parties||[]):[],connected=parties.reduce((n,p)=>n+Math.max(0,Number(p.connected)||0),0);
+ const muted=active&&(scMutePending===null?!!d.muted:scMutePending);
+ return `<div class="sc-console-top"><section class="sc-console-session ${starting?'is-starting':''}"><div class="sc-session-state"><span class="sc-live-dot ${active?'live':starting?'starting':''}"></span><h2>${starting?'Starting session…':active?'Live session':'No active session'}</h2><span class="sc-audio ${muted?'muted':''}">${navIcon('shotcaller')} Audio ${active?(muted?'muted':'on'):'off'}</span></div><div class="sc-session-totals"><div><strong>${active?connected:'—'}</strong><span>connected</span></div><div><strong>${active?parties.length:'—'}</strong><span>party channels</span></div></div>${starting?'<p class="sc-session-note" role="status">Setting up voice channels and connecting relay bots.</p>':muted?'<p class="sc-session-note">Callouts are muted across parties. Local Discord conversations still work.</p>':!active?'<p class="sc-session-note">Start a voice session for your event, a saved line-up or a custom party setup.</p>':''}<div class="sc-session-actions">${active?`<button class="btn" data-act="sc-mute" ${scMutePending!==null||scStopping?'disabled':''}>${muted?'Unmute session':'Mute session'}</button><button class="btn danger" data-act="sc-stop" ${scStopping?'disabled':''}>${scStopping?'Stopping…':'Stop session'}</button>`:`<button class="btn primary" data-act="sc-start" ${starting?'disabled':''}>${starting?'Starting session…':'Start session'}</button>${!starting?'<button class="btn" data-act="sc-tab" data-tab="setup">Session setup</button>':''}`}</div></section>${scCallers(d,active,starting)}</div><section class="sc-console-parties"><div class="sc-section-heading"><h2>${navIcon('shotcaller')} Party channels</h2>${active?`<span>${parties.length} channels · ${connected} connected</span>`:''}</div>${active?`<div class="sc-party-grid">${parties.map(p=>`<article class="sc-channel ${p.connected?'':'is-empty'}"><span class="sc-channel-icon" aria-hidden="true">${navIcon('shotcaller')}</span><div><h3>${esc(p.name)}</h3><div class="sc-channel-count"><strong>${Math.max(0,Number(p.connected)||0)}</strong><span>connected</span></div></div></article>`).join('')||'<p class="sc-secondary">No party channels reported.</p>'}</div>`:starting?`<div class="sc-start-animation" role="status"><div class="sc-start-symbol" aria-hidden="true"><span></span>${navIcon('shotcaller')}</div><strong>Preparing your voice session<span class="sc-loading-dots" aria-hidden="true">…</span></strong><p>Channels and relay bots are being prepared. This can take a little while.</p></div>`:'<div class="sc-session-empty"><span aria-hidden="true">'+navIcon('shotcaller')+'</span><strong>Your party channels will appear here</strong><p>Choose a voice channel, party setup and caller to get started.</p></div>'}</section><div class="sc-bridge-note">${navIcon('requests')}<strong>Bridge</strong><span>Not available yet</span></div>`;
+}
 function viewShotcaller() {
-  if (!isOfficer()) return '<div class="empty">Officers only.</div>';
-  if (!S.cfg.shotcallerOn) return `<div class="page-head"><div><h1>Shotcaller</h1></div></div>
-    <div class="panel"><div class="muted">Shotcaller is not set up on this server yet. Set <code>SHOTCALLER_URL</code> and <code>SHOTCALLER_API_KEY</code> in the server's environment to turn this page on.</div></div>`;
-  if (SC.loading) return '<div class="page-head"><div><h1>Shotcaller</h1></div></div><div class="panel"><div class="muted">Loading…</div></div>';
-  if (SC.error) return `<div class="page-head"><div><h1>Shotcaller</h1></div></div><div class="panel"><div class="warn-line">${esc(SC.error)}</div></div>`;
-  if (scStarting) return scStartingPage();
-  return SC.data.active ? scActivePage(SC.data) : scInactivePage();
+ if(!isOfficer())return '<div class="empty">Officers only.</div>';
+ const header=scPageHeader();
+ if(!S.cfg.shotcallerOn)return `<section class="sc-workspace">${header}<div class="panel sc-message"><h2>Shotcaller is not connected</h2><p>Configure the Shotcaller connection in the server settings to enable voice controls.</p></div></section>`;
+ if(scStarting)return `<section class="sc-workspace">${header}${scTabs()}${scSessionConsole({},'starting')}</section>`;
+ if(SC.loading)return `<section class="sc-workspace">${header}<div class="sc-message" role="status">Loading voice session…</div></section>`;
+ if(SC.error)return `<section class="sc-workspace">${header}<div class="panel sc-message"><h2>Unable to load voice session</h2><p>${esc(SC.error)}</p><button class="btn" data-act="sc-retry">Try again</button></div></section>`;
+ if(UI.scTab==='setup')return `<section class="sc-workspace">${header}${scTabs()}<section class="sc-setup-panel"><h2>Next session setup</h2><p>These settings apply to the next session you start here. The current session stays unchanged.</p>${scSetupChannels?scStartForm(scSetupChannels,true):`<div class="sc-message" role="status">${scSetupLoading?'Loading voice channels…':'<button class="btn" data-act="sc-load-setup">Load voice channels</button>'}</div>`}</section></section>`;
+ return SC.data?.active?scActivePage(SC.data):scInactivePage();
 }
-VIEWS.shotcaller = () => viewShotcaller();
-
-function scActivePage(d) {
-  const connected = d.parties.reduce((n, p) => n + (p.connected || 0), 0);
-  return `<div class="page-head"><div><h1>Shotcaller</h1><div class="muted">Live control for the active voice session. A new one can also be started with <code>/shotcaller start</code> in Discord.</div></div></div>
-
-  <div class="stats">
-    <div class="stat"><div class="k">Session</div><div class="v" style="font-size:28px">🟢 Active</div></div>
-    <div class="stat" ${d.muted ? 'style="--c:#eba23c"' : ''}><div class="k">Audio</div><div class="v" style="font-size:28px">${d.muted ? '🔇 Muted' : '🔊 On'}</div></div>
-    <div class="stat"><div class="k">Parties</div><div class="v">${d.parties.length}</div></div>
-    <div class="stat"><div class="k">Players connected</div><div class="v">${connected}</div></div>
-  </div>
-
-  <div class="events-layout">
-    <div class="cal">
-      <div class="panel"><h3>Parties</h3>
-        <div class="parties" style="margin-top:12px">${d.parties.map((p) => `
-          <div class="panel" style="margin:0;padding:14px${p.connected ? '' : ';opacity:.6'}">
-            <div style="display:flex;justify-content:space-between;align-items:center"><strong>${esc(p.name)}</strong></div>
-            <div class="muted small" style="margin-top:6px">${p.connected ? '🔊' : '⚪'} ${p.connected} connected</div>
-          </div>`).join('') || '<div class="muted small">No parties.</div>'}
-        </div>
-      </div>
-    </div>
-
-    <aside class="ev-side">
-      <div class="panel"><h3>Controls</h3>
-        <div class="seg" style="margin-top:10px">
-          <button class="btn sm" data-act="sc-mute">${d.muted ? '🔊 Unmute' : '🔇 Mute'}</button>
-          <button class="btn sm danger" data-act="sc-stop">■ Stop session</button>
-        </div>
-        ${d.muted ? '<div class="muted small" style="margin-top:8px">Audio is muted - nobody hears the dedicated caller or any callouts right now. Parties can still talk to each other locally in Discord as normal.</div>' : ''}
-      </div>
-
-      <div class="panel"><h3>Dedicated caller</h3>
-        <div class="muted small" style="margin:8px 0">Heard by every other party, wherever they're standing.</div>
-        <div class="seg">${d.dedicated.length ? d.dedicated.map((id) => scChip(id, 'sc-dedicated-remove')).join('') : '<span class="muted small">No caller selected</span>'}</div>
-        <button class="btn sm" style="margin-top:10px" data-act="sc-dedicated-manage">Manage dedicated caller(s)</button>
-      </div>
-
-      <div class="panel"><h3>Extra callers</h3>
-        <div class="muted small" style="margin:8px 0">On top of anyone with the configured caller role.</div>
-        <div class="seg">${d.additionalCallers.length ? d.additionalCallers.map((id) => scChip(id, 'sc-extra-remove')).join('') : '<span class="muted small">None set</span>'}</div>
-        <button class="btn sm" style="margin-top:10px" data-act="sc-extra-manage">Manage extra callers</button>
-      </div>
-
-      <div class="panel" style="opacity:.55"><h3>Bridge</h3>
-        <div class="muted small" style="margin-top:8px">Cross-guild bridge control is coming in a future update.</div>
-      </div>
-    </aside>
-  </div>`;
-}
-
-function scStartingPage() {
-  return `<div class="page-head"><div><h1>Shotcaller</h1><div class="muted">Starting the session - this can take up to a minute while voice channels are created and the relay bots connect.</div></div></div>
-
-  <div class="stats">
-    <div class="stat" style="--c:#eba23c"><div class="k">Session</div><div class="v" style="font-size:28px">🟡 Starting…</div></div>
-    <div class="stat" style="--c:var(--muted)"><div class="k">Audio</div><div class="v" style="font-size:28px">—</div></div>
-    <div class="stat"><div class="k">Parties</div><div class="v">—</div></div>
-    <div class="stat"><div class="k">Players connected</div><div class="v">—</div></div>
-  </div>
-
-  <div class="events-layout">
-    <div class="cal">
-      <div class="panel"><h3>Parties</h3>
-        <div style="margin-top:12px;padding:40px 20px;text-align:center;border:1px dashed var(--line);border-radius:8px">
-          <strong class="muted" style="font-size:17px">Setting up voice channels…</strong>
-        </div>
-      </div>
-    </div>
-
-    <aside class="ev-side">
-      <div class="panel"><h3>Controls</h3>
-        <div class="seg" style="margin-top:10px"><button class="btn sm" disabled>▶ Starting…</button></div>
-      </div>
-    </aside>
-  </div>`;
-}
-
-function scInactivePage() {
-  return `<div class="page-head"><div><h1>Shotcaller</h1><div class="muted">Live control for the active voice session. A new one can also be started with <code>/shotcaller start</code> in Discord.</div></div></div>
-
-  <div class="stats">
-    <div class="stat" style="--c:var(--muted)"><div class="k">Session</div><div class="v" style="font-size:28px">⚪ Inactive</div></div>
-    <div class="stat" style="--c:var(--muted)"><div class="k">Audio</div><div class="v" style="font-size:28px">🔇 Off</div></div>
-    <div class="stat"><div class="k">Parties</div><div class="v">—</div></div>
-    <div class="stat"><div class="k">Players connected</div><div class="v">—</div></div>
-  </div>
-
-  <div class="events-layout">
-    <div class="cal">
-      <div class="panel"><h3>Parties</h3>
-        <div style="margin-top:12px;padding:40px 20px;text-align:center;border:1px dashed var(--line);border-radius:8px">
-          <strong style="color:var(--danger);font-size:17px">No voice channels created</strong>
-        </div>
-      </div>
-    </div>
-
-    <aside class="ev-side">
-      <div class="panel"><h3>Controls</h3>
-        <div class="seg" style="margin-top:10px"><button class="btn sm" style="background:#6fcf8b;border-color:#6fcf8b;color:#0d1f14" data-act="sc-start">▶ Start session</button></div>
-      </div>
-
-      <div class="panel"><h3>Dedicated caller</h3>
-        <div class="muted small" style="margin:8px 0">Heard by every other party, wherever they're standing.</div>
-        <div class="seg"><span class="muted small">No caller selected</span></div>
-        <button class="btn sm" style="margin-top:10px" data-act="sc-dedicated-manage">Manage dedicated caller(s)</button>
-      </div>
-
-      <div class="panel"><h3>Extra callers</h3>
-        <div class="muted small" style="margin:8px 0">On top of anyone with the configured caller role.</div>
-        <div class="seg"><span class="muted small">None set</span></div>
-        <button class="btn sm" style="margin-top:10px" data-act="sc-extra-manage">Manage extra callers</button>
-      </div>
-
-      <div class="panel" style="opacity:.55"><h3>Bridge</h3>
-        <div class="muted small" style="margin-top:8px">Cross-guild bridge control is coming in a future update.</div>
-      </div>
-    </aside>
-  </div>`;
-}
+function scActivePage(d) { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole(d,'active')}</section>`; }
+function scStartingPage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole({},'starting')}</section>`; }
+function scInactivePage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole({},'inactive')}</section>`; }
+VIEWS.shotcaller=()=>viewShotcaller();
+ACTIONS['sc-retry']=()=>pollShotcaller();
+ACTIONS['sc-tab']=async(el,d)=>{
+ UI.scTab=d.tab==='setup'?'setup':'session';render();
+ if(UI.scTab==='setup'&&!scSetupChannels)await ACTIONS['sc-load-setup']();
+};
+ACTIONS['sc-load-setup']=async()=>{
+ if(scSetupLoading)return;scSetupLoading=true;render();
+ try{scSetupChannels=(await api('/api/shotcaller/voice-channels')).channels||[];}
+ catch(error){toast(error.message,true);}
+ finally{scSetupLoading=false;render();}
+};
 
 /* ---------------------------------------------------------------- actions */
-ACTIONS['sc-mute'] = () => {
-  if (!SC.data) return;
-  const next = !SC.data.muted;
-  SC.data.muted = next; render();                                      // optimistic, same idea as rsvpNow()
-  api('/api/shotcaller/mute', 'POST', { muted: next })
-    .then((r) => { if (SC.data) SC.data.muted = r.muted; render(); })
-    .catch((e) => { if (SC.data) SC.data.muted = !next; render(); toast(e.message, true); });
+ACTIONS['sc-mute']=async()=>{
+ if(!SC.data?.active||scMutePending!==null||scStopping)return;
+ const previous=!!SC.data.muted;scMutePending=!previous;render();
+ try{const reply=await api('/api/shotcaller/mute','POST',{muted:scMutePending});if(SC.data)SC.data.muted=!!reply.muted;}
+ catch(error){if(SC.data)SC.data.muted=previous;toast(error.message,true);}
+ finally{scMutePending=null;await pollShotcaller();}
 };
-ACTIONS['sc-stop'] = () => {
-  if (!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.')) return;
-  scAct(() => api('/api/shotcaller/stop', 'POST'), 'Shotcaller session stopped');
+ACTIONS['sc-stop']=async()=>{
+ if(!SC.data?.active||scStopping)return;
+ if(!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.'))return;
+ scStopping=true;render();
+ try{await scAct(()=>api('/api/shotcaller/stop','POST'),'Shotcaller session stopped');}
+ finally{scStopping=false;render();}
 };
 // Start dialog: ported from the approved mockup (voice channel / mode / voice-channel-setup / dedicated caller).
 // Needs the bot's live voice-channel list, so it's fetched first - the dialog only opens once that answers.
-async function scStartDialog() {
-  let channels;
-  try { channels = (await api('/api/shotcaller/voice-channels')).channels || []; }
-  catch (e) { toast(e.message, true); return; }
-  if (!channels.length) return toast('No voice channels found in that Discord server.', true);
+async function scStartDialog(){
+ if(scStarting||scStartLoading)return;
+ scStartLoading=true;
+ try{
+  const channels=(await api('/api/shotcaller/voice-channels')).channels||[];
+  if(!channels.length){toast('No voice channels found in that Discord server.',true);return;}
+  openDialog(scStartForm(channels),true);
+ }catch(error){toast(error.message,true);}
+ finally{scStartLoading=false;}
+}
+function scStartForm(channels,configure=false){
+  const draft=UI.scSetupDraft || {};
   const last = SC.data && SC.data.lastVoiceChannel;
-  const lastId = last && channels.some((c) => c.id === last.channelId) ? last.channelId : channels[0].id;
-  const st = S.settings.shotcaller;
+  const lastId=channels.some(c=>c.id===draft.channelId)?draft.channelId:last&&channels.some(c=>c.id===last.channelId)?last.channelId:channels[0]?.id;
+  const st = S.settings.shotcaller || {};
   const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   // Only events/presets that actually have parties to match are worth offering here.
   const upcomingEvents = S.events.filter((e) => e.parties.length && new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start));
   const presetsWithParties = S.presets.filter((p) => p.parties.length);
-  openDialog(`<form data-form="shotcaller-start"><h2>Start Shotcaller session</h2>
+  const kind=(draft.setupKind==='event'&&upcomingEvents.length)||(draft.setupKind==='preset'&&presetsWithParties.length)?draft.setupKind:'default';
+  const mode=['8','12','custom'].includes(draft.mode)?draft.mode:'8';
+  return `<form class="sc-start-form" data-form="${configure?'shotcaller-configure':'shotcaller-start'}">${configure?'':'<h2>Start Shotcaller session</h2>'}
     <div class="field"><label>Voice channel (becomes Party 1 - yours)</label>
-      <select name="channelId">${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === lastId ? 'selected' : ''}>🔊 ${esc(c.name)}${last && c.id === last.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
+      <select name="channelId">${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === lastId ? 'selected' : ''}>${esc(c.name)}${last && c.id === last.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
     <div class="row">
       <div class="field"><label>Mode</label>
-        <select name="mode" data-act="sc-mode" id="sc-mode">
-          <option value="8" selected>GvG - 8 parties</option>
-          <option value="12">Full Guild - 12 parties</option>
-          <option value="custom">Custom - 1 to 12</option>
+        <select name="mode" data-act="sc-mode" id="sc-mode" ${kind!=='default'?'disabled':''}>
+          <option value="8" ${mode==='8'?'selected':''}>GvG - 8 parties</option>
+          <option value="12" ${mode==='12'?'selected':''}>Full Guild - 12 parties</option>
+          <option value="custom" ${mode==='custom'?'selected':''}>Custom - 1 to 12</option>
         </select></div>
-      <div class="field hidden" id="sc-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" value="8"></div>
+      <div class="field ${mode==='custom'?'':'hidden'}" id="sc-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" value="${Number(draft.customCount)||8}" ${kind!=='default'?'disabled':''}></div>
     </div>
     <div class="muted small hidden" id="sc-mode-note" style="margin-top:-6px;margin-bottom:12px"></div>
     <div class="field"><label>Voice channel setup</label>
       <select name="setupKind" data-act="sc-setup" id="sc-setup">
-        <option value="default" selected>Default - plain Party 1-N</option>
-        ${upcomingEvents.length ? '<option value="event">Event-related parties - match an event\'s line-up</option>' : ''}
-        ${presetsWithParties.length ? '<option value="preset">Use preset - match a saved line-up</option>' : ''}
+        <option value="default" ${kind==='default'?'selected':''}>Default - plain Party 1-N</option>
+        ${upcomingEvents.length ? `<option value="event" ${kind==='event'?'selected':''}>Event-related parties - match an event\'s line-up</option>` : ''}
+        ${presetsWithParties.length ? `<option value="preset" ${kind==='preset'?'selected':''}>Use preset - match a saved line-up</option>` : ''}
       </select></div>
-    <div class="field hidden" id="sc-setup-event"><label>Event</label>
-      <select name="eventId">${upcomingEvents.map((e) => { const n = 1 + e.parties.slice(1).filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}">${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+    <div class="field ${kind==='event'?'':'hidden'}" id="sc-setup-event"><label>Event</label>
+      <select name="eventId">${upcomingEvents.map((e) => { const n = 1 + e.parties.slice(1).filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}" ${String(draft.eventId)===String(e.id)?'selected':''}>${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
       <div class="muted small" style="margin-top:6px">Party count comes from this event's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
-    <div class="field hidden" id="sc-setup-preset"><label>Preset</label>
-      <select name="presetId">${presetsWithParties.map((p) => { const n = 1 + p.parties.slice(1).filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}">${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+    <div class="field ${kind==='preset'?'':'hidden'}" id="sc-setup-preset"><label>Preset</label>
+      <select name="presetId">${presetsWithParties.map((p) => { const n = 1 + p.parties.slice(1).filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}" ${String(draft.presetId)===String(p.id)?'selected':''}>${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
       <div class="muted small" style="margin-top:6px">Party count comes from this preset's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field"><label>Shotcaller</label>
       <select name="dedicatedCallerId">
         <option value="">No dedicated caller - anyone can call out</option>
-        ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === st.defaultCallerId ? 'selected' : ''}>${esc(c.name)}${c.key === st.defaultCallerId ? ' (default)' : ''}</option>`).join('')}
+        ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === (draft.dedicatedCallerId ?? st.defaultCallerId) ? 'selected' : ''}>${esc(c.name)}${c.key === st.defaultCallerId ? ' (default)' : ''}</option>`).join('')}
       </select>
       <div class="muted small" style="margin-top:6px">Defaults to whoever's set as the default caller in Admin - not necessarily you. Pick someone else here just for this session, or set a new default in Admin.</div></div>
-    <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button>
-      <button class="btn" style="background:#6fcf8b;color:#0d1f14;border-color:#6fcf8b;font-weight:600">Start session</button></div>
-  </form>`);
+    <div class="dlg-actions">${configure?'':'<button type="button" class="btn" data-act="dlg-close">Cancel</button>'}
+      <button class="btn primary" ${!channels.length?'disabled':''}>${configure?'Save next session setup':'Start session'}</button></div>
+  </form>`;
 }
-ACTIONS['sc-start'] = () => scStartDialog();
+ACTIONS['sc-start']=()=>scStartDialog();
+FORMS['shotcaller-configure']=(form,fd)=>{
+ UI.scSetupDraft={...fd,mode:fd.mode||$('#sc-mode')?.value||'8',customCount:fd.customCount||$('#sc-custom input')?.value||'8'};
+ UI.scTab='session';render();toast('Setup saved for the next session you start here');
+};
 CHANGES['sc-mode'] = (el) => { $('#sc-custom').classList.toggle('hidden', el.value !== 'custom'); };
 CHANGES['sc-setup'] = (el) => {
   const overridden = el.value !== 'default';
@@ -259,9 +190,11 @@ CHANGES['sc-setup'] = (el) => {
   modeSel.disabled = overridden;
   if (customInput) customInput.disabled = overridden;
   note.classList.toggle('hidden', !overridden);
-  note.textContent = overridden ? `Party count is set by the ${el.value === 'event' ? 'chosen event' : 'chosen preset'} above, not by Mode.` : '';
+  note.textContent = overridden ? `Party count is set by the ${el.value === 'event' ? 'chosen event' : 'chosen preset'}, not by Mode.` : '';
 };
 FORMS['shotcaller-start'] = (f, fd) => {
+  if(scStarting)return;
+  UI.scTab='session';
   let count, partyNames = [];
   if (fd.setupKind === 'event' || fd.setupKind === 'preset') {
     const chosen = fd.setupKind === 'event' ? byId(S.events, fd.eventId) : byId(S.presets, fd.presetId);
@@ -297,6 +230,7 @@ FORMS['shotcaller-start'] = (f, fd) => {
       // still finds each party's actual channel instead of guessing from whatever order the parties happen
       // to be in by then.
       await api('/api/shotcaller/start', 'POST', { channelId: fd.channelId, count, partyNames, dedicatedCallerId: fd.dedicatedCallerId || null, eventId: fd.setupKind === 'event' ? fd.eventId : null });
+      delete UI.scSetupDraft;
       toast('Shotcaller session started');
     } catch (e) {
       toast(e.message, true);
