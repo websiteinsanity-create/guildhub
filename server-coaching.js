@@ -126,6 +126,7 @@ module.exports = function install(ctx) {
     const myStudents = coach ? studentsOf(user.key) : [];
     return {
       isCoach: coach,
+      myCoachClasses: coach ? classesCoachedBy(user.key) : [],
       myStudents,
       // Same reasoning as each VOD's ownerName above - a guest coach has no member list to resolve their own
       // students' names from, so hand the names over directly, keyed by the same owner key myStudents already
@@ -474,5 +475,5 @@ module.exports = function install(ctx) {
     return { ok: true };
   }, { applicant: true });
 
-  return { coachingState, studentsOf };
+  return { coachingState, studentsOf, classesCoachedBy };
 };

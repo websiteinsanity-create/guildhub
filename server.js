@@ -370,8 +370,11 @@ function migrate() {
   db.loot = db.loot || [];
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
-  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers', 'guestCoaches']) db[k] = db[k] || [];
-  for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks']) db[k] = db[k] || {};
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers', 'guestCoaches', 'gearChat', 'gearScreens', 'gearFolder']) db[k] = db[k] || [];
+  for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks', 'gearSkills', 'gearLinks']) db[k] = db[k] || {};
+  // Gear Threads' screenshot topics: officer-managed from here on (Admin > Gear Threads), but seeded once
+  // with these four so a freshly-installed guild starts with something sensible already in place.
+  if (!db.gearSectionTypes) db.gearSectionTypes = ['Gear', 'Damage & Defense', 'Main Stats', 'CC Stats'].map((label) => ({ id: newId(), label }));
   db.partyBuilderNote = typeof db.partyBuilderNote === 'string' ? db.partyBuilderNote : '';
   // { pct, events, days, fromDate } per player - a linearly-decaying starting baseline, not a flat number
   // (see /api/admin/attendance-starting). An older save from before this had just a plain number per player;
@@ -1873,7 +1876,7 @@ http.createServer(async (req, res) => {
         need(!r.officer || isOfficer(user), 403, 'Officers only.');
         need(user.role !== 'applicant' || r.applicant, 403, 'Your application has to be accepted first.');       // applicants can reach nothing but the application
       }
-      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || /\/post-parties$/.test(url.pathname) ? 9e6 : 2e6);
+      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || /\/post-parties$/.test(url.pathname) || /^\/api\/gearthreads\/[^/]+\/(screens\/[^/]+|folder)$/.test(url.pathname) ? 9e6 : 2e6);
       const out = await r.handler({ body, user, params, ip, query: Object.fromEntries(url.searchParams) });
       return send(res, 200, out, url.pathname === '/api/export'
         ? { 'Content-Disposition': 'attachment; filename="guild-backup.json"' } : {});

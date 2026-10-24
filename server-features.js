@@ -27,6 +27,7 @@ module.exports = function install(ctx) {
   ctx.coaching = coaching;   // server-community.js's applicantState() needs this for guest coaches - set after install so the reference is there by the time anyone actually calls it, even though community itself was installed first
   const compliance = require('./server-compliance')(ctx);                                   // leave of absence, warnings, the event chart
   ctx.reevaluateWarnings = compliance.reevaluateWarnings;   // setAttended() in server.js needs this for every writer, not just attendance-status - set after install so the reference is there by the time anyone actually calls it, same pattern as ctx.coaching above
+  require('./server-geargear')(ctx);   // Personal Gear Threads - needs ctx.coaching (just set above) for its coach/student permission check
 
   // Officer correction for one player's recorded result on one PAST event, from the Attendance page's
   // event-by-event list (public/features.js's att-detail dialog, clicking "Came"/"No-show"/etc. there) -
@@ -122,6 +123,9 @@ module.exports = function install(ctx) {
       changes: off ? D.changes : D.changes.filter((c) => c.ownerKey === user.key),
       profiles: off ? D.profiles : Object.fromEntries([user.key, ...coachedOwners].filter((k) => D.profiles[k]).map((k) => [k, D.profiles[k]])),
       series: D.series,
+      // Not sensitive (just topic names), and needed by every gear thread's screenshot tabs, not only Admin's
+      // own editor for the list - so this goes to everyone, same reasoning as attendanceStarting just below.
+      gearSectionTypes: D.gearSectionTypes,
       infoBoard: D.infoBoard,
       notices: noticesFor(user),
       ...compliance.extraState(user),
@@ -176,6 +180,7 @@ module.exports = function install(ctx) {
   };
 
   function cleanBuildRefs(memberId, buildId) {
+    if (ctx.gearDropBuild) ctx.gearDropBuild(memberId, buildId);
     const fix = (p) => { if (p.builds && String(p.builds[memberId]) === String(buildId)) { const b = { ...p.builds }; delete b[memberId]; return { ...p, builds: b }; } return p; };
     for (const ev of db().events) ev.parties = ev.parties.map(fix);
     for (const pr of db().presets) pr.parties = pr.parties.map(fix);
