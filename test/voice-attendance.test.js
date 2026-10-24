@@ -80,22 +80,26 @@ async function startServer(extraEnv, botOpts) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-voiceattn-'));
   const port = 40000 + Math.floor(Math.random() * 20000);
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, ['server.js'], {
-    cwd: path.join(__dirname, '..'),
-    env: {
-      ...process.env, PORT: String(port), DATA_DIR: dir, MEMBER_PASSCODE: 'm1', OFFICER_PASSCODE: 'o1',
-      DISCORD_GUILD_ID: GUILD, DISCORD_BOT_TOKEN: 'bot-token', DISCORD_API_BASE: fake.url,
-      SHOTCALLER_URL: bot.url, SHOTCALLER_API_KEY: KEY,
-      VOICE_POLL_INTERVAL_MS: '150', // voice-attendance has its own clock, independent of the ~30s scheduler tick
-      ...extraEnv,
-    },
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('server did not start')), 8000);
-    proc.stdout.on('data', (d) => { if (String(d).includes('running')) { clearTimeout(t); resolve(); } });
-    proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
-  });
+  const spawnServer = async (envOverride) => {
+    const pr = spawn(process.execPath, ['server.js'], {
+      cwd: path.join(__dirname, '..'),
+      env: {
+        ...process.env, PORT: String(port), DATA_DIR: dir, MEMBER_PASSCODE: 'm1', OFFICER_PASSCODE: 'o1',
+        DISCORD_GUILD_ID: GUILD, DISCORD_BOT_TOKEN: 'bot-token', DISCORD_API_BASE: fake.url,
+        SHOTCALLER_URL: bot.url, SHOTCALLER_API_KEY: KEY,
+        VOICE_POLL_INTERVAL_MS: '150', // voice-attendance has its own clock, independent of the ~30s scheduler tick
+        ...extraEnv, ...envOverride,
+      },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('server did not start')), 8000);
+      pr.stdout.on('data', (d) => { if (String(d).includes('running')) { clearTimeout(t); resolve(); } });
+      pr.on('exit', (c) => reject(new Error('server exited early: ' + c)));
+    });
+    return pr;
+  };
+  let proc = await spawnServer({});
   const call = async (p, method = 'GET', body, token) => {
     const res = await fetch(base + p, {
       method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
@@ -107,6 +111,8 @@ async function startServer(extraEnv, botOpts) {
   return {
     call, fake, bot,
     officer: await login('Boss', 'o1'),
+    // Stops the server process and starts a fresh one on the same data folder - what an update or a crash does.
+    restart: async (envOverride) => { proc.kill(); await new Promise((r) => proc.once('exit', r)); proc = await spawnServer(envOverride || {}); },
     stop: async () => { proc.kill(); await new Promise((r) => proc.once('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); fake.close(); bot.server.close(); },
   };
 }
@@ -535,3 +541,20 @@ withServer("a party's members standing in a voice channel the officer's standalo
   const finalEv = await attendedOf(s, ev.id);
   for (const m of party2Members) assert.ok(finalEv.attended.includes(m.id), `${m.owner}, standing in channel c3 (never matched to any party by Guild Hall's own guess), should still be credited for being in the live session at all`);
 });
+
+// A track that was running when the server restarted (an update, a crash) used to sit at "1 of 3" forever: the
+// next check only ever lived in an in-memory timer. The scheduler's watchdog now picks such a track up.
+withServer('a voice track interrupted by a server restart resumes and finishes instead of sticking at 1 of 3', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', pointsEnabled: true }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s);
+  s.bot.setConnected('c0', anchorMembers.map((m) => m.owner));
+  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  // First check done, next one is 60s away - the restart kills that timer.
+  await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.voiceTracking && e.voiceTracking.checksDone === 1 ? e : null; });
+  await s.restart({ SCHEDULER_INTERVAL_MS: '200', VOICE_POLL_INTERVAL_MS: '150' });
+  s.officer = (await s.call('/api/login', 'POST', { name: 'Boss', passcode: 'o1' })).body.token;
+  const done = await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.voiceTracking && e.voiceTracking.finishedAt ? e : null; }, 60, 150);
+  assert.equal(done.voiceTracking.checksDone, 3);
+  for (const m of anchorMembers) assert.ok(done.attended.includes(m.id), `${m.owner} should be marked attended`);
+}, { VOICE_POLL_INTERVAL_MS: '60000' });

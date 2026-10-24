@@ -8,7 +8,7 @@
 // Guild Hall already knows its own Discord server and there is no reason to ask for that twice.
 
 module.exports = function install(ctx) {
-  const { route, need, HttpError, save, audit, shotcaller, findMember, findEvent, eventFor, setAttended, partyIsPlaceholder } = ctx;
+  const { route, need, HttpError, save, audit, shotcaller, findMember, findEvent, eventFor, setAttended, partyIsPlaceholder, tickHooks } = ctx;
   const db = () => ctx.db;
   const yes = (v) => v === true || v === 'true';
   const configured = () => !!(shotcaller.url && shotcaller.apiKey && shotcaller.guildId);
@@ -260,9 +260,9 @@ module.exports = function install(ctx) {
     const gateAt = Date.parse(ev.start) + offsetMs;
     const now = Date.now();
     if (now >= gateAt) {
-      runCheck(ev.id, started).catch((e) => console.error('[voice-attendance] check failed:', e));
+      runCheckSafe(ev.id, started);
     } else {
-      checkTimers.set(ev.id, setTimeout(() => { runCheck(ev.id, null).catch((e) => console.error('[voice-attendance] check failed:', e)); }, gateAt - now));
+      checkTimers.set(ev.id, setTimeout(() => { runCheckSafe(ev.id, null); }, gateAt - now));
     }
   }
 
@@ -486,10 +486,44 @@ module.exports = function install(ctx) {
       finalizeTrack(ev, null);
     } else {
       clearCheckTimer(ev.id);
-      checkTimers.set(ev.id, setTimeout(() => { runCheck(ev.id, null).catch((e) => console.error('[voice-attendance] check failed:', e)); }, VOICE_CHECK_MS));
+      checkTimers.set(ev.id, setTimeout(() => { runCheckSafe(ev.id, null); }, VOICE_CHECK_MS));
       save();
     }
   }
+  // Why this wrapper exists: each check schedules the NEXT one only after it finishes, from an in-memory timer.
+  // If a check threw (anything unexpected mid-way), or the server was restarted while a track was running, nothing
+  // ever scheduled the next check and the track sat at "1 of 3" forever. So a failed check is retried a few times
+  // and then closed out with whatever was collected, and the watchdog below picks up a track that has no timer
+  // at all (after a restart) - both end with the track finishing normally instead of hanging.
+  const checksInFlight = new Set();
+  async function runCheckSafe(evId, knownStatus) {
+    if (checksInFlight.has(evId)) return;
+    checksInFlight.add(evId);
+    try {
+      await runCheck(evId, knownStatus);
+    } catch (e) {
+      console.error('[voice-attendance] check failed:', e);
+      const ev = findEvent(evId);
+      const vt = ev && ev.voiceTracking;
+      if (vt && vt.active && !vt.finishedAt) {
+        vt.checkErrors = (vt.checkErrors || 0) + 1;
+        if (vt.checkErrors >= 5) { finalizeTrack(ev, null); save(); }
+        else { clearCheckTimer(evId); checkTimers.set(evId, setTimeout(() => { runCheckSafe(evId, null); }, VOICE_CHECK_MS)); }
+      }
+    } finally {
+      checksInFlight.delete(evId);
+    }
+  }
+  tickHooks.push(async () => {
+    for (const ev of db().events) {
+      const vt = ev.voiceTracking;
+      if (!vt || !vt.active || vt.finishedAt || checkTimers.has(ev.id) || checksInFlight.has(ev.id)) continue;
+      // Active but nothing scheduled and nothing running: the server restarted mid-track (or a timer was lost).
+      // Carry on from where it stopped; runCheck itself closes the track if the session is gone.
+      console.warn(`[voice-attendance] resuming stalled track for event ${ev.id} (${vt.checksDone || 0} of ${VOICE_CHECKS_TOTAL} checks done)`);
+      runCheckSafe(ev.id, null);
+    }
+  });
   // VOICE_POLL_INTERVAL_MS (env var name kept from before this track-model change, for test compatibility) is
   // now the gap between each of a track's checks, not a continuous poll's cadence. VOICE_CHECKS_TOTAL is
   // fixed, not guild-configurable - 3 checks, "once at the start and twice more 10 seconds apart", exactly as

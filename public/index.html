@@ -33,10 +33,13 @@
 </div>
 
 <div id="app" class="hidden">
-  <nav class="rail">
+  <header class="mobile-nav-bar"><button id="nav-mobile-toggle" data-menu-action="open" aria-controls="guild-navigation" aria-expanded="false" aria-label="Open navigation">☰</button><span id="mobile-page-label">Guild Manager</span></header>
+  <button class="nav-backdrop" data-menu-action="close" aria-label="Close navigation" tabindex="-1"></button>
+  <nav class="rail" id="guild-navigation" aria-label="Guild navigation">
+    <div class="nav-controls"><span class="nav-control-label">Navigation</span><button id="nav-mobile-close" data-menu-action="close" aria-label="Close navigation">✕</button><button id="nav-collapse" data-menu-action="collapse" aria-label="Collapse menu"></button></div>
     <div class="brand"><img id="brand-icon" class="guild-icon hidden" alt=""><h2 id="brand-name"></h2><span id="brand-tag"></span></div>
-    <div id="nav-links"></div>
-    <div class="who"><span id="who"></span><br><a href="#" data-act="logout" class="small">Sign out</a></div>
+    <div id="nav-links"></div><button id="nav-scroll-cue" data-menu-action="more" hidden>More menu items ↓</button>
+    <details class="who nav-profile" id="nav-profile" open><summary id="who"></summary><div id="nav-profile-links"></div></details>
   </nav>
   <main id="main"></main>
 </div>

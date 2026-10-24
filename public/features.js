@@ -265,48 +265,90 @@ const buildOptionsFor = (m) => `<option value="main">Main: ${esc(classOf(m) || '
 const buildName = (m, key) => { if (!m) return ''; if (key === 'main') return 'Main build'; const b = (m.builds || []).find((x) => String(x.id) === String(key)); return b ? b.name : '(deleted build)'; };
 const REQ_STATUS = { open: 'Open', approved: 'Approved', rejected: 'Not approved', given: 'Handed over' };
 
+// Shared presentation helpers; Requests and Leave of absence keep separate routes and data.
+const opsDrafts = new Map(), opsSending = new Set();
+const opsDraftKey = kind => JSON.stringify([S.user.key, S.user.role, kind]);
+const opsDraft = kind => opsDrafts.get(opsDraftKey(kind)) || {};
+function opsCapture(e) {
+  const el = e.target, form = el.closest?.('form[data-form]');
+  if (!form || !['request','leave','warn-new'].includes(form.dataset.form) || !el.name) return;
+  const key = opsDraftKey(form.dataset.form);
+  opsDrafts.set(key,{...opsDrafts.get(key),[el.name]:el.value});
+}
+document.addEventListener('input',opsCapture,true);
+document.addEventListener('change',opsCapture,true);
+const opsMetrics = entries => `<div class="ops-metrics">${entries.map(([label,value,state])=>`<div class="ops-metric ${state || ''}"><span>${esc(label)}</span><strong>${value}</strong></div>`).join('')}</div>`;
+ACTIONS['ops-compose-focus'] = el => {
+  const form = document.querySelector(`form[data-form="${el.dataset.kind === 'leave' ? 'leave' : 'request'}"]`);
+  if (form) { form.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'}); form.querySelector('select,input,textarea')?.focus({preventScroll:true}); }
+};
+async function opsSubmit(kind, f, fd) {
+  const key = opsDraftKey(kind);
+  if (opsSending.has(key)) return;
+  opsSending.add(key); const button = f.querySelector('[type="submit"]'); if (button) button.disabled = true;
+  try {
+    const r = await api(kind === 'leave' ? '/api/leaves' : kind === 'warn-new' ? '/api/warnings' : '/api/requests','POST',fd);
+    const draft = opsDrafts.get(key);
+    if (draft) { for (const [field,value] of Object.entries(fd)) if (draft[field] === value) delete draft[field]; if (!Object.keys(draft).length) opsDrafts.delete(key); }
+    toast(kind === 'warn-new' ? 'Warning given. The player gets a Discord message.' : kind === 'request' ? 'Request sent' : r.status === 'pending' ? 'Sent. The leadership has to approve it.' : 'Saved');
+    await refresh(true);
+  } catch (e) { toast(e.message,true); }
+  finally { opsSending.delete(key); const current = document.querySelector(`form[data-form="${kind}"] [type="submit"]`); if (current) current.disabled = opsSending.has(opsDraftKey(kind)); }
+}
+function requestComposer(own) {
+  if (!own.length) return '<div class="empty">An active character is required to make a request.</div>';
+  const d = opsDraft('request'), member = own.find(m=>String(m.id)===String(d.memberId)) || own[0];
+  const build = d.buildKey === 'main' || (member.builds || []).some(b=>String(b.id)===String(d.buildKey)) ? d.buildKey : 'main';
+  const kinds = S.cfg.requestKinds || ['Lucent','Item'], kind = kinds.includes(d.kind) ? d.kind : kinds[0], lucent = kind === 'Lucent';
+  return `<form data-form="request" class="ops-form">
+    <div class="field"><label for="rq-m">Character</label><select id="rq-m" name="memberId" data-act="req-char">${own.map(m=>`<option value="${m.id}" ${m.id === member.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
+    <div class="field"><label for="rq-b">Build</label><select id="rq-b" name="buildKey">${buildOptionsFor(member).replace(`value="${build}"`,`value="${build}" selected`)}</select></div>
+    <div class="field"><label for="rq-k">I need</label><select id="rq-k" name="kind" data-act="req-kind">${opts(kinds,kind)}</select></div>
+    <div class="field ${lucent ? '' : 'hidden'}" id="rq-lucent"><label for="rq-a">Amount of Lucent</label><input id="rq-a" name="amount" type="number" min="1" max="1000000000" step="1" placeholder="1000" value="${esc(d.amount || '')}" ${lucent ? 'required' : 'disabled'}></div>
+    <div class="field ${lucent ? 'hidden' : ''}" id="rq-item"><label for="rq-lt">Item type</label><select id="rq-lt" name="lootType">${opts(S.cfg.lootTypes.filter(t=>t!=='Lucent'),d.lootType || S.cfg.lootDefaultType)}</select><label for="rq-i">Item</label><input id="rq-i" name="item" maxlength="120" placeholder="Item name" value="${esc(d.item || '')}" ${lucent ? 'disabled' : 'required'}></div>
+    <div class="field"><label for="rq-r">Reason <span class="muted small">(optional)</span></label><textarea id="rq-r" name="reason" maxlength="300" placeholder="What do you need this for?">${esc(d.reason || '')}</textarea></div>
+    <button type="submit" class="btn primary" ${opsSending.has(opsDraftKey('request')) ? 'disabled' : ''}>Send request</button>
+  </form>`;
+}
 VIEWS.requests = () => {
-  const off = isOfficer(), own = mine(), q = UI.reqQ.toLowerCase();
-  const list = S.requests.filter((r) => (!UI.reqStatus || r.status === UI.reqStatus) && (!q || `${r.item} ${r.reason} ${(byId(S.members, r.memberId) || {}).name || ''}`.toLowerCase().includes(q)))
-    .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || b.at.localeCompare(a.at));
-  const first = own[0];
-  return `
-  <div class="page-head"><div><h1>Requests</h1><div class="muted">Ask the leadership for Lucent or an item, for a specific build.${off ? '' : ' You only see your own requests.'}</div></div></div>
-  ${own.length ? `<div class="panel" style="margin-bottom:16px"><h3>New request</h3>
-    <form data-form="request" class="loot-form">
-      <div class="field"><label for="rq-m">Character</label><select id="rq-m" name="memberId" data-act="req-char">${own.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></div>
-      <div class="field"><label for="rq-b">Build</label><select id="rq-b" name="buildKey">${buildOptionsFor(first)}</select></div>
-      <div class="field"><label for="rq-k">I need</label><select id="rq-k" name="kind" data-act="req-kind">${(S.cfg.requestKinds || ['Lucent', 'Item']).map((k) => `<option>${esc(k)}</option>`).join('')}</select></div>
-      <div class="field" id="rq-lucent"><label for="rq-a">Amount of Lucent</label><input id="rq-a" name="amount" type="number" min="1" placeholder="1000"></div>
-      <div class="field wide hidden" id="rq-item"><label for="rq-i">Item</label><div style="display:flex;gap:8px"><select name="lootType" style="width:auto">${S.cfg.lootTypes.filter((t) => t !== 'Lucent').map((t) => `<option ${t === S.cfg.lootDefaultType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><input id="rq-i" name="item" maxlength="120" placeholder="Item name"></div></div>
-      <div class="field wide"><label for="rq-r">Why do you need it? (optional)</label><input id="rq-r" name="reason" maxlength="300" placeholder="For my PvP set, to finish the enchanting"></div>
-      <button class="btn primary">Send request</button>
-    </form></div>` : '<div class="empty">Add a character on your profile page to make requests.</div>'}
-  <div class="toolbar">
-    <select data-ui="reqStatus" aria-label="Status"><option value="">All statuses</option>${Object.entries(REQ_STATUS).map(([k, v]) => `<option value="${k}" ${UI.reqStatus === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-    <input type="search" placeholder="Search" value="${esc(UI.reqQ)}" data-ui="reqQ" aria-label="Search requests">
-    <span class="muted small">${list.length} ${list.length === 1 ? 'request' : 'requests'}</span>
-  </div>
+  const off = isOfficer(), own = mine(), q = (UI.reqQ || '').trim().toLowerCase();
+  const list = S.requests.filter(r => (!UI.reqStatus || r.status === UI.reqStatus) && (!q || [r.item,r.reason,r.kind,r.amount,byId(S.members,r.memberId)?.name,buildName(byId(S.members,r.memberId),r.buildKey)].join(' ').toLowerCase().includes(q)))
+    .sort((a,b)=>(a.status === 'open' ? 0 : 1)-(b.status === 'open' ? 0 : 1) || b.at.localeCompare(a.at));
+  return `<section class="ops-workspace requests-workspace"><div class="page-head"><div><h1>Requests</h1><div class="muted">Lucent and item requests, organised by player and build.${off ? '' : ' Only your requests are visible.'}</div></div>${own.length ? '<button class="btn primary ops-mobile-compose" data-act="ops-compose-focus" data-kind="request">+ New request</button>' : ''}</div>
+    <div class="ops-grid"><div class="ops-ledger">
+    ${opsMetrics([['Open',S.requests.filter(r=>r.status==='open').length,'waiting'],['Approved',S.requests.filter(r=>r.status==='approved').length,'approved'],['Handed over',S.requests.filter(r=>r.status==='given').length,'completed']])}
+    <div class="panel ops-list-panel"><div class="ops-list-heading"><h2>Request history</h2><span class="muted small">${list.length} of ${S.requests.length} requests</span></div>
+    <div class="ops-filters"><input type="search" data-ui="reqQ" placeholder="Search player, item or build…" value="${esc(UI.reqQ || '')}" aria-label="Search requests"><select data-ui="reqStatus" aria-label="Request status"><option value="">All statuses</option>${Object.entries(REQ_STATUS).map(([k,v])=>`<option value="${k}" ${UI.reqStatus===k?'selected':''}>${v}</option>`).join('')}</select></div>
   ${list.length ? `<div class="tbl-wrap"><table>
     <thead><tr><th>Sent</th><th>Character and build</th><th>Request</th><th>Status</th><th></th></tr></thead>
     <tbody>${list.map((r) => { const m = byId(S.members, r.memberId); return `<tr>
-      <td class="nowrap muted small">${fmtShort(r.at)}</td>
-      <td><b>${esc(m ? m.name : '(removed)')}</b> ${m ? roleChip(m.role) : ''}<div class="muted small">${esc(buildName(m, r.buildKey))}${off && m ? ` · ${esc(ownerName(m.owner))}` : ''}</div></td>
-      <td>${r.kind === 'Lucent' ? `<b>${Number(r.amount).toLocaleString()}</b> Lucent` : `${esc(r.item)} <span class="type-pill t-${esc(r.lootType)}">${esc(r.lootType)}</span>`}${r.reason ? `<div class="muted small">${esc(r.reason)}</div>` : ''}</td>
-      <td><span class="st-pill st-${r.status}">${REQ_STATUS[r.status]}</span>${r.note ? `<div class="muted small">${esc(r.note)}${r.decidedBy ? ` (${esc(r.decidedBy)})` : ''}</div>` : ''}</td>
-      <td class="nowrap">${off && (r.status === 'open' || r.status === 'approved') ? `${r.status === 'open' ? `<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="approved">Approve</button> ` : ''}<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="given">${r.kind === 'Item' ? 'Handed over' : 'Paid out'}</button> <button class="btn sm danger" data-act="req-set" data-id="${r.id}" data-s="rejected">Reject</button>` : ''}
+      <td data-label="Sent" class="nowrap muted small">${fmtShort(r.at)}</td>
+      <td data-label="Character and build"><b>${esc(m ? m.name : '(removed)')}</b> ${m ? roleChip(m.role) : ''}<div class="muted small">${esc(buildName(m, r.buildKey))}${off && m ? ` · ${esc(ownerName(m.owner))}` : ''}</div></td>
+      <td data-label="Request">${r.kind === 'Lucent' ? `<b>${Number(r.amount).toLocaleString()}</b> Lucent` : `${esc(r.item)} <span class="type-pill t-${esc(r.lootType)}">${esc(r.lootType)}</span>`}${r.reason ? `<div class="muted small">${esc(r.reason)}</div>` : ''}</td>
+      <td data-label="Status"><span class="st-pill st-${r.status}">${REQ_STATUS[r.status]}</span>${r.note ? `<div class="muted small">${esc(r.note)}${r.decidedBy ? ` (${esc(r.decidedBy)})` : ''}</div>` : ''}</td>
+      <td data-label="Actions" class="ops-actions-cell">${off && (r.status === 'open' || r.status === 'approved') ? `${r.status === 'open' ? `<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="approved">Approve</button> ` : ''}<button class="btn sm" data-act="req-set" data-id="${r.id}" data-s="given">${r.kind === 'Item' ? 'Handed over' : 'Paid out'}</button> <button class="btn sm danger" data-act="req-set" data-id="${r.id}" data-s="rejected">Reject</button>` : ''}
         ${((r.status === 'open' && r.byKey === S.user.key) || off) ? `<button class="btn sm ${off ? 'danger' : ''}" data-act="req-del" data-id="${r.id}">${off ? 'Delete' : 'Withdraw'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
     : `<div class="empty">${S.requests.length ? 'Nothing matches.' : 'No requests yet.'}</div>`}
-  ${off ? '<p class="muted small">"Handed over" (or "Paid out" for Lucent) adds the entry to the Loot section by itself. Players get a Discord message when you decide.</p>' : ''}`;
+
+    ${off ? '<p class="ops-hint muted small">Marking a request as handed over or paid out adds it to Loot. Decisions notify the player on Discord.</p>' : ''}</div></div>
+    <aside class="panel ops-composer"><h2>New request</h2><p class="muted small">Choose your build and what you need.</p>${requestComposer(own)}</aside></div></section>`;
 };
-CHANGES['req-char'] = (el) => { const m = byId(S.members, el.value); $('#rq-b').innerHTML = m ? buildOptionsFor(m) : ''; };
-CHANGES['req-kind'] = (el) => { $('#rq-lucent').classList.toggle('hidden', el.value !== 'Lucent'); $('#rq-item').classList.toggle('hidden', el.value === 'Lucent'); };
+CHANGES['req-char'] = el => {
+  const m = byId(S.members,el.value); $('#rq-b').innerHTML = m ? buildOptionsFor(m) : '';
+  const key = opsDraftKey('request'); opsDrafts.set(key,{...opsDrafts.get(key),memberId:el.value,buildKey:'main'});
+};
+CHANGES['req-kind'] = el => {
+  const lucent = el.value === 'Lucent';
+  $('#rq-lucent').classList.toggle('hidden',!lucent); $('#rq-item').classList.toggle('hidden',lucent);
+  $('#rq-a').disabled = !lucent; $('#rq-a').required = lucent;
+  $('#rq-i').disabled = lucent; $('#rq-i').required = !lucent;
+};
 // Any number of days the guild wants, not just the fixed presets this used to offer - 14 is just the starting
 // point for a new session. "All time" disables the day box rather than clearing it, so flipping it back off
 // goes back to a sensible number instead of an empty field.
 CHANGES['att-days'] = (el) => { UI.attDays = String(Math.max(1, Math.min(3650, Math.round(Number(el.value)) || 14))); render(); };
 CHANGES['att-alltime'] = (el) => { UI.attDays = el.checked ? 'all' : '14'; render(); };
-FORMS.request = (f, fd) => act(async () => { await api('/api/requests', 'POST', fd); }, 'Request sent');
+FORMS.request = (f, fd) => opsSubmit('request',f,fd);
 ACTIONS['req-set'] = (el, d) => {
   const note = d.s === 'rejected' ? prompt('Reason for the player (optional)', '') : '';
   if (note === null) return;
@@ -315,35 +357,57 @@ ACTIONS['req-set'] = (el, d) => {
 ACTIONS['req-del'] = (el, d) => { if (confirm('Remove this request?')) act(() => api('/api/requests/' + d.id, 'DELETE'), 'Removed'); };
 
 /* ================= approvals (leadership) ================= */
+const LEAD_APPROVAL_TYPES = [['all','All'],['application','Applications'],['change','Changes'],['leave','Leave'],['explanation','Explanations']];
+const leadValue = value => esc(value == null || value === '' ? '(empty)' : typeof value === 'object' ? JSON.stringify(value,null,2) : String(value));
+function approvalQueue() {
+  const items = [
+    ...(S.applications || []).filter(x=>x.status==='pending').map(x=>({kind:'application',label:'Application',name:x.character?.name || x.name,data:x})),
+    ...(S.changes || []).filter(x=>x.status==='pending').map(x=>({kind:'change',label:'Character / profile change',name:byId(S.members,x.memberId)?.name || ownerName(x.ownerKey),data:x})),
+    ...(S.leaves || []).filter(x=>x.status==='pending').map(x=>({kind:'leave',label:'Leave request',name:x.name,data:x})),
+    ...(S.explanations || []).filter(x=>x.status==='pending').map(x=>({kind:'explanation',label:'Attendance explanation',name:x.name,data:x}))
+  ];
+  return items.map(x=>({...x,key:x.kind+':'+x.data.id})).sort((a,b)=>(a.data.at || '').localeCompare(b.data.at || ''));
+}
+function approvalDetail(item) {
+  const x = item.data;
+  let content = '', actions = '';
+  if (item.kind === 'application') {
+    const m = x.character || {};
+    content = `<div class="leader-identity">${avatarImg({id:x.userKey,avatar:x.avatar})}<div><strong>${esc(x.name)}</strong><div class="muted small">${esc(x.username || '')}</div></div></div><div class="leader-detail-box"><h3>Character</h3><strong>${esc(m.name)}</strong> ${roleChip(m.role)}<p>${esc(classFor(m.primaryWeapon,m.secondaryWeapon) || [m.primaryWeapon,m.secondaryWeapon].filter(Boolean).join(' / '))}${m.specialization ? ' · ' + esc(m.specialization) : ''}</p><p class="muted small">Gear score ${m.gearScore || '-'} · Watermark ${m.level || '-'}</p>${(m.questlogs || []).length ? questlogLinks(m,' · ') : ''}</div><div class="leader-detail-box"><h3>Application</h3><div class="leader-text">${esc(x.about || '')}</div></div>`;
+    actions = `<button class="btn primary" data-act="app-decide" data-id="${x.id}" data-d="accept">Accept application</button><button class="btn danger" data-act="app-decide" data-id="${x.id}" data-d="reject">Reject</button>`;
+  } else if (item.kind === 'change') {
+    if (x.changes && Object.keys(x.changes).length) {
+      content = `<div class="leader-diff"><div class="leader-diff-head"><span>Field</span><span>Current</span><span>Requested</span></div>${Object.entries(x.changes).map(([field,v])=>`<div class="leader-diff-row"><strong>${esc(FIELD_LABEL[field] || field)}</strong><span>${leadValue(v.from)}</span><span>${leadValue(v.to)}</span></div>`).join('')}</div>`;
+    } else {
+      content = `<div class="leader-detail-box">${changeSummary(x)}</div>${x.data ? `<div class="leader-detail-box"><h3>Requested details</h3><dl class="leader-facts">${Object.entries(x.data).map(([k,v])=>`<dt>${esc(FIELD_LABEL[k] || k)}</dt><dd>${leadValue(v)}</dd>`).join('')}</dl></div>` : ''}`;
+    }
+    actions = `<button class="btn primary" data-act="change-decide" data-id="${x.id}" data-d="approve">Approve</button><button class="btn danger" data-act="change-decide" data-id="${x.id}" data-d="reject">Reject</button>`;
+  } else if (item.kind === 'leave') {
+    content = `<div class="leader-detail-box"><h3>Requested dates</h3><div class="leader-date-range">${fmtLootDate(x.from)} → ${fmtLootDate(x.to)}</div><p class="muted small">${dayCount(x)} days · first and last day included</p></div><div class="leader-detail-box"><h3>Reason</h3><div class="leader-text">${esc(x.reason || 'No reason provided.')}</div></div>`;
+    actions = `<button class="btn primary" data-act="leave-decide" data-id="${x.id}" data-d="approved">Approve</button><button class="btn danger" data-act="leave-decide" data-id="${x.id}" data-d="rejected">Reject</button>`;
+  } else {
+    content = `<div class="leader-detail-box"><h3>Attendance triggers</h3>${(x.triggers || []).map(t=>`<p>${esc(triggerText(t))}</p>`).join('')}</div><div class="leader-detail-box"><h3>Player explanation</h3><div class="leader-text">${esc(x.reason)}</div></div>`;
+    actions = `<button class="btn primary" data-act="expl-decide" data-id="${x.id}" data-d="approved">Accept explanation</button><button class="btn danger" data-act="expl-decide" data-id="${x.id}" data-d="rejected">Reject</button>`;
+  }
+  return `<header class="leader-detail-head"><span class="leader-kicker">${esc(item.label)}</span><h2>${esc(item.name)}</h2><span class="muted small">Submitted ${fmtShort(x.at)}</span></header>${content}<div class="leader-decision-actions">${actions}</div>`;
+}
 VIEWS.approvals = () => {
-  const pending = S.changes.filter((c) => c.status === 'pending').sort((a, b) => a.at.localeCompare(b.at));
-  const done = S.changes.filter((c) => c.status !== 'pending').sort((a, b) => (b.decidedAt || '').localeCompare(a.decidedAt || '')).slice(0, 15);
-  const leaves = S.leaves.filter((l) => l.status === 'pending').sort((a, b) => a.at.localeCompare(b.at));
-  const reasons = S.explanations.filter((x) => x.status === 'pending').sort((a, b) => a.at.localeCompare(b.at));
-  const apps = S.applications.filter((a) => a.status === 'pending').sort((a, b) => a.at.localeCompare(b.at));
-  const appsDone = S.applications.filter((a) => a.status !== 'pending' && a.status !== 'withdrawn').sort((a, b) => (b.decidedAt || '').localeCompare(a.decidedAt || '')).slice(0, 6);
-  const none = !pending.length && !leaves.length && !reasons.length && !apps.length;
-  return `
-  <div class="page-head"><div><h1>Approvals</h1><div class="muted">Everything players sent that needs your OK. What needs approval is set in Admin.</div></div></div>
-  ${none ? '<div class="empty">Nothing is waiting for approval.</div>' : ''}
-  ${apps.length ? `<h3 class="sec">Applications to join the guild</h3>${apps.map((a) => `<div class="panel"><div class="ev-title"><div style="min-width:0">
-      <div class="muted small">${avatarImg({ id: a.userKey, avatar: a.avatar })} ${esc(a.name)}${a.username ? ` (${esc(a.username)})` : ''} · ${fmtShort(a.at)}</div>
-      <b>${esc(a.character.name)}</b> ${roleChip(a.character.role)} <span class="muted">${esc(classFor(a.character.primaryWeapon, a.character.secondaryWeapon) || [a.character.primaryWeapon, a.character.secondaryWeapon].filter(Boolean).join(' / ') || 'no weapons given')}${a.character.specialization ? ' | ' + esc(a.character.specialization) : ''}</span>
-      <div class="small muted">Gear score ${a.character.gearScore || '-'} · Watermark ${a.character.level || '-'}${(a.character.questlogs || []).length ? ' · ' + questlogLinks(a.character, ' · ') : ''}</div>
-      <div style="white-space:pre-wrap;margin-top:6px">${esc(a.about)}</div></div>
-      <span class="seg"><button class="btn sm primary" data-act="app-decide" data-id="${a.id}" data-d="accept">Accept</button><button class="btn sm danger" data-act="app-decide" data-id="${a.id}" data-d="reject">Reject</button></span></div></div>`).join('')}` : ''}
-  ${reasons.length ? `<h3 class="sec">Reasons for missed events</h3>${reasons.map((x) => `<div class="panel"><div class="ev-title"><div><div class="muted small">${esc(x.name)} · ${fmtShort(x.at)}</div>
-      <div class="small" style="margin:2px 0 6px">${x.triggers.map((t) => esc(triggerText(t))).join(' · ')}</div><div style="white-space:pre-wrap">${esc(x.reason)}</div></div>
-      <span class="seg"><button class="btn sm primary" data-act="expl-decide" data-id="${x.id}" data-d="approved">Accept</button><button class="btn sm danger" data-act="expl-decide" data-id="${x.id}" data-d="rejected">Reject</button></span></div></div>`).join('')}` : ''}
-  ${leaves.length ? `<h3 class="sec">Leave of absence</h3>${leaves.map((l) => `<div class="panel"><div class="ev-title"><div><div class="muted small">${esc(l.name)} · ${fmtShort(l.at)}</div>
-      <b>${fmtLootDate(l.from)} to ${fmtLootDate(l.to)}</b> <span class="muted">(${dayCount(l)} days)</span>${l.reason ? `<div class="small">${esc(l.reason)}</div>` : ''}</div>
-      <span class="seg"><button class="btn sm primary" data-act="leave-decide" data-id="${l.id}" data-d="approved">Approve</button><button class="btn sm danger" data-act="leave-decide" data-id="${l.id}" data-d="rejected">Reject</button></span></div></div>`).join('')}` : ''}
-  ${pending.length ? `<h3 class="sec">Changes to characters and profiles</h3>${pending.map((c) => `<div class="panel"><div class="ev-title"><div><div class="muted small">${esc(ownerName(c.ownerKey))} · ${fmtShort(c.at)}</div>${changeSummary(c)}</div>
-      <span class="seg"><button class="btn sm primary" data-act="change-decide" data-id="${c.id}" data-d="approve">Approve</button><button class="btn sm danger" data-act="change-decide" data-id="${c.id}" data-d="reject">Reject</button></span></div></div>`).join('')}` : ''}
+  if (!isOfficer()) return '<div class="empty">Officers only.</div>';
+  const all = approvalQueue(), q = (UI.approvalQ || '').trim().toLowerCase();
+  const items = all.filter(x=>(!UI.approvalType || UI.approvalType==='all' || x.kind===UI.approvalType) && (!q || [x.name,x.label,JSON.stringify(x.data)].join(' ').toLowerCase().includes(q)));
+  const selected = items.find(x=>x.key===UI.approvalSelected) || items[0];
+  const done = S.changes.filter(c=>c.status!=='pending').sort((a,b)=>(b.decidedAt || '').localeCompare(a.decidedAt || '')).slice(0,15);
+  const appsDone = S.applications.filter(a=>a.status!=='pending' && a.status!=='withdrawn').sort((a,b)=>(b.decidedAt || '').localeCompare(a.decidedAt || '')).slice(0,6);
+  return `<section class="leader-workspace approvals-workspace"><div class="page-head"><div><h1>Approvals</h1><div class="muted">Review applications, changes, leave and attendance explanations.</div></div><span class="leader-pending-count">${all.length} waiting</span></div>
+    <div class="leader-split"><aside class="panel leader-queue-panel"><div class="leader-type-tabs" role="group" aria-label="Approval type">${LEAD_APPROVAL_TYPES.map(([key,label])=>`<button class="btn sm ${((UI.approvalType || 'all')===key)?'active':''}" aria-pressed="${(UI.approvalType || 'all')===key}" data-act="approval-type" data-type="${key}">${label} <span>${key==='all'?all.length:all.filter(x=>x.kind===key).length}</span></button>`).join('')}</div><input type="search" data-ui="approvalQ" value="${esc(UI.approvalQ || '')}" aria-label="Search approvals" placeholder="Search player or details…"><div class="leader-queue">${items.map(x=>`<button class="leader-queue-item ${x===selected?'active':''}" aria-pressed="${x===selected}" data-act="approval-select" data-key="${x.key}"><strong>${esc(x.name)}</strong><span>${esc(x.label)}</span><small>${fmtShort(x.data.at)}</small></button>`).join('') || '<div class="empty">No pending items match.</div>'}</div></aside><article class="panel leader-detail" aria-label="Approval details">${selected ? approvalDetail(selected) : `<div class="empty">${all.length ? 'Choose another filter to see pending items.' : 'Nothing is waiting for approval.'}</div>`}</article></div>
+    <details class="panel leader-history" data-fold="approval-history" ${UI.fold?.['approval-history']?'open':''}><summary>Recent decisions</summary>
   ${appsDone.length ? `<h3 class="sec" style="margin-top:28px">Recent applications</h3><div class="tbl-wrap"><table><tbody>${appsDone.map((a) => `<tr><td class="muted small nowrap">${fmtShort(a.decidedAt)}</td><td><b>${esc(a.name)}</b> <span class="muted">(${esc(a.character.name)})</span></td><td><span class="st-pill ${a.status === 'accepted' ? 'st-approved' : 'st-rejected'}">${a.status === 'accepted' ? 'Accepted' : 'Rejected'}</span>${a.note ? `<div class="muted small">${esc(a.note)}</div>` : ''}${a.roleResult && a.roleResult !== 'given' ? `<div class="small" style="color:var(--danger)">Discord role: ${esc(a.roleResult)}</div>` : a.roleResult === 'given' ? '<div class="muted small">Discord member role given</div>' : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
   ${done.length ? `<h3 class="sec" style="margin-top:28px">Recently decided</h3><div class="tbl-wrap"><table><tbody>${done.map((c) => `<tr><td class="muted small nowrap">${fmtShort(c.decidedAt)}</td><td>${esc(ownerName(c.ownerKey))}</td><td>${changeSummary(c)}</td>
-      <td><span class="st-pill st-${c.status === 'approved' ? 'approved' : 'rejected'}">${c.status === 'approved' ? 'Approved' : 'Not approved'}</span>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+      <td><span class="st-pill st-${c.status === 'approved' ? 'approved' : 'rejected'}">${c.status === 'approved' ? 'Approved' : 'Not approved'}</span>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${!done.length && !appsDone.length ? '<div class="empty">No recent decisions.</div>' : ''}</details></section>`;
 };
+ACTIONS['approval-select'] = (el,d) => { UI.approvalSelected=d.key; render(); document.querySelector('[data-act="approval-select"][data-key="'+d.key+'"]')?.focus({preventScroll:true}); };
+ACTIONS['approval-type'] = (el,d) => { UI.approvalType=LEAD_APPROVAL_TYPES.some(([key])=>key===d.type)?d.type:'all'; UI.approvalSelected=null; render(); };
 const dayCount = (l) => Math.round((Date.parse(l.to) - Date.parse(l.from)) / 864e5) + 1;
 const triggerText = (t) => ({ noshow: `${t.value} no-shows (limit ${t.limit})`, noreply: `${t.value} events without an answer (limit ${t.limit})`, attendance: `attendance ${t.value}% (minimum ${t.limit}%)` }[t.kind] || t.kind);
 ACTIONS['change-decide'] = (el, d) => {
@@ -377,16 +441,19 @@ function attEvents() {
 // the same /api/attendance-stats endpoint, the moment a window shows up that nothing cached yet covers. This
 // also carries the server's own per-event resolution (the `list` array) for the per-player drill-down below,
 // instead of the client resolving going/no-show/declined/no-reply itself.
-let attStatsKey = null, attStatsFetching = null;
+let attStatsKey = null, attStatsFetching = null, attStatsError = null;
+function attendanceStatsKey() { return `${S.user?.key||''}:${S.user?.role||''}:${UI.attDays}:${UI.attMand?1:0}`; }
+function attendanceStatsUrl() { return `/api/attendance-stats?windowDays=${encodeURIComponent(UI.attDays)}&mandatoryOnly=${UI.attMand?1:0}`; }
 function attStatsByOwner() {
-  const key = `${UI.attDays}:${UI.attMand ? 1 : 0}`;
-  if (attStatsKey !== key && attStatsFetching !== key) {
-    attStatsFetching = key;
-    api(`/api/attendance-stats?windowDays=${encodeURIComponent(UI.attDays)}&mandatoryOnly=${UI.attMand ? 1 : 0}`)
-      .then((rows) => { S.attStatsByOwner = Object.fromEntries(rows.map((r) => [r.owner, r])); attStatsKey = key; attStatsFetching = null; render(); })
-      .catch(() => { attStatsFetching = null; });
-  }
-  return attStatsKey === key ? (S.attStatsByOwner || {}) : {};
+ const key=attendanceStatsKey();
+ if(attStatsKey!==key && attStatsFetching!==key && attStatsError!==key){
+  attStatsFetching=key;
+  api(attendanceStatsUrl()).then(rows=>{
+   if(attendanceStatsKey()!==key)return;
+   S.attStatsByOwner=Object.fromEntries(rows.map(r=>[r.owner,r]));attStatsKey=key;attStatsError=null;render();
+  }).catch(()=>{if(attendanceStatsKey()===key){attStatsError=key;render();}}).finally(()=>{if(attStatsFetching===key)attStatsFetching=null;});
+ }
+ return attStatsKey===key?(S.attStatsByOwner||{}):{};
 }
 // One row per player (all of their active characters together), read from the server's own resolution of
 // each event (going/no-show/declined/no-reply, leave-of-absence, join-date, and the percentage itself,
@@ -396,19 +463,19 @@ function attStatsByOwner() {
 //   No reply  = never answered Going or Can't with any character
 function attRows() {
   const off = isOfficer(), ls = lootSettings(), byOwner = new Map();
-  for (const m of S.members.filter((x) => x.active && (off || x.owner === S.user.key))) { if (!byOwner.has(m.owner)) byOwner.set(m.owner, []); byOwner.get(m.owner).push(m); }
+  for (const m of S.members.filter((x) => x.active && !x.mercenary && (off || x.owner === S.user.key))) { if (!byOwner.has(m.owner)) byOwner.set(m.owner, []); byOwner.get(m.owner).push(m); }
   const stats = attStatsByOwner();
   return [...byOwner].map(([owner, chars]) => {
     const ids = chars.map((c) => c.id);
     const s = stats[owner];
     const list = (s ? s.list : [])
-      .map((x) => ({ e: byId(S.events, x.id), status: x.status, answer: x.status === 'leave' ? '-' : x.status === 'declined' ? "Can't" : x.status === 'noreply' ? 'no answer' : 'Going' }))
+      .map((x) => ({ e: byId(S.events, x.id), status: x.status, answer: x.status==='leave'?'On leave':chars.some(c=>byId(S.events,x.id)?.rsvps[c.id]==='yes')?'Attending':chars.some(c=>byId(S.events,x.id)?.rsvps[c.id]==='no')?'Not attending':'No reply' }))
       .filter((x) => x.e);
     const n = s ? s.came : 0, total = s ? s.counted : 0, noshow = s ? s.noshow : 0, noreply = s ? s.noreply : 0;
     const declined = list.filter((x) => x.status === 'declined').length;
     const pct = s ? s.pct : null;
     const last = S.events.filter((e) => ids.some((id) => e.attended.includes(id))).map((e) => e.start).sort().pop();
-    return { owner, name: ownerName(owner), chars, n, total, noshow, noreply, declined, pct, band: pct === null ? 'none' : bandOf(pct, ls), last, bal: ids.reduce((a, id) => a + balance(id), 0), list };
+    return { owner, name: ownerName(owner), chars, n, total, noshow, noreply, declined, pct, band: pct === null ? 'none' : bandOf(pct, ls), last, bal: ids.reduce((a, id) => a + balance(id), 0), virtualActive: !!s?.virtualActive, list };
   });
 }
 
@@ -456,54 +523,29 @@ FORMS['att-starting'] = (f, fd) => {
     (values[owner] ??= {})[field] = val;
   }
   for (const owner of Object.keys(values)) if (values[owner].pct === '') values[owner] = null;
-  return act(() => api('/api/admin/attendance-starting', 'PUT', { values }), 'Saved');
+  return act(async()=>{await api('/api/admin/attendance-starting','PUT',{values});attStatsKey=null;attStatsError=null;},'Saved');
 };
+function attendancePeriodLabel() { return UI.attDays==='all'?'All time':`Last ${UI.attDays} days`; }
+function attendancePlayerMeta(r) { return r.chars.map(c=>[classOf(c),c.role].filter(Boolean).join(' · ')).filter(Boolean).join(' / '); }
 VIEWS.points = () => {
-  const off = isOfficer(), ls = lootSettings(), q = UI.attQ.toLowerCase();
-  const evs = attEvents(), days = UI.attDays === 'all' ? null : Number(UI.attDays);
-  const rows = attRows().filter((r) => (!UI.attRole || r.chars.some((c) => c.role === UI.attRole)) && (!UI.attBand || r.band === UI.attBand)
-    && (!UI.attFlag || (UI.attFlag === 'noshow' ? r.noshow > 0 : r.noreply > 0)) && (!q || `${r.name} ${r.chars.map((c) => `${c.name} ${classOf(c)}`).join(' ')}`.toLowerCase().includes(q)));
-  const sorts = {
-    name: (a, b) => a.name.localeCompare(b.name),
-    rateDesc: (a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.name.localeCompare(b.name),
-    rateAsc: (a, b) => (a.pct ?? 101) - (b.pct ?? 101) || a.name.localeCompare(b.name),
-    attended: (a, b) => b.n - a.n || a.name.localeCompare(b.name),
-    noshow: (a, b) => b.noshow - a.noshow || a.name.localeCompare(b.name),
-    noreply: (a, b) => b.noreply - a.noreply || a.name.localeCompare(b.name),
-    points: (a, b) => b.bal - a.bal || a.name.localeCompare(b.name),
-    last: (a, b) => (b.last || '').localeCompare(a.last || ''),
-  };
-  rows.sort(sorts[UI.attSort] || sorts.name);
-  const showPts = pointsOn();
-  const focus = UI.pointsFocus ? byId(S.members, UI.pointsFocus) : null;
-  const ledger = S.points.filter((p) => !focus || p.memberId === focus.id).sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 60);
-  const active = S.members.filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name));
-  const bad = (n) => (n ? `<b class="cnt-bad">${n}</b>` : '<span class="muted">0</span>');
-  const warn = (n) => (n ? `<b class="cnt-warn">${n}</b>` : '<span class="muted">0</span>');
-  return `
-  <div class="page-head"><div><h1>${showPts ? 'Attendance and points' : 'Attendance'}</h1>
-    <div class="muted">Based on ${evs.length} ${evs.length === 1 ? 'event' : 'events'} with recorded attendance ${days ? `in the last ${days} days` : 'in total'}${UI.attMand ? ' (mandatory only)' : ''}. Click a row for the event-by-event list.${off ? '' : ' You only see yourself.'}</div></div></div>
-  <div class="toolbar">
-    ${off ? `<input type="search" placeholder="Search player, character or class" value="${esc(UI.attQ)}" data-ui="attQ" aria-label="Search">
-    <select data-ui="attRole" aria-label="Role">${opts(S.cfg.roles, UI.attRole, 'All roles')}</select>` : ''}
-    <label style="margin:0;display:flex;gap:6px;align-items:center"><span class="muted small">Last</span><input type="number" min="1" max="3650" data-act="att-days" value="${UI.attDays === 'all' ? '' : UI.attDays}" ${UI.attDays === 'all' ? 'disabled' : ''} style="width:76px" aria-label="Number of days"><span class="muted small">days</span></label>
-    <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-act="att-alltime" ${UI.attDays === 'all' ? 'checked' : ''}> All time</label>
-    <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ui="attMand" ${UI.attMand ? 'checked' : ''}> Mandatory only</label>
-    ${off ? `<select data-ui="attBand" aria-label="Attendance colour"><option value="">Any attendance</option><option value="red" ${UI.attBand === 'red' ? 'selected' : ''}>Red (0-${ls.redMax}%)</option><option value="orange" ${UI.attBand === 'orange' ? 'selected' : ''}>Orange (${ls.redMax + 1}-${ls.orangeMax}%)</option><option value="green" ${UI.attBand === 'green' ? 'selected' : ''}>Green (${ls.orangeMax + 1}-100%)</option></select>
-    <select data-ui="attFlag" aria-label="Problems"><option value="">Everybody</option><option value="noshow" ${UI.attFlag === 'noshow' ? 'selected' : ''}>With no-shows</option><option value="noreply" ${UI.attFlag === 'noreply' ? 'selected' : ''}>With unanswered events</option></select>` : ''}
-    <select data-ui="attSort" aria-label="Sort by">${[['name', 'Sort: name'], ['rateDesc', 'Sort: best attendance'], ['rateAsc', 'Sort: worst attendance'], ['attended', 'Sort: most events'], ['noshow', 'Sort: most no-shows'], ['noreply', 'Sort: most unanswered'], ['last', 'Sort: last seen'], ...(showPts ? [['points', 'Sort: points']] : [])].map(([v, l]) => `<option value="${v}" ${UI.attSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    <span class="muted small">${rows.length} shown</span>
-  </div>
-  ${rows.length ? `<div class="tbl-wrap"><table>
-    <thead><tr><th>Player</th><th style="min-width:210px">Attendance</th><th class="num">Events came to</th><th class="num" title="Said Going, but did not show up">No-shows</th><th class="num" title="Did not answer Going or Can't">No reply</th><th>Last seen</th>${showPts ? '<th class="num">Points</th>' : ''}</tr></thead>
-    <tbody>${rows.map((r) => `<tr class="click" data-act="att-detail" data-key="${esc(r.owner)}">
-      <td><b>${esc(r.name)}</b><div class="chips-sm">${r.chars.map((c) => `<span class="chip small" style="--c:${roleColor(c.role)}">${esc(c.name)}</span>`).join('')}</div></td>
-      <td><div class="attcell"><span class="rate ${r.band}">${r.pct === null ? '-' : r.pct + '%'}</span><div class="attbar"><i class="${r.band}" style="width:${r.pct ?? 0}%"></i></div></div></td>
-      <td class="num">${r.total ? `${r.n} / ${r.total}` : '-'}${r.total < evs.length ? `<div class="muted small">${evs.length - r.total} on leave</div>` : ''}</td><td class="num">${bad(r.noshow)}</td><td class="num">${warn(r.noreply)}</td>
-      <td class="muted small nowrap">${r.last ? fmtShort(r.last) : '-'}</td>${showPts ? `<td class="num ${r.bal > 0 ? 'pos' : r.bal < 0 ? 'neg' : ''}">${r.bal}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
-    : '<div class="empty">Nobody matches these filters.</div>'}
-  ${off ? attendanceStartingPanel(active) : ''}
-  ${showPts && off ? `<div class="panel" style="margin-top:20px"><h3>Adjust points</h3>
+ const off=isOfficer(),ls=lootSettings(),q=UI.attQ.toLowerCase(),evs=attEvents(),showPts=pointsOn();
+ const tab=showPts && UI.attView==='points'?'points':'attendance';
+ const rows=attRows().filter(r=>(!UI.attRole||r.chars.some(c=>c.role===UI.attRole))&&(!UI.attBand||r.band===UI.attBand)&&(!UI.attFlag||(UI.attFlag==='noshow'?r.noshow>0:r.noreply>0))&&(!q||`${r.name} ${r.chars.map(c=>`${c.name} ${classOf(c)}`).join(' ')}`.toLowerCase().includes(q)));
+ const sorts={name:(a,b)=>a.name.localeCompare(b.name),rateDesc:(a,b)=>(b.pct??-1)-(a.pct??-1),rateAsc:(a,b)=>(a.pct??101)-(b.pct??101),attended:(a,b)=>b.n-a.n,noshow:(a,b)=>b.noshow-a.noshow,noreply:(a,b)=>b.noreply-a.noreply,points:(a,b)=>b.bal-a.bal,last:(a,b)=>(b.last||'').localeCompare(a.last||'')};
+ rows.sort((a,b)=>(sorts[UI.attSort]||sorts.name)(a,b)||a.name.localeCompare(b.name));
+ const focus=UI.pointsFocus?byId(S.members,UI.pointsFocus):null;
+ const ledger=S.points.filter(p=>!focus||p.memberId===focus.id).sort((a,b)=>new Date(b.at)-new Date(a.at)).slice(0,60);
+ const active=S.members.filter(m=>m.active).sort((a,b)=>a.name.localeCompare(b.name));
+ const ready=attStatsKey===attendanceStatsKey(),bad=n=>`<span class="attendance-count ${n?'has-value':''}">${n}</span>`;
+ const periodPresets=['7','14','30','60','90','all'];
+ return `<section class="attendance-workspace"><header class="page-head"><div><div class="attendance-eyebrow">OUR GUILD · ATTENDANCE</div><h1>Attendance</h1><p class="muted">Recorded attendance, clear accountability.${off?'':' You only see your own results.'}</p></div><div class="attendance-period"><select aria-label="Attendance period" data-act="att-period">${periodPresets.map(v=>`<option value="${v}" ${!UI.attCustom&&String(UI.attDays)===v?'selected':''}>${v==='all'?'All time':`Last ${v} days`}</option>`).join('')}<option value="custom" ${UI.attCustom||!periodPresets.includes(String(UI.attDays))?'selected':''}>Custom period</option></select><label>Days<input type="number" min="1" max="3650" data-act="att-days" aria-label="Number of days" value="${UI.attDays==='all'?'':UI.attDays}" ${UI.attDays==='all'?'disabled':''}></label></div></header>
+ ${showPts?`<nav class="attendance-tabs" aria-label="Attendance sections"><button data-act="att-view" data-tab="attendance" class="${tab==='attendance'?'active':''}" aria-pressed="${tab==='attendance'}">Attendance</button><button data-act="att-view" data-tab="points" class="${tab==='points'?'active':''}" aria-pressed="${tab==='points'}">Points</button></nav>`:''}
+ <div class="attendance-context">${evs.length} recorded ${evs.length===1?'event':'events'} · ${esc(attendancePeriodLabel())}${UI.attMand?' · Mandatory only':''} · Approved leave excluded</div>
+ ${tab==='attendance'?`<div class="attendance-summary"><div><span>${off?'Members in view':'Your characters'}</span><strong>${ready?rows.length:'—'}</strong></div><div><span>With no-shows</span><strong class="attention">${ready?rows.filter(r=>r.noshow>0).length:'—'}</strong></div><div><span>With no reply</span><strong>${ready?rows.filter(r=>r.noreply>0).length:'—'}</strong></div></div>`:''}
+ <div class="attendance-toolbar">${off?`<input type="search" placeholder="Search player or class…" aria-label="Search player, character or class" data-ui="attQ" value="${esc(UI.attQ)}"><select aria-label="Role" data-ui="attRole">${opts(S.cfg.roles,UI.attRole,'All roles')}</select><select data-ui="attBand" aria-label="Attendance range"><option value="">Any attendance</option>${[['red',`0–${ls.redMax}%`],['orange',`${ls.redMax+1}–${ls.orangeMax}%`],['green',`${ls.orangeMax+1}–100%`]].map(([v,l])=>`<option value="${v}" ${UI.attBand===v?'selected':''}>${l}</option>`).join('')}</select><select data-ui="attFlag" aria-label="Attendance problems">${[['','Everybody'],['noshow','With no-shows'],['noreply','With no reply']].map(([v,l])=>`<option value="${v}" ${UI.attFlag===v?'selected':''}>${l}</option>`).join('')}</select>`:''}<label><input type="checkbox" data-ui="attMand" ${UI.attMand?'checked':''}> Mandatory only</label><select data-ui="attSort" aria-label="Sort attendance">${[['name','Name A–Z'],['rateDesc','Best attendance'],['rateAsc','Lowest attendance'],['attended','Most events'],['noshow','Most no-shows'],['noreply','Most unanswered'],['last','Last seen'],...(showPts?[['points','Points']]:[])].map(([v,l])=>`<option value="${v}" ${UI.attSort===v?'selected':''}>Sort: ${l}</option>`).join('')}</select></div>
+ ${!ready?`<div class="empty" role="status">${attStatsError===attendanceStatsKey()?`Could not load attendance. <button class="btn sm" data-act="att-retry">Try again</button>`:'Loading recorded attendance…'}</div>`:rows.length?`<div class="tbl-wrap attendance-roster"><table><thead><tr><th>Player</th>${tab==='attendance'?'<th>Attendance</th><th class="num">Attended</th><th class="num">No-shows</th><th class="num">No reply</th><th>Last seen</th>':'<th class="num">Points</th><th>Attendance</th>'}<th><span class="sr-only">Details</span></th></tr></thead><tbody>${rows.map(r=>`<tr class="click" data-act="att-detail" data-key="${esc(r.owner)}"><td data-label="Player"><strong>${esc(r.chars.length===1?r.chars[0].name:r.name)}</strong><small>${esc(attendancePlayerMeta(r))}</small>${r.name!==(r.chars[0]?.name||'')?`<small class="attendance-owner">${esc(r.name)}</small>`:''}</td>${tab==='attendance'?`<td data-label="Attendance"><div class="attendance-rate ${r.band}"><strong>${r.pct===null?'—':r.pct+'%'}</strong><span class="attendance-rate-track"><i style="width:${r.pct??0}%"></i></span></div>${r.virtualActive?'<small class="attendance-baseline">Starting baseline included</small>':''}</td><td class="num" data-label="Attended">${r.total?`${r.n} / ${r.total}`:'—'}${r.list.filter(x=>x.status==='leave').length?`<small>${r.list.filter(x=>x.status==='leave').length} on leave</small>`:''}</td><td class="num attendance-noshow" data-label="No-shows">${bad(r.noshow)}</td><td class="num" data-label="No reply">${bad(r.noreply)}</td><td data-label="Last seen"><small>${r.last?fmtShort(r.last):'Not recorded'}</small></td>`:`<td class="num" data-label="Points">${r.bal}</td><td data-label="Attendance">${r.pct===null?'—':r.pct+'%'}</td>`}<td class="attendance-arrow"><button class="btn sm" data-act="att-detail" data-key="${esc(r.owner)}" aria-label="View attendance details for ${esc(r.name)}">›</button></td></tr>`).join('')}</tbody></table></div><div class="attendance-count-note">${rows.length} ${rows.length===1?'player':'players'} shown</div>`:'<div class="empty">Nobody matches these filters.</div>'}
+ ${tab==='attendance'&&off?`<details class="panel fold attendance-officer" data-fold="attendance-officer" ${UI.fold?.['attendance-officer']?'open':''}><summary>Officer tools <small>Starting attendance</small></summary>${attendanceStartingPanel(active)}</details>`:''}
+ ${tab==='points'?`${showPts && off ? `<div class="panel" style="margin-top:20px"><h3>Adjust points</h3>
     <form data-form="points" class="toolbar" style="margin:0">
       <select name="memberId" required aria-label="Character" style="min-width:180px">${active.map((m) => `<option value="${m.id}" ${focus && focus.id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
       <input name="delta" type="number" placeholder="+5 or -10" required style="width:110px" aria-label="Amount">
@@ -514,51 +556,94 @@ VIEWS.points = () => {
     ${off ? `<select data-ui="pointsFocus" aria-label="Ledger of" style="width:auto"><option value="">Everybody</option>${active.map((m) => `<option value="${m.id}" ${focus && focus.id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>` : ''}</div>
     ${ledger.length ? `<div class="tbl-wrap" style="border:0"><table><tbody>${ledger.map((p) => { const m = byId(S.members, p.memberId);
       return `<tr><td class="muted small" style="white-space:nowrap">${fmtShort(p.at)}</td><td>${esc(m ? m.name : '?')}</td><td>${esc(p.reason)}</td><td class="num ${p.delta > 0 ? 'pos' : 'neg'}">${p.delta > 0 ? '+' : ''}${p.delta}</td>
-        <td>${off && !p.eventId ? `<button class="btn sm" data-act="points-del" data-id="${p.id}" aria-label="Delete entry">×</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted">No entries yet.</div>'}</div>` : ''}`;
+        <td>${off && !p.eventId ? `<button class="btn sm" data-act="points-del" data-id="${p.id}" aria-label="Delete entry">×</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted">No entries yet.</div>'}</div>` : ''}`:''}
+ </section>`;
 };
-// The four results an officer can correct a past event to from the Attendance page's event-by-event list
-// (ACTIONS['att-detail'] below) - "On leave" is not offered here, since it comes from a separate
-// leave-of-absence record, not something settable through a player's rsvp/attended on one event.
-const ATT_EDIT_OPTIONS = [['attended', 'Came'], ['noshow', 'No-show'], ['declined', "Said can't"], ['noreply', 'No reply']];
-ACTIONS['att-detail'] = (el, d) => {
-  const r = attRows().find((x) => x.owner === d.key);
-  if (!r) return;
-  const off = isOfficer();
-  openDialog(`<h2>${esc(r.name)}</h2>
-    <div class="muted small" style="margin:-8px 0 12px">${r.chars.map((c) => esc(c.name)).join(', ')} · came to ${r.n} of ${r.total} events (${r.pct ?? 0}%) · ${r.noshow} no-show · ${r.noreply} without an answer · ${r.declined} said they can't</div>
-    ${r.list.length ? `<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Event</th><th>Answered</th><th>Result</th></tr></thead><tbody>${r.list.slice().sort((a, b) => b.e.start.localeCompare(a.e.start)).map((x) => `<tr>
-      <td class="muted small nowrap">${fmtShort(x.e.start)}</td><td>${esc(x.e.title)}${x.e.mandatory ? ' <span class="pill-m">Mandatory</span>' : ''}</td><td>${esc(x.answer)}</td>
-      <td>${off && x.status !== 'leave' ? `<select class="status-pick" data-act="attdetail-stage" data-ev="${x.e.id}" data-rst="${x.status}" data-orig="${x.status}" aria-label="Result for ${esc(x.e.title)}">
-          ${ATT_EDIT_OPTIONS.map(([k, label]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${label}</option>`).join('')}
-        </select>` : `<span class="st-pill ${ATT_STATUS[x.status][1]}">${ATT_STATUS[x.status][0]}</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">No events with recorded attendance in this period.</div>'}
-    <div class="dlg-actions">
-      ${off ? `<button class="btn primary hidden" id="attdetail-save" data-act="attdetail-save" data-owner="${esc(r.owner)}">Save</button>` : ''}
-      <button class="btn" data-act="dlg-close">Close</button>
-    </div>`, true);
+CHANGES['att-period']=el=>{
+ if(el.value==='custom'){UI.attCustom=true;if(UI.attDays==='all')UI.attDays='14';render();document.querySelector('.attendance-period input')?.focus();return;}
+ UI.attCustom=false;UI.attDays=el.value;render();
 };
-// The select only stages locally (same pattern as the roster editor's CHANGES['roster-stage']) - nothing is
-// sent to the server, and no other row re-renders, until "Save" is actually clicked. The Save button itself
-// only appears once at least one row's staged value has actually changed from what it started as.
-CHANGES['attdetail-stage'] = (el) => {
-  el.dataset.rst = el.value;
-  const dirty = [...document.querySelectorAll('select[data-act="attdetail-stage"]')].some((s) => s.dataset.rst !== s.dataset.orig);
-  document.getElementById('attdetail-save')?.classList.toggle('hidden', !dirty);
+ACTIONS['att-view']=(el,d)=>{UI.attView=d.tab==='points'&&pointsOn()?'points':'attendance';render();};
+ACTIONS['att-retry']=()=>{attStatsError=null;attStatsKey=null;render();};
+// Corrections keep the existing four-result server workflow. Leave comes from approved leave records.
+const ATT_EDIT_OPTIONS = [['attended','Present'],['noshow','No-show'],['declined','Not attending'],['noreply','No reply']];
+const ATT_REVIEW_LABEL={attended:'Present',noshow:'No-show',declined:'Not attending',noreply:'No reply',leave:'On leave'};
+function attendanceReviewHtml(r,pending={}) {
+ const off=isOfficer(),dirty=Object.keys(pending).length;
+ return `<section class="attendance-review" data-owner="${esc(r.owner)}"><header class="attendance-review-head"><div><h2>${esc(r.chars.length===1?r.chars[0].name:r.name)}</h2><p>${esc(attendancePlayerMeta(r))}</p></div><button type="button" class="btn attendance-review-close" data-act="dlg-close" aria-label="Close attendance details">×</button><div class="attendance-review-period">${esc(attendancePeriodLabel())}${UI.attMand?' · Mandatory events':''}</div></header>
+ <div class="attendance-review-summary"><div><strong class="${r.band}">${r.pct===null?'—':r.pct+'%'}</strong><span>attendance</span></div><div><strong>${r.n} / ${r.total}</strong><span>eligible events</span></div><div><strong class="attention">${r.noshow}</strong><span>no-shows</span></div><div><strong>${r.noreply}</strong><span>no reply</span></div></div>
+ <p class="attendance-review-note">Approved leave is excluded.${r.virtualActive?' A starting attendance baseline is included in the percentage.':''}</p>
+ <div class="attendance-review-body">${r.list.length?`<table class="attendance-history"><thead><tr><th>Date</th><th>Event</th><th>Signup</th><th>Recorded result</th><th><span class="sr-only">Changes</span></th></tr></thead><tbody>${r.list.slice().sort((a,b)=>b.e.start.localeCompare(a.e.start)).map(x=>{
+  const staged=pending[x.e.id],value=staged||x.status;
+  return `<tr class="${staged?'is-edited':''}"><td data-label="Date">${fmtShort(x.e.start)}</td><td data-label="Event"><strong>${esc(x.e.title)}</strong>${x.e.mandatory?'<small>Mandatory event</small>':''}</td><td data-label="Signup"><span class="attendance-answer">${esc(x.answer)}</span></td><td data-label="Recorded result">${off&&x.status!=='leave'?`<select class="status-pick" data-act="attdetail-stage" data-ev="${x.e.id}" data-rst="${value}" data-orig="${x.status}" aria-label="Recorded result for ${esc(x.e.title)}">${ATT_EDIT_OPTIONS.map(([k,label])=>`<option value="${k}" ${value===k?'selected':''}>${label}</option>`).join('')}</select>`:`<span class="attendance-result" data-rst="${x.status}">${esc(ATT_REVIEW_LABEL[x.status]||x.status)}</span>${x.status==='leave'?'<small>From approved leave</small>':''}`}</td><td class="attendance-change"><span class="attendance-edited" ${staged?'':'hidden'}>Edited</span></td></tr>`;
+ }).join('')}</tbody></table>`:'<div class="empty">No events with recorded attendance in this period.</div>'}</div>
+ <footer class="attendance-review-footer"><span id="attdetail-dirty" role="status">${dirty?`${dirty} unsaved ${dirty===1?'change':'changes'}`:'No unsaved changes'}</span><div>${off?`<button class="btn" data-act="attdetail-discard" ${dirty?'':'disabled'}>Discard changes</button><button class="btn primary" id="attdetail-save" data-act="attdetail-save" data-owner="${esc(r.owner)}" ${dirty?'':'disabled'}>Save changes</button>`:'<button class="btn" data-act="dlg-close">Close</button>'}</div></footer></section>`;
+}
+function openAttendanceReview(owner,pending={}) {
+ const r=attRows().find(x=>x.owner===owner);if(!r)return;
+ openDialog(attendanceReviewHtml(r,pending),true);
+}
+ACTIONS['att-detail']=async(el,d)=>{
+ try{
+  const key=attendanceStatsKey();
+  if(attStatsKey!==key){
+   const stats=await api(attendanceStatsUrl());if(attendanceStatsKey()!==key)return;
+   S.attStatsByOwner=Object.fromEntries(stats.map(r=>[r.owner,r]));attStatsKey=key;attStatsError=null;render();
+  }
+  openAttendanceReview(d.key);
+ }catch(error){toast(error.message,true);}
 };
-ACTIONS['attdetail-save'] = (el, d) => {
-  const owner = d.owner;
-  const rows = [...document.querySelectorAll('select[data-act="attdetail-stage"]')].filter((s) => s.dataset.rst !== s.dataset.orig);
-  if (!rows.length) return;
-  act(async () => {
-    for (const sel of rows) await api(`/api/events/${sel.dataset.ev}/attendance-status`, 'POST', { owner, status: sel.dataset.rst });
-    // attRows() (used to rebuild this same dialog right below) reads from the lazily-cached custom-window
-    // stats, keyed only by the Attendance page's own day/mandatory-only filters - a correction here changes
-    // neither of those, so the cache has no way to know it's now stale. Without this, the dialog that reopens
-    // right after would show the pre-save numbers again, making the save look like it did nothing. Force a
-    // fresh read into that same cache, under the same key, before the dialog rebuilds.
-    const key = `${UI.attDays}:${UI.attMand ? 1 : 0}`;
-    S.attStatsByOwner = Object.fromEntries((await api(`/api/attendance-stats?windowDays=${encodeURIComponent(UI.attDays)}&mandatoryOnly=${UI.attMand ? 1 : 0}`)).map((r) => [r.owner, r]));
-    attStatsKey = key;
-  }, rows.length === 1 ? 'Attendance updated' : `Attendance updated for ${rows.length} events`).then((ok) => { if (ok) ACTIONS['att-detail'](null, { key: owner }); });
+function attendanceReviewChanges() { return [...document.querySelectorAll('#dlg select[data-act="attdetail-stage"]')].filter(s=>s.value!==s.dataset.orig); }
+function paintAttendanceReviewChanges() {
+ const rows=attendanceReviewChanges(),dirty=rows.length;
+ document.querySelectorAll('#dlg select[data-act="attdetail-stage"]').forEach(s=>{
+  s.dataset.rst=s.value;const changed=s.value!==s.dataset.orig;
+  s.closest('tr')?.classList.toggle('is-edited',changed);
+  const badge=s.closest('tr')?.querySelector('.attendance-edited');if(badge)badge.hidden=!changed;
+ });
+ const status=document.getElementById('attdetail-dirty');if(status)status.textContent=dirty?`${dirty} unsaved ${dirty===1?'change':'changes'}`:'No unsaved changes';
+ const save=document.getElementById('attdetail-save');if(save)save.disabled=!dirty||!!UI.attDetailSaving;
+ const discard=document.querySelector('#dlg [data-act="attdetail-discard"]');if(discard)discard.disabled=!dirty||!!UI.attDetailSaving;
+}
+CHANGES['attdetail-stage']=paintAttendanceReviewChanges;
+ACTIONS['attdetail-discard']=()=>{
+ if(UI.attDetailSaving)return;
+ document.querySelectorAll('#dlg select[data-act="attdetail-stage"]').forEach(s=>s.value=s.dataset.orig);
+ paintAttendanceReviewChanges();
+};
+function canCloseAttendanceReview() {
+ if(!document.querySelector('#dlg .attendance-review'))return true;
+ if(UI.attDetailSaving)return false;
+ return !attendanceReviewChanges().length||confirm('Discard unsaved attendance changes?');
+}
+$('#dlg').addEventListener('cancel',event=>{if(!canCloseAttendanceReview())event.preventDefault();});
+ACTIONS['attdetail-save']=async(el,d)=>{
+ if(!isOfficer()||UI.attDetailSaving)return;
+ const rows=attendanceReviewChanges();if(!rows.length)return;
+ const owner=d.owner;
+ UI.attDetailSaving=true;paintAttendanceReviewChanges();
+ document.querySelectorAll('#dlg select[data-act="attdetail-stage"]').forEach(s=>s.disabled=true);
+ let error=null;
+ try{
+  for(const select of rows){
+   await api(`/api/events/${select.dataset.ev}/attendance-status`,'POST',{owner,status:select.value});
+   select.dataset.orig=select.value;
+  }
+ }catch(e){error=e;}
+ const pending=Object.fromEntries(attendanceReviewChanges().map(s=>[s.dataset.ev,s.value]));
+ try{
+  await refresh(true);
+  const key=attendanceStatsKey();
+  S.attStatsByOwner=Object.fromEntries((await api(attendanceStatsUrl())).map(r=>[r.owner,r]));
+  attStatsKey=key;attStatsError=null;render();
+ }catch(e){error=error||e;}
+ UI.attDetailSaving=false;
+ if(error){
+  document.querySelectorAll('#dlg select[data-act="attdetail-stage"]').forEach(s=>s.disabled=false);
+  paintAttendanceReviewChanges();
+  toast(error.message,true);
+  // Keep failed edits visible. Successful requests have their new original value and will not be repeated.
+ }else{openAttendanceReview(owner,pending);toast('Attendance updated');}
 };
 
 /* ================= dashboard you can personalise ================= */
@@ -1359,77 +1444,103 @@ CHANGES['preset-hidden'] = (el) => act(() => api('/api/presets/' + el.dataset.id
 
 
 /* ================= the chart in the "Going" area of an event ================= */
-UI.chartMode = 'bar';
-const CH = { yes: ['Going', '#6fcf8b'], no: ["Can't", '#e2685c'], none: ['No reply', '#8b95a7'], leave: ['On leave', '#5fb8e8'] };
+const CH = { yes: ['Attending', '#34e394'], no: ['Not attending', '#ff667a'], none: ['No reply', '#a4a9b4'], leave: ['On leave', '#46c9ff'] };
 const ZERO = { yes: 0, no: 0, none: 0, leave: 0 };
+const SIGNUP_CHART_KEYS = ['yes', 'no', 'none', 'leave'];
+function chartModeKey() { return 'gh_event_chart_v2_' + (S.user?.key || S.user?.name || 'guest'); }
+function signupChartMode() {
+  let mode = (UI.signupChartModes || {})[chartModeKey()] || 'bar';
+  try { mode = localStorage.getItem(chartModeKey()) || mode; } catch {}
+  return ['table', 'bar', 'pie'].includes(mode) ? mode : 'bar';
+}
+const chartCount = c => SIGNUP_CHART_KEYS.reduce((n, k) => n + (Number(c[k]) || 0), 0);
 function chartBars(rows, keys) {
-  const sum = (c) => keys.reduce((a, k) => a + c[k], 0), max = Math.max(1, ...rows.map((r) => sum(r.c)));
-  return `<div class="cbars">${rows.map((r) => {
-    const t = sum(r.c), going = r.c.yes, pct = t ? Math.round(100 * going / t) : 0;
-    return `<div class="cbar ${r.all ? 'all' : ''}" style="--rc:${r.color || 'var(--accent-text)'}">
-      <div class="cl"><i class="rdot"></i>${esc(r.label)}</div>
-      <div class="ctrack">${t ? `<div class="cstack" style="width:${100 * t / max}%">${keys.map((k) => (r.c[k] ? `<span class="seg-${k}" style="flex:${r.c[k]}" title="${CH[k][0]}: ${r.c[k]}"><b>${r.c[k]}</b></span>` : '')).join('')}</div>` : '<em class="muted small">nobody</em>'}</div>
-      <div class="cn"><b>${going}</b><span class="muted">/${t}</span><small>${pct}%</small></div></div>`;
+  return `<div class="signup-bars">${rows.map(r => {
+    const total = chartCount(r.c);
+    return `<div class="signup-bar-row ${r.all ? 'is-total' : ''}" style="--role-color:${r.color || '#d8c5a0'}">
+      <div class="signup-role"><i></i>${esc(r.label)}</div>
+      <div class="signup-track" role="img" aria-label="${esc(r.label)}: ${keys.map(k => `${CH[k][0]} ${r.c[k] || 0}`).join(', ')}">${total ? keys.filter(k => r.c[k]).map(k => `<span style="--segment-color:${CH[k][1]};width:${100*r.c[k]/total}%" title="${CH[k][0]}: ${r.c[k]}">${r.c[k]/total >= .07 ? `<b>${r.c[k]}</b>` : ''}</span>`).join('') : '<span class="signup-empty">No players</span>'}</div>
+      <div class="signup-ratio"><strong>${r.c.yes || 0}</strong><span> / ${total}</span></div></div>`;
   }).join('')}</div>`;
 }
-// A ring with the number of people going in the middle.
-function donutSvg(c, keys, size = 132) {
-  const tot = keys.reduce((a, k) => a + c[k], 0), R = 46, W = 16, C = 2 * Math.PI * R, cx = size / 2, live = keys.filter((k) => c[k]);
-  let off = 0;
-  const arcs = live.map((k) => {
-    const len = (c[k] / tot) * C, gap = live.length > 1 ? 2.5 : 0, shown = Math.max(0.5, len - gap);
-    const el = `<circle cx="${cx}" cy="${cx}" r="${R}" fill="none" stroke="${CH[k][1]}" stroke-width="${W}" stroke-dasharray="${shown} ${C - shown}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cx})"><title>${CH[k][0]}: ${c[k]}</title></circle>`;
-    off += len; return el;
+function donutSvg(c, keys, size = 160) {
+  const total = chartCount(c), radius = 62, width = 15, circumference = 2*Math.PI*radius, center = size/2;
+  const live = keys.filter(k => c[k]);
+  let offset = 0;
+  const arcs = live.map(k => {
+    const length = c[k]/total*circumference;
+    // Keep the gap relative for tiny segments so even one of 100 players stays visible.
+    const gap = live.length > 1 ? Math.min(2.5,length*.18) : 0;
+    const arc = `<circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="${CH[k][1]}" stroke-width="${width}" stroke-dasharray="${length-gap} ${circumference-length+gap}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${center} ${center})"><title>${CH[k][0]}: ${c[k]}</title></circle>`;
+    offset += length; return arc;
   }).join('');
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${keys.map((k) => `${CH[k][0]} ${c[k]}`).join(', ')}">
-    <circle cx="${cx}" cy="${cx}" r="${R}" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="${W}"/>${tot ? arcs : ''}
-    <text x="${cx}" y="${cx + 3}" text-anchor="middle" class="dn">${c.yes}</text><text x="${cx}" y="${cx + 22}" text-anchor="middle" class="dl">of ${tot} going</text></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${keys.map(k => `${CH[k][0]} ${c[k] || 0}`).join(', ')}">
+    <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#302938" stroke-width="${width}"/>${arcs}
+    <text x="${center}" y="${center-3}" text-anchor="middle" class="signup-ring-count">${c.yes || 0}<tspan class="signup-ring-denominator"> / ${total}</tspan></text>
+    <text x="${center}" y="${center+17}" text-anchor="middle" class="signup-ring-caption">attending</text>
+    <text x="${center}" y="${center+36}" text-anchor="middle" class="signup-ring-percent">${total ? Math.round(100*(c.yes || 0)/total) : 0}%</text></svg>`;
+}
+function signupChartTable(rows, keys) {
+ return `<div class="signup-table-wrap"><table class="signup-table"><caption class="sr-only">Event signup counts by role and response</caption><thead><tr><th scope="col">Role</th>${keys.map(k=>`<th scope="col" style="--status-color:${CH[k][1]}"><i></i>${CH[k][0]}</th>`).join('')}<th scope="col">Total</th></tr></thead><tbody>${rows.map(r=>`<tr class="${r.all?'is-total':''}"><th scope="row"><span class="signup-role" style="--role-color:${r.color || '#d8c5a0'}"><i></i>${esc(r.label)}</span></th>${keys.map(k=>`<td style="--status-color:${CH[k][1]}" class="${r.c[k]?'has-count':''}">${r.c[k] || 0}</td>`).join('')}<td>${chartCount(r.c)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function goingChart(ev) {
   const c = ev.chart;
   if (!c) return '';
-  const rows = [...S.cfg.roles.map((r) => ({ label: r, c: c.roles[r] || ZERO, color: roleColor(r) })), { label: 'Everybody', c: c.total, all: true }];
-  const keys = ['yes', 'no', 'none', ...(c.total.leave ? ['leave'] : [])];
-  const pie = UI.chartMode === 'pie', all = keys.reduce((a, k) => a + c.total[k], 0);
-  return `<div class="going-chart">
-    <div class="chart-head"><div class="chart-sum"><b>${c.total.yes}</b> of ${all} ${all === 1 ? 'player' : 'players'} going${all ? ` <span class="muted">(${Math.round(100 * c.total.yes / all)}%)</span>` : ''}</div>
-      <span class="seg"><button class="btn sm ${pie ? '' : 'on'}" data-act="chart-mode" data-m="bar">Bars</button><button class="btn sm ${pie ? 'on' : ''}" data-act="chart-mode" data-m="pie">Rings</button></span></div>
-    <div class="legend-row">${keys.map((k) => `<span class="lg"><i style="background:${CH[k][1]}"></i>${CH[k][0]} <b>${c.total[k]}</b>${all ? `<small>${Math.round(100 * c.total[k] / all)}%</small>` : ''}</span>`).join('')}</div>
-    ${pie ? `<div class="cpies">${rows.map((r) => `<figure class="cpie ${r.all ? 'all' : ''}" style="--rc:${r.color || 'var(--accent-text)'}">${donutSvg(r.c, keys)}<figcaption><b>${esc(r.label)}</b>
-        <span class="mini-legend">${keys.map((k) => `<span title="${CH[k][0]}"><i style="background:${CH[k][1]}"></i>${r.c[k]}</span>`).join('')}</span></figcaption></figure>`).join('')}</div>` : chartBars(rows, keys)}
-  </div>`;
+  const rows = [...S.cfg.roles.map(r => ({ label:r, c:c.roles[r] || ZERO, color:roleColor(r) })), {label:'Total',c:c.total,all:true}];
+  const keys = SIGNUP_CHART_KEYS, mode = signupChartMode(), total = chartCount(c.total);
+  const totalRow = rows[rows.length-1];
+  return `<section class="signup-analytics" aria-label="Event signup overview">
+    <div class="signup-chart-head"><div><h3>Sign-up overview</h3><p>Responses by role</p></div><div class="signup-chart-total"><strong>${c.total.yes || 0}</strong><span>of ${total} attending<b>${total ? Math.round(100*(c.total.yes || 0)/total) : 0}%</b></span></div>
+    <div class="signup-chart-switch" role="group" aria-label="Chart display">${[['table','Table'],['bar','Bars'],['pie','Rings']].map(([key,label])=>`<button class="btn sm ${mode===key?'active':''}" aria-pressed="${mode===key}" data-act="chart-mode" data-m="${key}">${label}</button>`).join('')}</div></div>
+    ${mode==='table' ? signupChartTable(rows,keys) : mode==='pie' ? `<div class="signup-rings">${[totalRow,...rows.slice(0,-1)].map(r=>`<figure class="signup-ring ${r.all?'is-total':''}">${donutSvg(r.c,keys)}<figcaption class="signup-role" style="--role-color:${r.color || '#d8c5a0'}"><i></i>${esc(r.label)}</figcaption></figure>`).join('')}</div>` : chartBars(rows,keys)}
+    <div class="signup-chart-legend">${keys.map(k=>`<span style="--status-color:${CH[k][1]}"><i></i>${CH[k][0]} <b>${c.total[k] || 0}</b></span>`).join('')}</div>
+    ${c.total.leave ? '<p class="signup-chart-note">On leave is shown separately and is not counted as attending.</p>' : ''}
+  </section>`;
 }
-ACTIONS['chart-mode'] = (el, d) => { UI.chartMode = d.m; render(); };
+ACTIONS['chart-mode'] = (el,d) => {
+ if (!['table','bar','pie'].includes(d.m)) return;
+ (UI.signupChartModes ||= {})[chartModeKey()] = d.m;
+ try { localStorage.setItem(chartModeKey(),d.m); } catch {}
+ render();
+ document.querySelector('.signup-chart-switch [data-m="'+d.m+'"]')?.focus({preventScroll:true});
+};
 
 /* ================= leave of absence ================= */
 UI.leaveStatus = '';
 const LEAVE_STATUS = { pending: ['Waiting', 'st-open'], approved: ['Approved', 'st-approved'], rejected: ['Not approved', 'st-rejected'] };
 const allPlayers = () => (S.cfg.authMode === 'discord' ? S.users.map((u) => ({ key: u.id, name: u.name })) : [...new Set(S.members.filter((m) => m.active).map((m) => m.owner))].map((o) => ({ key: o, name: o })));
+function leaveComposer(off, today, c) {
+  const d = opsDraft('leave');
+  return `<form data-form="leave" class="ops-form">
+    ${off ? `<div class="field"><label for="lv-p">Player</label><select id="lv-p" name="ownerKey">${allPlayers().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<option value="${esc(p.key)}" ${d.ownerKey===p.key?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>` : ''}
+    <div class="field"><label for="lv-f">First day</label><input id="lv-f" name="from" data-act="leave-from" type="date" value="${esc(d.from || today)}" ${off ? '' : `min="${today}"`} required></div>
+    <div class="field"><label for="lv-t">Last day</label><input id="lv-t" name="to" type="date" value="${esc(d.to || addDayStr(today,6))}" min="${esc(off ? d.from || '' : d.from && d.from > today ? d.from : today)}" required></div>
+    <div class="field"><label for="lv-r">Reason <span class="muted small">(optional)</span></label><textarea id="lv-r" name="reason" maxlength="200" placeholder="Holiday, exams, personal time…">${esc(d.reason || '')}</textarea></div>
+    <button type="submit" class="btn primary" ${opsSending.has(opsDraftKey('leave')) ? 'disabled' : ''}>${off ? 'Add leave' : 'Request leave'}</button>
+  </form><p class="ops-policy muted small">${off ? 'Entries added by leadership are approved immediately and may start in the past.' : c.loaNeedsApproval ? 'Your leave must be approved by leadership.' : 'Leave is approved automatically.'}</p><p class="ops-policy muted small">Approved leave excludes these dates from missed attendance. Event reminders are paused.</p>`;
+}
+UI.leaveQ = '';
 VIEWS.leave = () => {
-  const off = isOfficer(), c = S.settings.compliance || {}, today = todayTz();
-  const list = S.leaves.filter((l) => !UI.leaveStatus || l.status === UI.leaveStatus).sort((a, b) => b.from.localeCompare(a.from));
-  const away = S.leaves.filter((l) => l.status === 'approved' && l.from <= guildDate(Date.now()) && guildDate(Date.now()) <= l.to);
-  return `
-  <div class="page-head"><div><h1>Leave of absence</h1><div class="muted">Going to be away? Tell the leadership. Events in that time do not count as no-show, no reply or missed attendance, and you get no reminders.${c.loaNeedsApproval ? ' The leadership has to approve it.' : ''}</div></div></div>
-  ${off && away.length ? `<div class="panel" style="margin-bottom:16px"><h3>Away right now</h3>${away.map((l) => `<div class="rule-row"><b>${esc(l.name)}</b><span class="muted small">until ${fmtLootDate(l.to)}${l.reason ? ' · ' + esc(l.reason) : ''}</span></div>`).join('')}</div>` : ''}
-  <div class="panel" style="margin-bottom:16px"><h3>${off ? 'Add a leave' : 'Ask for a leave'}</h3>
-    <form data-form="leave" class="loot-form">
-      ${off ? `<div class="field"><label for="lv-p">Player</label><select id="lv-p" name="ownerKey">${allPlayers().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('')}</select></div>` : ''}
-      <div class="field"><label for="lv-f">First day</label><input id="lv-f" name="from" type="date" value="${today}" ${off ? '' : `min="${today}"`} required></div>
-      <div class="field"><label for="lv-t">Last day</label><input id="lv-t" name="to" type="date" value="${addDayStr(today, 6)}" ${off ? '' : `min="${today}"`} required></div>
-      <div class="field wide"><label for="lv-r">Reason (optional)</label><input id="lv-r" name="reason" maxlength="200" placeholder="Holiday, exams, ..."></div>
-      <button class="btn primary">${off ? 'Add leave' : 'Send'}</button>
-    </form>${off ? '<div class="muted small" style="margin-top:8px">Entries added by the leadership are approved at once and may start in the past.</div>' : ''}</div>
-  <div class="toolbar"><select data-ui="leaveStatus" aria-label="Status"><option value="">All</option>${Object.entries(LEAVE_STATUS).map(([k, v]) => `<option value="${k}" ${UI.leaveStatus === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select><span class="muted small">${list.length} ${list.length === 1 ? 'entry' : 'entries'}</span></div>
+  const off = isOfficer(), c = S.settings.compliance || {}, today = guildDate(Date.now()), q = (UI.leaveQ || '').trim().toLowerCase();
+  const list = S.leaves.filter(l=>(!UI.leaveStatus || l.status === UI.leaveStatus) && (!q || [l.name,l.reason,l.note].join(' ').toLowerCase().includes(q))).sort((a,b)=>b.from.localeCompare(a.from));
+  const away = S.leaves.filter(l=>l.status==='approved' && l.from <= today && today <= l.to);
+  const people = new Map(); for (const l of away) { const key = l.ownerKey || l.name; if (!people.has(key) || people.get(key).to < l.to) people.set(key,l); }
+  return `<section class="ops-workspace leave-workspace"><div class="page-head"><div><h1>Leave of absence</h1><div class="muted">Plan time away and keep leadership informed.${off ? '' : ' Only your leave entries are visible.'}</div></div><button class="btn primary ops-mobile-compose" data-act="ops-compose-focus" data-kind="leave">+ ${off ? 'Add leave' : 'Request leave'}</button></div>
+    <div class="ops-grid"><div class="ops-ledger">
+    ${opsMetrics([['Away now',people.size,'approved'],['Upcoming leaves',S.leaves.filter(l=>l.status==='approved' && l.from>today).length,'completed'],['Waiting',S.leaves.filter(l=>l.status==='pending').length,'waiting']])}
+    ${away.length ? `<div class="panel ops-away-panel"><h2>${off ? 'Away now' : 'Your current leave'}</h2><div class="ops-away-list">${[...people.values()].sort((a,b)=>a.to.localeCompare(b.to)).map(l=>`<div class="ops-away-person"><strong>${esc(l.name)}</strong><span class="muted small">Through ${fmtLootDate(l.to)}</span></div>`).join('')}</div></div>` : ''}
+    <div class="panel ops-list-panel"><div class="ops-list-heading"><h2>Leave history</h2><span class="muted small">${list.length} of ${S.leaves.length} entries</span></div><div class="ops-filters"><input type="search" data-ui="leaveQ" placeholder="Search player or reason…" aria-label="Search leave entries" value="${esc(UI.leaveQ || '')}"><select data-ui="leaveStatus" aria-label="Leave status"><option value="">All statuses</option>${Object.entries(LEAVE_STATUS).map(([k,v])=>`<option value="${k}" ${UI.leaveStatus===k?'selected':''}>${v[0]}</option>`).join('')}</select></div>
   ${list.length ? `<div class="tbl-wrap"><table><thead><tr>${off ? '<th>Player</th>' : ''}<th>From</th><th>To</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>${list.map((l) => {
     const running = l.from <= today && today <= l.to;
-    return `<tr>${off ? `<td><b>${esc(l.name)}</b></td>` : ''}<td class="nowrap">${fmtLootDate(l.from)}</td><td class="nowrap">${fmtLootDate(l.to)}${running && l.status === 'approved' ? ' <span class="type-pill">now</span>' : ''}</td><td>${esc(l.reason) || '<span class="muted">-</span>'}</td>
-      <td><span class="st-pill ${LEAVE_STATUS[l.status][1]}">${LEAVE_STATUS[l.status][0]}</span>${l.note ? `<div class="muted small">${esc(l.note)}</div>` : ''}</td>
-      <td class="nowrap">${off && l.status === 'pending' ? `<button class="btn sm" data-act="leave-decide" data-id="${l.id}" data-d="approved">Approve</button> <button class="btn sm danger" data-act="leave-decide" data-id="${l.id}" data-d="rejected">Reject</button> ` : ''}
+    return `<tr>${off ? `<td data-label="Player"><b>${esc(l.name)}</b></td>` : ''}<td data-label="From" class="nowrap">${fmtLootDate(l.from)}</td><td data-label="To" class="nowrap">${fmtLootDate(l.to)}${running && l.status === 'approved' ? ' <span class="type-pill">now</span>' : ''}</td><td data-label="Reason">${esc(l.reason) || '<span class="muted">-</span>'}</td>
+      <td data-label="Status"><span class="st-pill ${LEAVE_STATUS[l.status][1]}">${LEAVE_STATUS[l.status][0]}</span>${l.note ? `<div class="muted small">${esc(l.note)}</div>` : ''}</td>
+      <td data-label="Actions" class="ops-actions-cell">${off && l.status === 'pending' ? `<button class="btn sm" data-act="leave-decide" data-id="${l.id}" data-d="approved">Approve</button> <button class="btn sm danger" data-act="leave-decide" data-id="${l.id}" data-d="rejected">Reject</button> ` : ''}
         ${off && running && l.status === 'approved' ? `<button class="btn sm" data-act="leave-end" data-id="${l.id}">End today</button> ` : ''}
-        ${off || l.status === 'pending' || l.from > today ? `<button class="btn sm" data-act="leave-del" data-id="${l.id}">${off ? 'Delete' : 'Take back'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty">No leave entries.</div>'}`;
+        ${off || l.status === 'pending' || l.from > today ? `<button class="btn sm" data-act="leave-del" data-id="${l.id}">${off ? 'Delete' : 'Take back'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty">No leave entries.</div>'}
+    </div></div><aside class="panel ops-composer"><h2>${off ? 'Add leave' : 'Request leave'}</h2><p class="muted small">First and last day are both included.</p>${leaveComposer(off,today,c)}</aside></div></section>`;
 };
-FORMS.leave = (f, fd) => act(async () => { const r = await api('/api/leaves', 'POST', fd); toast(r.status === 'pending' ? 'Sent. The leadership has to approve it.' : 'Saved'); });
+CHANGES['leave-from'] = el => { const end = $('#lv-t'); if (end) end.min = !isOfficer() && el.value < guildDate(Date.now()) ? guildDate(Date.now()) : el.value; };
+FORMS.leave = (f, fd) => opsSubmit('leave',f,fd);
 ACTIONS['leave-del'] = (el, d) => { if (confirm('Remove this leave entry?')) act(() => api('/api/leaves/' + d.id, 'DELETE'), 'Removed'); };
 ACTIONS['leave-end'] = (el, d) => act(() => api('/api/leaves/' + d.id, 'PUT', { to: addDayStr(guildDate(Date.now()), -1) }), 'The leave ended');
 
@@ -1454,27 +1565,23 @@ VIEWS.warnings = () => {
   const perPlayer = [...new Set(S.warnings.filter((w) => w.status === 'active').map((w) => w.ownerKey))].map((k) => ({ k, n: activeWarn(k).length, name: ownerName(k) })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
   const mineActive = activeWarn(S.user.key).length, c = S.settings.compliance || {};
   const status = (w) => (w.status === 'active' ? '<span class="st-pill st-rejected">Active</span>' : `<span class="st-pill">${w.status === 'removed' ? 'Removed' : 'Ended'}</span><div class="muted small">${w.endedBy === 'timer' ? 'ran out' : w.endedBy === 'quiet' ? 'quiet period' : w.endedBy ? 'by ' + esc(w.endedBy) : ''}</div>`);
-  return `
-  <div class="page-head"><div><h1>Warnings</h1><div class="muted">${off ? 'Every warning, given automatically or by the leadership.' : 'Your warnings. Only you and the leadership can see them.'}</div></div>
-    ${off ? '<button class="btn" data-act="warn-run">Check attendance now</button>' : ''}</div>
-  <div class="panel" style="margin-bottom:16px"><h3>How it works</h3><div class="small">${esc(rulesText())}</div></div>
-  ${!off ? `<div class="panel" style="margin-bottom:16px"><h3>Your status</h3><div><b>${mineActive}</b> active ${mineActive === 1 ? 'warning' : 'warnings'}${isDisqualified(S.user.key) ? ' <span class="qtag warn">Disqualified from loot</span>' : c.disqualifyAt > 0 ? ` <span class="muted small">(disqualified from ${c.disqualifyAt})</span>` : ''}</div></div>` : ''}
-  ${off ? `<div class="panel" style="margin-bottom:16px"><h3>Players with active warnings</h3>${perPlayer.length ? perPlayer.map((p) => `<div class="rule-row"><b>${esc(p.name)}</b><span>${p.n} active</span>${isDisqualified(p.k) ? '<span class="qtag warn">Disqualified from loot</span>' : ''}<button class="btn sm" data-act="warn-clear-all" data-owner="${esc(p.k)}" data-name="${esc(p.name)}">Clear all</button></div>`).join('') : '<div class="muted small">Nobody has an active warning.</div>'}</div>
-    <div class="panel" style="margin-bottom:16px"><h3>Give a warning</h3><form data-form="warn-new" class="loot-form">
-      <div class="field"><label for="wn-p">Player</label><select id="wn-p" name="ownerKey">${allPlayers().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('')}</select></div>
-      <div class="field wide"><label for="wn-r">Reason</label><input id="wn-r" name="reason" required maxlength="300" placeholder="What happened"></div><button class="btn primary">Give warning</button></form></div>` : ''}
-  <div class="toolbar">
-    <select data-ui="warnFilter" aria-label="Which"><option value="active" ${UI.warnFilter === 'active' ? 'selected' : ''}>Active warnings</option><option value="all" ${UI.warnFilter === 'all' ? 'selected' : ''}>All, including ended</option></select>
-    ${off ? `<input type="search" placeholder="Search player or reason" value="${esc(UI.warnQ)}" data-ui="warnQ" aria-label="Search">` : ''}<span class="muted small">${list.length} shown</span></div>
-  ${list.length ? `<div class="tbl-wrap"><table><thead><tr>${off ? '<th>Player</th>' : ''}<th>Given</th><th>Type</th><th>Reason</th><th>Ends</th><th>Status</th>${off ? '<th></th>' : ''}</tr></thead><tbody>${list.map((w) => `<tr>${off ? `<td><b>${esc(w.name)}</b></td>` : ''}
-    <td class="nowrap muted small">${fmtShort(w.at)}</td><td>${esc(WARN_KIND[w.kind] || w.kind)}</td><td>${esc(w.reason)}${w.note ? `<div class="muted small">${esc(w.note)}</div>` : ''}</td>
-    <td class="nowrap muted small">${w.status === 'active' ? (w.expiresAt ? fmtLootDate(w.expiresAt.slice(0, 10)) : 'never') : (w.endedAt ? fmtLootDate(w.endedAt.slice(0, 10)) : '-')}</td><td>${status(w)}</td>
-    ${off ? `<td>${w.status === 'active' ? `<button class="btn sm" data-act="warn-remove" data-id="${w.id}">Remove</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
+  const draft = opsDraft('warn-new');
+  return `<section class="ops-workspace leader-workspace warnings-workspace"><div class="page-head"><div><h1>Warnings</h1><div class="muted">${off ? 'Attendance and manual warnings, with a clear record of each decision.' : 'Your warnings. Only you and leadership can see them.'}</div></div>${off ? '<button class="btn" data-act="warn-run">Check attendance now</button>' : ''}</div>
+    <details class="panel leader-rules" data-fold="warning-rules" ${UI.fold?.['warning-rules']?'open':''}><summary>Warning rules</summary><p>${esc(rulesText())}</p></details>
+    <div class="ops-grid ${off?'':'leader-readonly'}"><div class="ops-ledger">${opsMetrics([['Active warnings',S.warnings.filter(w=>w.status==='active').length,'waiting'],['Affected players',perPlayer.length,''],['Ended / removed',S.warnings.filter(w=>w.status!=='active').length,'completed']])}
+    ${!off ? `<div class="panel leader-member-status">${isDisqualified(S.user.key) ? '<span class="qtag warn">Disqualified from loot</span>' : c.disqualifyAt>0 ? `<span class="muted small">Disqualification starts at ${c.disqualifyAt} active warnings.</span>` : '<span class="muted small">No disqualification threshold is set.</span>'}</div>` : ''}
+    ${off && perPlayer.length ? `<details class="panel leader-affected"><summary>Players with active warnings (${perPlayer.length})</summary>${perPlayer.map(p=>`<div class="rule-row"><strong>${esc(p.name)}</strong><span>${p.n} active</span>${isDisqualified(p.k)?'<span class="qtag warn">Disqualified from loot</span>':''}<button class="btn sm" data-act="warn-clear-all" data-owner="${esc(p.k)}" data-name="${esc(p.name)}">Clear all</button></div>`).join('')}</details>` : ''}
+    <div class="panel ops-list-panel"><div class="ops-list-heading"><h2>Warning history</h2><span class="muted small">${list.length} shown</span></div><div class="ops-filters">${off?`<input type="search" data-ui="warnQ" value="${esc(UI.warnQ)}" placeholder="Search player or reason…" aria-label="Search warnings">`:''}<select data-ui="warnFilter" aria-label="Warning status"><option value="active" ${UI.warnFilter==='active'?'selected':''}>Active warnings</option><option value="all" ${UI.warnFilter==='all'?'selected':''}>All, including ended</option></select></div>
+  ${list.length ? `<div class="tbl-wrap"><table><thead><tr>${off ? '<th>Player</th>' : ''}<th>Given</th><th>Type</th><th>Reason</th><th>Ends</th><th>Status</th>${off ? '<th></th>' : ''}</tr></thead><tbody>${list.map((w) => `<tr>${off ? `<td data-label="Player"><b>${esc(w.name)}</b></td>` : ''}
+    <td data-label="Given" class="nowrap muted small">${fmtShort(w.at)}</td><td data-label="Type">${esc(WARN_KIND[w.kind] || w.kind)}</td><td data-label="Reason">${esc(w.reason)}${w.note ? `<div class="muted small">${esc(w.note)}</div>` : ''}</td>
+    <td data-label="Ends" class="nowrap muted small">${w.status === 'active' ? (w.expiresAt ? fmtLootDate(w.expiresAt.slice(0, 10)) : 'never') : (w.endedAt ? fmtLootDate(w.endedAt.slice(0, 10)) : '-')}</td><td data-label="Status">${status(w)}</td>
+    ${off ? `<td data-label="Actions">${w.status === 'active' ? `<button class="btn sm" data-act="warn-remove" data-id="${w.id}">Remove</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : '<div class="empty">No warnings.</div>'}
   ${S.explanations.length ? `<h3 class="sec" style="margin-top:24px">${off ? 'Reasons players sent' : 'Your explanations'}</h3><div class="tbl-wrap"><table><tbody>${S.explanations.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 15).map((x) => `<tr><td class="nowrap muted small">${fmtShort(x.at)}</td>${off ? `<td><b>${esc(x.name)}</b></td>` : ''}<td style="white-space:pre-wrap">${esc(x.reason)}</td>
-      <td><span class="st-pill ${x.status === 'approved' ? 'st-approved' : x.status === 'rejected' ? 'st-rejected' : 'st-open'}">${x.status === 'approved' ? 'Accepted' : x.status === 'rejected' ? 'Not accepted' : 'Waiting'}</span>${x.note ? `<div class="muted small">${esc(x.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+      <td><span class="st-pill ${x.status === 'approved' ? 'st-approved' : x.status === 'rejected' ? 'st-rejected' : 'st-open'}">${x.status === 'approved' ? 'Accepted' : x.status === 'rejected' ? 'Not accepted' : 'Waiting'}</span>${x.note ? `<div class="muted small">${esc(x.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    </div></div>${off ? `<aside class="panel ops-composer"><h2>Give warning</h2><p class="muted small">Record the reason clearly. The player is notified on Discord.</p><form data-form="warn-new" class="ops-form"><div class="field"><label for="wn-p">Player</label><select id="wn-p" name="ownerKey">${allPlayers().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<option value="${esc(p.key)}" ${draft.ownerKey===p.key?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="field"><label for="wn-r">Reason</label><textarea id="wn-r" name="reason" maxlength="300" required placeholder="What happened?">${esc(draft.reason || '')}</textarea></div><button type="submit" class="btn primary" ${opsSending.has(opsDraftKey('warn-new'))?'disabled':''}>Give warning</button></form></aside>` : ''}</div></section>`;
 };
-FORMS['warn-new'] = (f, fd) => act(async () => { await api('/api/warnings', 'POST', fd); f.reset(); }, 'Warning given. The player gets a Discord message.');
+FORMS['warn-new'] = (f, fd) => opsSubmit('warn-new',f,fd);
 ACTIONS['warn-remove'] = (el, d) => { const note = prompt('Why is it removed? (optional)', ''); if (note === null) return; act(() => api('/api/warnings/' + d.id, 'PUT', { note }), 'Warning removed'); };
 ACTIONS['warn-clear-all'] = (el, d) => {
   if (!confirm(`Clear every active warning for ${d.name}?`)) return;
@@ -2174,11 +2281,11 @@ async function dmMercsTheirParty(ev) {
 AFTER_RENDER.push((page) => {
   if (page !== 'admin') return;
   const main = $('#main');
-  for (const p of [...main.children]) {
+  for (const p of [...main.querySelectorAll('.leader-admin-pane > .panel')]) {
     if (!p.classList.contains('panel') || !p.firstElementChild || p.firstElementChild.tagName !== 'H3') continue;
     const title = p.firstElementChild.textContent.trim(), key = 'adm:' + title;
     const d = document.createElement('details'); d.className = 'panel fold adm'; d.dataset.fold = key;
-    if ((UI.fold || {})[key]) d.open = true;
+    if ((UI.fold || {})[key] ?? !p.previousElementSibling?.classList.contains('panel')) d.open = true;
     const sum = document.createElement('summary'); sum.textContent = title;
     const body = document.createElement('div'); body.className = 'fold-body';
     p.firstElementChild.remove(); while (p.firstChild) body.appendChild(p.firstChild);
@@ -2187,7 +2294,7 @@ AFTER_RENDER.push((page) => {
   const head = main.querySelector('.page-head');
   if (head && !head.querySelector('[data-act=adm-all]')) head.insertAdjacentHTML('beforeend', '<span class="seg"><button class="btn sm" data-act="adm-all" data-open="1">Open all</button><button class="btn sm" data-act="adm-all" data-open="0">Close all</button></span>');
 });
-ACTIONS['adm-all'] = (el, d) => document.querySelectorAll('details.adm').forEach((x) => { x.open = d.open === '1'; (UI.fold = UI.fold || {})[x.dataset.fold] = x.open; });
+ACTIONS['adm-all'] = (el, d) => document.querySelectorAll('.leader-admin-pane:not([hidden]) details.adm').forEach((x) => { x.open = d.open === '1'; (UI.fold = UI.fold || {})[x.dataset.fold] = x.open; });
 
 /* ================= audit log (leadership only): who changed what, searchable and paginated ================= */
 Object.assign(UI, { auditQ: { user: '', action: '', target: '', from: '', to: '', page: 1 }, auditResult: null, auditActions: null });
@@ -2202,14 +2309,22 @@ const ACTION_LABELS = {
 };
 const actionLabel = (a) => ACTION_LABELS[a] || a;
 
+let auditLoadSerial = 0;
 async function loadAudit() {
-  const q = UI.auditQ, qs = Object.entries({ user: q.user, action: q.action, target: q.target, from: q.from, to: q.to, page: q.page, limit: 50 })
-    .filter(([, v]) => v !== '' && v != null).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-  try { UI.auditResult = await api('/api/admin/audit?' + qs); } catch (e) { UI.auditResult = { error: e.message }; }
-  if (!UI.auditActions) { try { UI.auditActions = await api('/api/admin/audit/actions'); } catch { UI.auditActions = []; } }
-  render();
+  if (!isOfficer()) return;
+  const serial = ++auditLoadSerial, viewer = S.user.key, q = {...UI.auditQ};
+  const qs = Object.entries({...q,limit:50}).filter(([,v])=>v!=='' && v!=null).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
+  UI.auditLoading = true; render();
+  try {
+    const result = await api('/api/admin/audit?' + qs);
+    if (serial !== auditLoadSerial || viewer !== S.user.key || !isOfficer()) return;
+    UI.auditResult=result; UI.auditSelected=null;
+  } catch(e) { if (serial === auditLoadSerial && viewer === S.user.key) UI.auditResult={error:e.message}; }
+  if (serial !== auditLoadSerial) return;
+  if (!UI.auditActions) { try { UI.auditActions=await api('/api/admin/audit/actions'); } catch { UI.auditActions=[]; } }
+  if (serial === auditLoadSerial) { UI.auditLoading=false; if (route().page==='auditlog') render(); }
 }
-AFTER_RENDER.push((page) => { if (page === 'auditlog' && UI.auditResult === null) loadAudit(); });
+AFTER_RENDER.push((page) => { if (page === 'auditlog' && UI.auditResult === null && !UI.auditLoading) loadAudit(); });
 // Quietly re-check the Discord connection (channels, roles) the moment Admin is opened, rather than only when
 // "Check the connection" is clicked by hand - otherwise a saved @-mention role looks "not found" on every fresh
 // visit until that button is pressed again, even though the role is perfectly fine.
@@ -2227,10 +2342,15 @@ function auditRow(e) {
     <td>${esc(e.description)}${hasDiff ? `<details class="ql-drop"><summary>What changed</summary><div class="diff">${Object.keys(e.before).map((k) => diffRow(k, e.before[k], e.after[k])).join('')}</div></details>` : ''}</td>
   </tr>`;
 }
+function auditDetail(e) {
+  const keys = [...new Set([...Object.keys(e.before || {}),...Object.keys(e.after || {})])];
+  return `<header class="leader-detail-head"><span class="leader-kicker">Log entry · read only</span><h2>${esc(actionLabel(e.action))}</h2></header><dl class="leader-facts"><dt>When</dt><dd>${fmtShort(e.at)}</dd><dt>Who</dt><dd>${esc(e.byName || 'System')}</dd><dt>Target</dt><dd>${esc(e.targetName || '—')}${e.targetType?` <span class="muted small">(${esc(e.targetType)})</span>`:''}</dd><dt>Action</dt><dd>${esc(e.action)}</dd></dl><div class="leader-detail-box"><h3>Details</h3><div class="leader-text">${esc(e.description || 'No additional details recorded.')}</div></div>${keys.length?`<h3 class="leader-subheading">Recorded changes</h3><div class="leader-diff"><div class="leader-diff-head"><span>Field</span><span>Before</span><span>After</span></div>${keys.map(k=>`<div class="leader-diff-row"><strong>${esc(k)}</strong><span>${leadValue(e.before?.[k])}</span><span>${leadValue(e.after?.[k])}</span></div>`).join('')}</div>`:'<p class="muted small">No before/after values were recorded for this action.</p>'}`;
+}
 VIEWS.auditlog = () => {
+  if (!isOfficer()) return '<div class="empty">Officers only.</div>';
   const q = UI.auditQ, r = UI.auditResult;
-  return `
-  <div class="page-head"><div><h1>Audit log</h1><div class="muted">Who changed what, and when. Only the leadership can see this.</div></div></div>
+  const selected = r?.entries?.find(x=>String(x.id)===String(UI.auditSelected)) || r?.entries?.[0];
+  return `<section class="leader-workspace audit-workspace"><div class="page-head"><div><h1>Audit log</h1><div class="muted">Who changed what, and when. A read-only record for leadership.</div></div></div><div class="panel leader-audit-filters">
   <div class="toolbar">
     <input type="search" placeholder="Search player" value="${esc(q.user)}" data-act="audit-user" aria-label="Filter by player">
     <select data-act="audit-action" aria-label="Filter by action"><option value="">All actions</option>${(UI.auditActions || []).map((a) => `<option value="${esc(a)}" ${q.action === a ? 'selected' : ''}>${esc(actionLabel(a))}</option>`).join('')}</select>
@@ -2239,16 +2359,11 @@ VIEWS.auditlog = () => {
     <label class="small muted" style="margin:0">To <input type="date" value="${esc(q.to)}" data-act="audit-to" aria-label="To date" style="width:auto"></label>
     ${(q.user || q.action || q.target || q.from || q.to) ? '<button class="btn sm" data-act="audit-clear">Clear filters</button>' : ''}
   </div>
-  ${!r ? '<div class="empty">Loading...</div>' : r.error ? `<div class="empty">${esc(r.error)}</div>` : r.entries.length ? `
-  <div class="tbl-wrap"><table>
-    <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
-    <tbody>${r.entries.map(auditRow).join('')}</tbody>
-  </table></div>
-  <div class="toolbar" style="margin-top:14px;justify-content:space-between">
-    <span class="muted small">${r.total} ${r.total === 1 ? 'entry' : 'entries'} · page ${r.page} of ${r.pages}</span>
-    <span class="seg"><button class="btn sm" data-act="audit-page" data-p="${r.page - 1}" ${r.page <= 1 ? 'disabled' : ''}>Previous</button><button class="btn sm" data-act="audit-page" data-p="${r.page + 1}" ${r.page >= r.pages ? 'disabled' : ''}>Next</button></span>
-  </div>` : '<div class="empty">Nothing matches these filters.</div>'}`;
+
+  </div>${UI.auditLoading || !r ? '<div class="panel empty" role="status">Loading audit entries…</div>' : r.error ? `<div class="panel empty">${esc(r.error)}<br><button class="btn sm" data-act="audit-retry">Try again</button></div>` : r.entries.length ? `<div class="leader-split audit-split"><aside class="panel leader-queue-panel"><div class="leader-queue audit-queue">${r.entries.map(e=>`<button class="leader-queue-item ${e===selected?'active':''}" data-act="audit-select" data-id="${e.id}" aria-pressed="${e===selected}"><strong>${esc(e.byName || 'System')}</strong><span>${esc(actionLabel(e.action))}</span><span class="muted small">${esc(e.targetName || '—')}</span><small>${fmtShort(e.at)}</small></button>`).join('')}</div><div class="leader-pagination"><span class="muted small">${r.total} entries · page ${r.page} of ${r.pages}</span><div class="seg"><button class="btn sm" data-act="audit-page" data-p="${r.page-1}" ${r.page<=1?'disabled':''}>Previous</button><button class="btn sm" data-act="audit-page" data-p="${r.page+1}" ${r.page>=r.pages?'disabled':''}>Next</button></div></div></aside><article class="panel leader-detail" aria-label="Audit entry details">${auditDetail(selected)}</article></div>` : '<div class="panel empty">Nothing matches these filters.</div>'}</section>`;
 };
+ACTIONS['audit-select'] = (el,d) => { UI.auditSelected=d.id; render(); document.querySelector('[data-act="audit-select"][data-id="'+d.id+'"]')?.focus({preventScroll:true}); };
+ACTIONS['audit-retry'] = () => loadAudit();
 const auditRefetch = (field) => (el) => { UI.auditQ = { ...UI.auditQ, [field]: el.value, page: 1 }; loadAudit(); };
 CHANGES['audit-user'] = auditRefetch('user');
 CHANGES['audit-action'] = auditRefetch('action');
@@ -2281,28 +2396,55 @@ ACTIONS['dupes-apply'] = () => {
 };
 
 /* ================= Admin: the final page, in the order the leadership wants it ================= */
+const ADMIN_CATEGORIES = [
+  ['appearance','Appearance',[appearanceAdmin,quotesAdmin]],
+  ['discord','Discord',[discordAdmin,dailyScheduleAdmin,mercenariesAdmin]],
+  ['people','People & access',[officersAdmin,coachesAdmin,adminPlayersList,approvalRulesAdmin,accessAdmin,adminSignIn]],
+  ['gear','Gear threads',[gearSectionsAdmin]],
+  ['shotcaller','Shotcaller',[()=>shotcallerAdmin()]],
+  ['events','Events & attendance',[complianceAdmin,adminEventRules,adminPointsToggle]],
+  ['experience','Notices & tags',[noticesAdmin,tagsAdmin]],
+  ['tools','Tools & data',[adminBackup,adminCustomizingText,()=>typeof testingAdmin==='function'?testingAdmin():'']]
+];
 VIEWS.admin = () => {
   if (!isOfficer()) return '<div class="empty">Officers only.</div>';
-  return '<div class="page-head"><h1>Admin</h1></div>'
-    + appearanceAdmin()
-    + quotesAdmin()
-    + discordAdmin()
-    + dailyScheduleAdmin()
-    + officersAdmin()
-    + coachesAdmin()
-    + gearSectionsAdmin()
-    + shotcallerAdmin()
-    + mercenariesAdmin()
-    + adminPlayersList()
-    + noticesAdmin()
-    + tagsAdmin()
-    + complianceAdmin()
-    + adminEventRules()
-    + adminPointsToggle()
-    + approvalRulesAdmin()
-    + accessAdmin()
-    + adminSignIn()
-    + adminBackup()
-    + adminCustomizingText()
-    + (typeof testingAdmin === 'function' ? testingAdmin() : '');
+  const category = ADMIN_CATEGORIES.some(([key])=>key===UI.adminCategory) ? UI.adminCategory : 'appearance';
+  return `<section class="leader-workspace leader-admin"><div class="page-head"><div><h1>Admin</h1><div class="muted">Guild settings, organised by topic. Save changes in each section.</div></div></div><div class="leader-admin-grid"><nav class="panel leader-admin-nav" aria-label="Settings categories">${ADMIN_CATEGORIES.map(([key,label])=>`<button class="leader-admin-category ${key===category?'active':''}" data-act="admin-category" data-key="${key}" aria-controls="admin-pane-${key}" aria-expanded="${key===category}">${esc(label)}</button>`).join('')}</nav><div class="leader-admin-content">${ADMIN_CATEGORIES.map(([key,label,renderers])=>`<section class="leader-admin-pane" id="admin-pane-${key}" data-admin-pane="${key}" aria-label="${esc(label)}" ${key===category?'':'hidden'}><h2 class="leader-admin-pane-title">${esc(label)}</h2>${renderers.map(fn=>fn()).join('')}</section>`).join('')}</div></div></section>`;
 };
+ACTIONS['admin-category'] = (el,d) => {
+  if (!ADMIN_CATEGORIES.some(([key])=>key===d.key)) return;
+  UI.adminCategory=d.key;
+  document.querySelectorAll('.leader-admin-pane').forEach(p=>{p.hidden=p.dataset.adminPane!==d.key;});
+  document.querySelectorAll('[data-act="admin-category"]').forEach(button=>{const active=button.dataset.key===d.key;button.classList.toggle('active',active);button.setAttribute('aria-expanded',String(active));});
+  const pane=document.getElementById('admin-pane-'+d.key); if (pane) autosizeAll(pane);
+};
+// Retain individual unsaved named fields when connection checks or saves redraw Admin.
+// No passwords or files are captured. Drafts live only in this browser session's memory.
+const adminDrafts = new Map();
+function adminFieldKey(el) {
+  const form=el.closest?.('form[data-form]'), pane=el.closest?.('[data-admin-pane]');
+  if (!form || !pane || !el.name || ['file','password','submit','button'].includes(el.type)) return null;
+  const siblings=[...form.elements].filter(x=>x.name===el.name && x.type===el.type);
+  const slot=['checkbox','radio'].includes(el.type)?el.value:siblings.indexOf(el);
+  return JSON.stringify([S.user.key,pane.dataset.adminPane,form.dataset.form,form.dataset.id || '',el.name,el.type,slot]);
+}
+function captureAdminDraft(e) {
+  if (!isOfficer()) return;
+  const el=e.target,key=adminFieldKey(el);if (!key) return;
+  const check=['checkbox','radio'].includes(el.type);
+  if (el.type==='radio') { const pane=el.closest('[data-admin-pane]');pane.querySelectorAll('input[type="radio"]').forEach(r=>{if(r.name===el.name && r.form===el.form){const k=adminFieldKey(r);if(k)adminDrafts.set(k,{value:r.checked});}}); }
+  else adminDrafts.set(key,{value:check?el.checked:el.value});
+}
+document.addEventListener('input',captureAdminDraft,true);
+document.addEventListener('change',captureAdminDraft,true);
+AFTER_RENDER.push(page=>{
+  if (page!=='admin' || !isOfficer()) return;
+  document.querySelectorAll('.leader-admin-pane input,.leader-admin-pane select,.leader-admin-pane textarea').forEach(el=>{
+    const key=adminFieldKey(el), draft=key&&adminDrafts.get(key);if(!draft)return;
+    const check=['checkbox','radio'].includes(el.type), current=check?el.checked:el.value;
+    if(current===draft.value){adminDrafts.delete(key);return;}
+    if(el.tagName==='SELECT' && ![...el.options].some(o=>o.value===draft.value)){adminDrafts.delete(key);return;}
+    if(check)el.checked=draft.value;else el.value=draft.value;
+    if(el.dataset.act==='attendance-mode-change')CHANGES['attendance-mode-change'](el);
+  });
+});

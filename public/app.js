@@ -309,7 +309,7 @@ function showLogin() {
 async function logout() {
   token = ''; localStorage.removeItem('gh_token'); S.user = null;
   if (S.cfg && S.cfg.authMode === 'discord') { try { await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } }); } catch {} }
-  showLogin();
+  closeMobileNav(); showLogin();
 }
 
 /* ================= data ================= */
@@ -390,24 +390,138 @@ function canSee(page, id) {
   if (n.coach) return isOfficer() || S.isCoach;      // a real, in-guild class coach (isCoach(u) already treats every officer as a coach too server-side, but checking isOfficer() here as well keeps this readable without relying on that)
   return isOfficer() || !(n.hide && hiddenFromMembers(n.hide));
 }
-function renderNav(page, id) {
-  // "merc" is the one nav entry that needs an id in its link (which event) - shown at all only once someone
-  // actually is a mercenary (S.mercEventId set by applicantState() server-side), not to every applicant.
-  // "guest-coach" is similar: shown once someone actually is one (S.isCoach, since the only way an applicant
-  // has that is by joining), not to a random applicant who has never touched the invite link.
-  // "mygearthread" is the same shape as "merc": a fixed nav slot whose link is actually a dynamic id (here,
-  // the viewer's own character), shown at all only once they actually have one to open.
-  const myThread = myGearThreadId();
-  $('#nav-links').innerHTML = NAV.filter((n) => canSee(n.key, n.key === 'mygearthread' ? myThread : undefined) && (n.key !== 'merc' || S.mercEventId) && (n.key !== 'guest-coach' || (S.user.role === 'applicant' && S.isCoach)) && (n.key !== 'mygearthread' || myThread != null)).map((n) => {
-    const b = n.badge ? n.badge() : 0;
-    const href = n.key === 'merc' ? `#/merc/${S.mercEventId}` : n.key === 'mygearthread' ? `#/gearthreads/${myThread}` : `#/${n.key}`;
-    // "mygearthread" never itself becomes the active "page" (its link resolves to the "gearthreads" page), so
-    // it is highlighted by matching on that instead - but only when the thread open is genuinely the viewer's
-    // own, not when an officer/coach is browsing someone else's via the index.
-    const active = n.key === page || (n.key === 'mygearthread' && page === 'gearthreads' && myThread != null && String(id) === String(myThread));
-    return `<a class="nav ${active ? 'active' : ''} ${n.gap ? 'gap' : ''}" href="${href}" data-nav="${n.key}">${esc(n.label())}${b ? `<span class="count">${b}</span>` : ''}</a>`;
-  }).join('');
+const NAV_GROUPS = [
+  { key: 'overview', label: 'Overview', items: ['dashboard', 'member'] },
+  { key: 'organization', label: 'Organization', items: ['events', 'parties', 'points', 'shotcaller'] },
+  { key: 'guild', label: 'Guild', items: ['loot', 'vods', 'gearthreads', 'mygearthread', 'requests', 'leave'] },
+  { key: 'leadership', label: 'Leadership', items: ['approvals', 'warnings', 'auditlog', 'admin'] },
+  { key: 'account', label: 'Account', items: ['apply', 'merc', 'guest-coach'] },
+];
+const NAV_PATHS = {
+ dashboard:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',
+ member:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 4a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+ events:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',
+ parties:'M4 21v-3a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v3 M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M2 10l2 2 2-2 M18 10l2 2 2-2',
+ points:'M8 4H5v17h14V4h-3 M8 3h8v4H8z M8 12l2 2 5-4 M8 18h8',
+ shotcaller:'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3 M5 10v2a7 7 0 0 0 14 0v-2 M12 19v3 M8 22h8',
+ loot:'M3 8h18v13H3z M3 8l3-5h12l3 5 M3 13h18 M10 11h4v5h-4z',
+ vods:'M3 4h18v16H3z M10 8l6 4-6 4z',
+ gearthreads:'M4 4h16v13H9l-5 4z M8 8h8 M8 12h5',
+ mygearthread:'M5 3h14v18H5z M12 7l3 4-3 4-3-4z M9 18h6',
+ requests:'M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h6',
+ leave:'M4 19h16 M5 19V7l7-4 7 4v12 M12 3v16 M8 9h8',
+ approvals:'M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z M8 12l3 3 5-6',
+ warnings:'M12 3 2 21h20z M12 9v5 M12 17v1',
+ auditlog:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',
+ admin:'M12 3l3 3 4 1v4l2 3-3 3-1 4h-4l-3-2-3 1-2-4-2-3 3-3V6l4-1z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
+ profile:'M4 21v-2a8 8 0 0 1 16 0v2 M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+ star:'m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z',
+ collapse:'m14 6-6 6 6 6', menu:'M3 6h18 M3 12h18 M3 18h18',
+ close:'m6 6 12 12 M18 6 6 18', logout:'M9 3H3v18h6 M9 12h12 M16 7l5 5-5 5'
+};
+function navIcon(key) {
+ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + (NAV_PATHS[key] || NAV_PATHS.requests) + '"/></svg>';
 }
+function navPrefsKey() { return 'gh_navigation_v1_' + (S.user.key || S.user.name); }
+function navPrefs() {
+ try { const p = JSON.parse(localStorage.getItem(navPrefsKey()) || '{}'); return { compact: !!p.compact, closed: p.closed || {}, favorites: Array.isArray(p.favorites) ? p.favorites.filter(k => NAV.some(n => n.key === k)) : [] }; }
+ catch { return { compact:false, closed:{}, favorites:[] }; }
+}
+function storeNavPrefs(p) { try { localStorage.setItem(navPrefsKey(), JSON.stringify(p)); } catch {} }
+function navEligible() {
+ const ownThread = myGearThreadId();
+ return NAV.filter(n => canSee(n.key, n.key === 'mygearthread' ? ownThread : undefined) &&
+  (n.key !== 'merc' || S.mercEventId) &&
+  (n.key !== 'guest-coach' || (S.user.role === 'applicant' && S.isCoach)) &&
+  (n.key !== 'mygearthread' || ownThread != null));
+}
+function navIsActive(key, page, id) {
+ const ownThread = myGearThreadId();
+ const ownOpen = page === 'gearthreads' && ownThread != null && id != null && String(id) === String(ownThread);
+ if (key === 'mygearthread') return ownOpen;
+ if (key === 'gearthreads') return page === 'gearthreads' && !ownOpen;
+ return key === page;
+}
+function renderNav(page, id = route().id) {
+ const navScroll = $('#nav-links').scrollTop;
+ const prefs = navPrefs(), allowed = navEligible(), compact = prefs.compact && window.innerWidth > 860;
+ $('#app').classList.toggle('nav-compact', prefs.compact);
+ const link = n => {
+  const badge = n.badge ? n.badge() : 0, pinned = prefs.favorites.includes(n.key);
+  const href = n.key === 'merc' ? '#/merc/' + S.mercEventId : n.key === 'mygearthread' ? '#/gearthreads/' + myGearThreadId() : '#/' + n.key;
+  const active = navIsActive(n.key,page,id);
+  return `<div class="nav-entry"><a class="nav ${active ? 'active' : ''}" href="${href}" data-nav="${n.key}" ${active ? 'aria-current="page"' : ''} aria-label="${esc(n.label())}${badge ? ', ' + badge + ' pending' : ''}" title="${esc(n.label())}${badge ? ' (' + badge + ')' : ''}">${navIcon(n.key)}<span class="nav-label">${esc(n.label())}</span>${badge ? `<span class="count">${badge}</span>` : ''}</a><button class="nav-pin ${pinned ? 'pinned' : ''}" data-menu-action="pin" data-key="${n.key}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(n.label())}" title="${pinned ? 'Unpin' : 'Pin'} ${esc(n.label())}">${navIcon('star')}</button></div>`;
+ };
+ const favorites = allowed.filter(n => prefs.favorites.includes(n.key));
+ $('#nav-links').innerHTML = (favorites.length ? `<section class="nav-favorites"><h3>Favorites</h3>${favorites.map(link).join('')}</section>` : '') + NAV_GROUPS.map(g => {
+  const entries = g.items.map(k => allowed.find(n => n.key === k)).filter(Boolean);
+  if (!entries.length) return '';
+  const count = entries.reduce((v,n) => v + (n.badge ? n.badge() : 0),0), active = entries.some(n => navIsActive(n.key,page,id));
+  return `<details class="nav-group" data-nav-group="${g.key}" ${!prefs.closed[g.key] || compact ? 'open' : ''}><summary title="${g.label}${count ? ' (' + count + ' pending)' : ''}"><span>${g.label}</span>${active ? '<i class="nav-group-active" title="Contains current page"></i>' : ''}${count ? `<span class="nav-group-count">${count}</span>` : ''}<span class="nav-chevron">⌄</span></summary><div class="nav-group-links">${entries.map(link).join('')}</div></details>`;
+ }).join('');
+ $('#nav-links').scrollTop = navScroll;
+ renderNavProfile(page);
+ updateNavScrollCue();
+ if (window.requestAnimationFrame) window.requestAnimationFrame(updateNavScrollCue);
+ $('#nav-collapse').innerHTML = navIcon('collapse') + '<span>' + (prefs.compact ? 'Expand menu' : 'Collapse menu') + '</span>';
+ $('#nav-collapse').setAttribute('aria-label', prefs.compact ? 'Expand menu' : 'Collapse menu');
+ $('#nav-collapse').setAttribute('aria-expanded', String(!prefs.compact));
+ $('#mobile-page-label').textContent = (allowed.find(n => navIsActive(n.key,page,id)) || {label:()=> 'Guild Manager'}).label();
+}
+let navReturnFocus = null;
+function closeMobileNav() {
+ const rail = document.querySelector('nav.rail');
+ $('#app').classList.remove('nav-open');
+ $('#nav-mobile-toggle').setAttribute('aria-expanded','false');
+ $('#main').inert = false;
+ rail.removeAttribute('role'); rail.removeAttribute('aria-modal');
+ if (navReturnFocus) { navReturnFocus.focus(); navReturnFocus = null; }
+}
+function openMobileNav() {
+ navReturnFocus = document.activeElement;
+ $('#app').classList.add('nav-open');
+ $('#nav-mobile-toggle').setAttribute('aria-expanded','true');
+ $('#main').inert = true;
+ const rail = document.querySelector('nav.rail');
+ rail.setAttribute('role','dialog'); rail.setAttribute('aria-modal','true');
+ $('#nav-mobile-close').focus();
+ if (window.requestAnimationFrame) window.requestAnimationFrame(updateNavScrollCue);
+}
+document.addEventListener('click', e => {
+ const el = e.target.closest('[data-menu-action]');
+ if (el) {
+  const action = el.dataset.menuAction;
+  if (action === 'open') return openMobileNav();
+  if (action === 'close') return closeMobileNav();
+  if (action === 'more') {
+    $('#nav-links').scrollBy({ top: Math.max(100, $('#nav-links').clientHeight * .7), behavior: 'smooth' }); return;
+  }
+  const prefs = navPrefs();
+  if (action === 'collapse') prefs.compact = !prefs.compact;
+  if (action === 'pin') prefs.favorites = prefs.favorites.includes(el.dataset.key) ? prefs.favorites.filter(k => k !== el.dataset.key) : [...prefs.favorites, el.dataset.key];
+  storeNavPrefs(prefs); renderNav(route().page);
+  if (action === 'collapse') $('#nav-collapse').focus();
+  else document.querySelector('.nav-group [data-menu-action="pin"][data-key="' + el.dataset.key + '"]')?.focus({ preventScroll: true });
+ }
+ if (e.target.closest('a[data-nav], [data-act="logout"]')) closeMobileNav();
+});
+document.addEventListener('toggle', e => {
+ const group = e.target;
+ if (!S.user || !group.dataset || !group.dataset.navGroup || (navPrefs().compact && window.innerWidth > 860)) return;
+ const prefs = navPrefs(); prefs.closed[group.dataset.navGroup] = !group.open; storeNavPrefs(prefs);
+}, true);
+document.addEventListener('keydown', e => {
+ if (!$('#app').classList.contains('nav-open')) return;
+ if (e.key === 'Escape') { e.preventDefault(); closeMobileNav(); }
+ if (e.key === 'Tab') {
+  const nodes = [...document.querySelector('nav.rail').querySelectorAll('a,button,summary')].filter(el => el.getClientRects().length);
+  const first = nodes[0], last = nodes[nodes.length-1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+ }
+});
+window.addEventListener('resize', () => { if (window.innerWidth > 860 && $('#app').classList.contains('nav-open')) closeMobileNav(); });
+
 function render() {
   let { page, id } = route();
   if (page === 'roster') page = 'member';
@@ -415,7 +529,7 @@ function render() {
   if (!canSee(page, id) || !VIEWS[page]) page = 'dashboard';
   applyBranding();
   renderNav(page, id);
-  $('#who').innerHTML = `${avatarImg(S.user)}<b>${esc(S.user.name)}</b>${isOfficer() ? '<span class="badge-officer">Officer</span>' : S.user.role === 'applicant' ? '<span class="badge-officer" style="color:var(--muted);border-color:var(--muted)">Applicant</span>' : ''}`;
+
   $('#brand-name').textContent = guildName(); $('#brand-tag').textContent = guildTag();
   // Re-rendering the VOD review page while the exact same VOD is already open (a coaching point was just saved
   // or deleted, or the ordinary 30-second background refresh noticed something changed elsewhere) must not tear
@@ -598,72 +712,113 @@ function nextEventCard(ev) {
 }
 
 /* ================= roster ================= */
-function viewRoster() {
-  const active = S.members.filter((m) => m.active);
-  const total = active.length || 1;
-  const avgGs = active.length ? Math.round(active.reduce((a, m) => a + m.gearScore, 0) / active.length) : 0;
-  const q = UI.rosterQ.toLowerCase();
-  let list = S.members.filter((m) =>
-    !m.mercenary &&
-    (UI.rosterInactive || m.active) &&
-    (!UI.rosterRole || m.role === UI.rosterRole) &&
-    (!UI.rosterWeapon || m.primaryWeapon === UI.rosterWeapon || m.secondaryWeapon === UI.rosterWeapon || (m.builds || []).some((b) => b.primaryWeapon === UI.rosterWeapon || b.secondaryWeapon === UI.rosterWeapon)) &&
-    (!UI.rosterMode || (m.mode || 'PvE') === UI.rosterMode || (m.builds || []).some((b) => b.mode === UI.rosterMode)) &&
-    (!UI.rosterTag || (isOfficer() && (S.playerTags[m.owner] || []).includes(Number(UI.rosterTag)))) &&
-    (!q || [m.name, m.discord, ownerName(m.owner), classOf(m), m.specialization].join(' ').toLowerCase().includes(q)));
-  const sorts = {
-    name: (a, b) => a.name.localeCompare(b.name),
-    gs: (a, b) => b.gearScore - a.gearScore,
-    rank: (a, b) => rankIdx(a.rank) - rankIdx(b.rank) || a.name.localeCompare(b.name),
-  };
-  list.sort(sorts[UI.rosterSort]);
-
-  const strip = S.cfg.roles.map((r) => {
-    const n = active.filter((m) => m.role === r).length;
-    return { r, n };
-  });
-  return `
-  <div class="members-banner"><h1 class="sr-only">Member</h1></div>
-  <div class="page-head" style="margin-top:12px">
-    <div class="muted">${active.length} active characters · average gear score ${avgGs}</div>
-    ${S.members.some((m) => m.owner === S.user.key) ? '' : '<button class="btn primary" data-act="member-new">Add character</button>'}
-  </div>
-  <div class="comp">
-    <div class="bar">${strip.map((s) => `<i style="--c:${roleColor(s.r)};width:${100 * s.n / total}%"></i>`).join('')}</div>
-    <div class="legend">${strip.map((s) => `<span class="chip" style="--c:${roleColor(s.r)}">${esc(s.r)} <b>${s.n}</b></span>`).join('')}</div>
-  </div>
-  <div class="toolbar">
-    <input type="search" placeholder="Search name, class or Discord" value="${esc(UI.rosterQ)}" data-ui="rosterQ" aria-label="Search">
-    <select data-ui="rosterRole" aria-label="Role">${opts(S.cfg.roles, UI.rosterRole, 'All roles')}</select>
-    <select data-ui="rosterWeapon" aria-label="Weapon">${opts(S.cfg.weapons, UI.rosterWeapon, 'Any weapon')}</select>
-    <select data-ui="rosterMode" aria-label="PvE or PvP">${opts(S.cfg.buildModes || [], UI.rosterMode, 'PvE and PvP')}</select>
-    ${isOfficer() && S.tags.length ? `<select data-ui="rosterTag" aria-label="Tag"><option value="">Any tag</option>${S.tags.map((t) => `<option value="${t.id}" ${Number(UI.rosterTag) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
-    <select data-ui="rosterSort" aria-label="Sort">
-      <option value="name" ${UI.rosterSort === 'name' ? 'selected' : ''}>Sort by name</option>
-      <option value="gs" ${UI.rosterSort === 'gs' ? 'selected' : ''}>Sort by gear score</option>
-      <option value="rank" ${UI.rosterSort === 'rank' ? 'selected' : ''}>Sort by rank</option>
-    </select>
-    <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ui="rosterInactive" ${UI.rosterInactive ? 'checked' : ''}> Show inactive</label>
-  </div>
-  ${list.length ? `<div class="tbl-wrap"><table>
-    <thead><tr><th>Character</th><th>Role</th><th>Weapons</th><th class="num">Gear score</th><th class="num">Watermark</th><th>Rank</th><th>Discord</th>${isOfficer() ? '<th>Standing</th><th>Tags</th>' : ''}<th></th></tr></thead>
-    <tbody>${list.map((m) => { const wn = isOfficer() ? activeWarn(m.owner) : [], onLeave = isOfficer() && onLeaveAt(m.owner, Date.now()), a = isOfficer() && m.active ? attendanceStats(m.id) : null; return `<tr class="${m.active ? '' : 'dim'}">
-      <td><b>${esc(m.name)}</b>${m.owner === S.user.key ? '<span class="you">yours</span>' : ''}${onLeave ? '<span class="type-pill" style="margin-left:6px">On leave</span>' : ''}<div class="muted small"><a href="#/profile/${enc(m.owner)}" class="plain">${esc(ownerName(m.owner))}</a></div>${(isOfficer() || (S.myStudents || []).includes(m.owner)) && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m, '<br>')}</div></details>` : ''}</td>
-      <td>${roleChip(m.role)}</td><td class="wpn">${weaponLine(m)}${(m.builds || []).length ? `<div class="muted small">Also: ${m.builds.map((b) => esc(buildLabel(b))).join(' · ')}</div>` : ''}${m.mode && m.mode !== 'PvE' ? `<span class="type-pill" style="margin-left:6px">${esc(m.mode)}</span>` : ''}</td>
-      <td class="num">${m.gearScore || '-'}</td><td class="num">${m.level || '-'}</td>
-      <td>${esc(m.rank)}</td><td>${esc(m.discord)}</td>
-      ${isOfficer() ? `<td><a href="#/profile/${enc(m.owner)}" class="plain standing-cell">
-          ${wn.length ? `<span class="standing-flag warn">⚠ ${wn.length} ${wn.length === 1 ? 'warning' : 'warnings'}</span>` : ''}
-          ${a && a.pct !== null ? `<span class="standing-flag ${a.pct < 60 ? 'low' : ''}">${a.pct}% attendance${a.of ? '' : ' (starting)'}</span>` : ''}
-          ${!wn.length && !onLeave && (!a || a.pct === null) ? '<span class="muted small">-</span>' : ''}
-        </a></td>
-        <td class="tagcell">${tagsOf(m.owner).map(tagChip).join('')}<button class="btn sm" data-act="tags-edit" data-key="${esc(m.owner)}" aria-label="Edit tags of ${esc(ownerName(m.owner))}">Tags</button></td>` : ''}
-      <td>${canEdit(m) ? `<button class="btn sm" data-act="member-edit" data-id="${m.id}">Edit</button>` : ''}</td>
-    </tr>`; }).join('')}</tbody></table></div>`
-    : `<div class="empty">No characters match. ${S.members.length ? 'Clear the filters to see everyone.' : 'Add the first one with "Add character".'}</div>`}
-  ${isOfficer() ? guestCoachesSection() : ''}
-  ${isOfficer() ? mercenariesSection() : ''}`;
+// Shared roster filtering keeps alternate-build searches and officer-only tags intact.
+function rosterMatches(m) {
+ const q = (UI.rosterQ || '').trim().toLowerCase();
+ return (!UI.rosterRole || m.role === UI.rosterRole) &&
+  (!UI.rosterWeapon || [m.primaryWeapon,m.secondaryWeapon].includes(UI.rosterWeapon) || (m.builds || []).some(b => [b.primaryWeapon,b.secondaryWeapon].includes(UI.rosterWeapon))) &&
+  (!UI.rosterMode || (m.mode || 'PvE') === UI.rosterMode || (m.builds || []).some(b => b.mode === UI.rosterMode)) &&
+  (!UI.rosterTag || !isOfficer() || (S.playerTags[m.owner] || []).includes(Number(UI.rosterTag))) &&
+  (!q || [m.name,m.discord,ownerName(m.owner),classOf(m),m.specialization,...(m.builds || []).flatMap(b => [b.name,b.specialization,classFor(b.primaryWeapon,b.secondaryWeapon)])].join(' ').toLowerCase().includes(q));
 }
+function rosterBuildCell(m) {
+ const build = (b, main) => {
+  const cls = classFor(b.primaryWeapon,b.secondaryWeapon);
+  return `<div class="roster-build"><div class="roster-build-title"><span class="wicons">${[b.primaryWeapon,b.secondaryWeapon].filter(Boolean).map(weaponIcon).join('')}</span><strong>${esc(cls || 'Unspecified class')}</strong><span class="roster-role" style="--c:${roleColor(b.role || m.role)}">${esc(b.role || m.role)}</span></div>
+  ${b.specialization ? `<div class="roster-specialization">${esc(b.specialization)}</div>` : ''}
+  <div class="roster-build-weapons">${esc([b.primaryWeapon,b.secondaryWeapon].filter(Boolean).join(' / '))}${main ? '' : ` · ${esc(b.name || 'Alternate build')}`} · ${esc(b.mode || 'PvE')}</div></div>`;
+ };
+ return build(m,true) + ((m.builds || []).length ? `<details class="roster-alts"><summary>${m.builds.length} alternate ${m.builds.length === 1 ? 'build' : 'builds'}</summary>${m.builds.map(b=>build(b,false)).join('')}</details>` : '');
+}
+function rosterIdentity(m) {
+ return `<a class="roster-name" href="#/profile/${enc(m.owner)}">${esc(m.name)}</a>
+  ${m.owner === S.user.key ? '<span class="you">You</span>' : ''}
+  <div class="roster-subtle">${esc(m.discord || ownerName(m.owner))}</div>
+  ${!m.active && !m.mercenary ? '<span class="roster-state">Inactive</span>' : ''}
+  ${isOfficer() && onLeaveAt(m.owner,Date.now()) ? '<span class="roster-state">On leave</span>' : ''}
+  ${(isOfficer() || (S.myStudents || []).includes(m.owner)) && (m.questlogs || []).length ? `<details class="ql-drop"><summary>Questlog (${m.questlogs.length})</summary><div>${questlogLinks(m,'<br>')}</div></details>` : ''}`;
+}
+function rosterTable(list, mercenary) {
+ const off = isOfficer();
+ return `<div class="roster-table-wrap"><table class="roster-table"><thead><tr>
+  <th class="roster-col-name">Member</th><th class="roster-col-build">Class / Build</th>
+  ${mercenary ? '<th>Assigned event</th>' : '<th class="num">Gear</th><th class="num">Watermark</th><th>Rank</th>' + (off ? '<th>Standing</th><th>Tags</th>' : '')}
+  <th class="roster-col-action"><span class="sr-only">Actions</span></th></tr></thead><tbody>
+  ${list.map(m=>{
+   const a = m.active && !mercenary ? attendanceStats(m.id) : null;
+   const warnings = off ? activeWarn(m.owner) : [];
+   const event = mercenary ? byId(S.events,m.mercFor) : null;
+   return `<tr style="--member-role:${roleColor(m.role)}" class="${m.active || mercenary ? '' : 'roster-inactive'}">
+    <td data-label="Member" class="roster-identity">${rosterIdentity(m)}</td>
+    <td data-label="Class / Build" class="roster-class-cell">${rosterBuildCell(m)}</td>
+    ${mercenary ? `<td data-label="Assigned event">${event ? `<a href="#/events/${event.id}">${esc(event.title)}</a><div class="roster-subtle">${fmtShort(event.start)}</div>` : '<span class="muted">Event no longer exists</span>'}</td>` : `
+    <td data-label="Gear" class="num">${m.gearScore || '—'}</td><td data-label="Watermark" class="num">${m.level || '—'}</td>
+    <td data-label="Rank">${esc(m.rank)}</td>
+    ${off ? `<td data-label="Standing"><a class="roster-standing" href="#/profile/${enc(m.owner)}">${a && a.pct !== null ? `<span class="${a.pct < 60 ? 'low' : ''}">${a.pct}% attendance</span><small>${a.n} / ${a.of} events</small>` : '<span class="muted">No attendance data</span>'}${warnings.length ? `<span class="roster-warning">${warnings.length} active ${warnings.length === 1 ? 'warning' : 'warnings'}</span>` : ''}</a></td>
+    <td data-label="Tags" class="roster-tag-cell">${tagsOf(m.owner).map(tagChip).join('')}<button class="roster-text-button" data-act="tags-edit" data-key="${esc(m.owner)}" aria-label="Edit tags for ${esc(m.name)}">Edit tags</button></td>` : ''}`}
+    <td data-label="Actions">${canEdit(m) ? `<button class="btn sm" data-act="member-edit" data-id="${m.id}" aria-label="Edit ${esc(m.name)}">Edit</button>` : `<a class="roster-text-button" href="#/profile/${enc(m.owner)}">Profile</a>`}</td>
+   </tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+function rosterCoachContent() {
+ const q = (UI.rosterQ || '').trim().toLowerCase();
+ const all = S.guestCoaches || [];
+ const list = all.filter(g => (!q || [g.name,g.class].join(' ').toLowerCase().includes(q)) && (!UI.rosterCoachClass || g.class === UI.rosterCoachClass)).slice().sort((a,b)=>a.name.localeCompare(b.name));
+ const link = location.origin + '/#/guest-coach';
+ return `<div class="roster-coach-invite"><div><strong>Guest coaches</strong><p>External coaches stay separate from your guild roster. Assign their class below.</p></div><div class="link-row"><input readonly value="${esc(link)}" aria-label="Guest coach invite link"><button class="btn" data-act="copy-guestcoach-link" data-link="${esc(link)}">Copy invite link</button></div></div>
+ ${list.length ? `<div class="roster-table-wrap"><table class="roster-table roster-coach-table"><thead><tr><th>Coach</th><th>Assigned class</th><th>Actions</th></tr></thead><tbody>${list.map(g=>`<tr><td data-label="Coach"><strong>${esc(g.name)}</strong><div class="roster-subtle">Guest coach</div></td><td data-label="Assigned class"><select data-act="guestcoach-class" data-id="${esc(g.discordId)}" aria-label="Assigned class for ${esc(g.name)}">${opts((S.cfg.classes || []).map(c=>c.name).sort((a,b)=>a.localeCompare(b)),g.class)}</select></td><td data-label="Actions"><button class="btn sm danger" data-act="guestcoach-remove" data-id="${esc(g.discordId)}" data-name="${esc(g.name)}">Remove</button></td></tr>`).join('')}</tbody></table></div>` : rosterEmpty('No coaches match these filters.')}
+ <div class="roster-result-count">${list.length} of ${all.length} coaches</div>`;
+}
+function rosterEmpty(text) {
+ return `<div class="roster-empty"><strong>${esc(text)}</strong><span>Try another search or reset your filters.</span><button class="btn" data-act="roster-reset">Reset filters</button></div>`;
+}
+function viewRoster() {
+ const off = isOfficer();
+ const tab = off && ['mercenaries','coaches'].includes(UI.rosterTab) ? UI.rosterTab : 'members';
+ const members = S.members.filter(m=>!m.mercenary), active = members.filter(m=>m.active), mercs = S.members.filter(m=>m.mercenary);
+ const source = tab === 'mercenaries' ? mercs : members.filter(m=>UI.rosterInactive || m.active);
+ const list = source.filter(rosterMatches);
+ const sorts = {
+  name:(a,b)=>a.name.localeCompare(b.name),
+  gs:(a,b)=>(b.gearScore||0)-(a.gearScore||0),
+  watermark:(a,b)=>(b.level||0)-(a.level||0),
+  rank:(a,b)=>rankIdx(a.rank)-rankIdx(b.rank)||a.name.localeCompare(b.name),
+  attendance:(a,b)=>(attendanceStats(b.id).pct ?? -1)-(attendanceStats(a.id).pct ?? -1)
+ };
+ list.sort(sorts[UI.rosterSort] || sorts.name);
+ const filtered = ['rosterQ','rosterRole','rosterWeapon','rosterMode','rosterTag','rosterCoachClass','rosterEvent'].some(k=>UI[k]) || UI.rosterInactive;
+ const eventList = tab === 'mercenaries' ? list.filter(m=>!UI.rosterEvent || m.mercFor === Number(UI.rosterEvent)) : list;
+ const tabs = [{key:'members',label:'Members',count:active.length},...(off ? [{key:'mercenaries',label:'Mercenaries',count:mercs.length},{key:'coaches',label:'Coaches',count:(S.guestCoaches || []).length}] : [])];
+ return `<section class="roster-workspace">
+  <header class="roster-page-head"><div><div class="roster-eyebrow">${esc(guildName())} · GUILD ROSTER</div><h1>Members</h1><p>People, builds and guild standing in one place.</p></div><div class="roster-summary"><span><b>${active.length}</b> active</span>${S.cfg.roles.map(r=>`<span style="--c:${roleColor(r)}"><b>${active.filter(m=>m.role===r).length}</b> ${esc(r)}</span>`).join('')}</div></header>
+  <nav class="roster-tabs" aria-label="Roster sections">${tabs.map(t=>`<button data-act="roster-tab" data-tab="${t.key}" ${tab === t.key ? 'aria-current="page"' : ''} class="${tab === t.key ? 'active' : ''}">${t.label}<span>${t.count}</span></button>`).join('')}</nav>
+  <div class="roster-toolbar"><div class="roster-search">${navIcon('member')}<input type="search" data-ui="rosterQ" value="${esc(UI.rosterQ || '')}" placeholder="${tab === 'coaches' ? 'Search coaches or class…' : 'Search name, Discord, class or specialization…'}" aria-label="Search roster"></div>
+  ${tab === 'coaches' ? `<select data-ui="rosterCoachClass" aria-label="Filter coach class">${opts((S.cfg.classes || []).map(c=>c.name).sort((a,b)=>a.localeCompare(b)),UI.rosterCoachClass,'All classes')}</select>` : `
+   <select data-ui="rosterRole" aria-label="Filter role">${opts(S.cfg.roles,UI.rosterRole,'All roles')}</select>
+   <select data-ui="rosterWeapon" aria-label="Filter weapon">${opts(S.cfg.weapons,UI.rosterWeapon,'Any weapon')}</select>
+   <select data-ui="rosterMode" aria-label="Filter build mode">${opts(S.cfg.buildModes || [],UI.rosterMode,'All build modes')}</select>
+   ${off && S.tags.length ? `<select data-ui="rosterTag" aria-label="Filter tag"><option value="">Any tag</option>${S.tags.map(t=>`<option value="${t.id}" ${Number(UI.rosterTag)===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
+   <select data-ui="rosterSort" aria-label="Sort members">${[{key:'name',label:'Name A–Z'},{key:'gs',label:'Gear score'},{key:'watermark',label:'Watermark'},{key:'rank',label:'Rank'},...(off && tab === 'members' ? [{key:'attendance',label:'Attendance'}] : [])].map(o=>`<option value="${o.key}" ${UI.rosterSort === o.key ? 'selected' : ''}>Sort: ${o.label}</option>`).join('')}</select>
+   ${tab === 'members' ? `<label class="roster-inactive-toggle"><input type="checkbox" data-ui="rosterInactive" ${UI.rosterInactive?'checked':''}>Show inactive</label>` : `<select data-ui="rosterEvent" aria-label="Filter mercenary event"><option value="">All events</option>${[...new Set(mercs.map(m=>m.mercFor))].map(id=>{const ev=byId(S.events,id);return `<option value="${id}" ${Number(UI.rosterEvent)===id?'selected':''}>${esc(ev ? ev.title : 'Deleted event #' + id)}</option>`;}).join('')}</select>`}
+  `}
+  ${filtered ? '<button class="roster-text-button" data-act="roster-reset">Reset filters</button>' : ''}
+  ${tab === 'members' && !S.members.some(m=>m.owner===S.user.key && !m.mercenary) ? '<button class="btn primary" data-act="member-new">Add character</button>' : ''}
+  </div>
+  ${tab === 'coaches' ? rosterCoachContent() : `${eventList.length ? rosterTable(eventList,tab === 'mercenaries') : rosterEmpty(tab === 'mercenaries' ? 'No mercenaries match.' : 'No members match.')}<div class="roster-result-count">${eventList.length} of ${source.length} ${tab === 'mercenaries' ? 'mercenaries' : 'members'}</div>`}
+ </section>`;
+}
+ACTIONS['roster-tab'] = (el,d) => {
+ if (d.tab !== 'members' && !isOfficer()) return;
+ UI.rosterTab = d.tab; UI.rosterInactive=false;
+ UI.rosterQ=''; UI.rosterRole=''; UI.rosterWeapon=''; UI.rosterMode=''; UI.rosterTag=''; UI.rosterCoachClass=''; UI.rosterEvent=''; UI.rosterSort='name';
+ render();
+ document.querySelector('.roster-tabs [data-tab="' + d.tab + '"]')?.focus({preventScroll:true});
+};
+ACTIONS['roster-reset'] = () => {
+ ['rosterQ','rosterRole','rosterWeapon','rosterMode','rosterTag','rosterCoachClass','rosterEvent'].forEach(k=>UI[k]='');
+ UI.rosterInactive=false; UI.rosterSort='name'; render();
+};
+
 // Guest class coaches: never guild members, so (like mercenaries below) they never mix into the roster above.
 // Sits between the roster and Mercenaries - its own small dropdown-per-row list, not a full table, since there
 // is only ever a name and one class to show per person.
@@ -755,45 +910,33 @@ const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.get
 const goingCount = (e) => Object.values(e.rsvps).filter((s) => s === 'yes').length;
 const timeOf = (iso) => fmtTime(iso);
 
-// A small corner badge on top of the background tint - a check for the two "you're in" states, a cross for
-// the two "you're not" states, nothing for a plain no-answer (there is nothing to confirm yet). Spelled out as
-// its own function since both the month grid and the week list need exactly the same icon for the same status.
-const STATUS_ICON = { attended: '✓', going: '✓', noshow: '✕', declined: '✕' };
-// The month grid's chips are a single tight row (time + title, no room to spare), so a corner badge there would
-// either get clipped or crowd out the title - the background tint alone still shows who's in or out at a
-// glance. The fully-detailed week view (see weekCard below) is where the check/cross badge actually belongs.
+// Quick responses are siblings of the event link: a signup never navigates or opens a new-event dialog.
+function calendarRsvp(ev) {
+ const own=mine();
+ if(!own.length)return '';
+ const locked=Date.now()>=Date.parse(ev.signupClosesAt) && !isOfficer();
+ if(locked)return '<div class="calendar-quick-rsvp"><span class="calendar-signups-closed">Sign-ups closed</span></div>';
+ return `<div class="calendar-quick-rsvp">${own.map(m=>{
+  const status=ev.rsvps[m.id] || 'none';
+  const button=(value,label)=>`<button type="button" class="btn sm ${status===value?'on':''}" data-choice="${value}" aria-pressed="${status===value}" aria-label="${label} for ${esc(ev.title)}${own.length>1?' as '+esc(m.name):''}" data-act="rsvp" data-ev="${ev.id}" data-m="${m.id}" data-s="${status===value?'none':value}">${label}</button>`;
+  const leave=!m.mercenary && onLeaveAt(m.owner,Date.parse(ev.start)) && !loaOverridden(ev,m.owner);
+  return `<div class="calendar-quick-row">${own.length>1?`<span class="calendar-character-name">${esc(m.name)}</span>`:''}<div class="calendar-response-buttons">${button('yes','Sign up')}${button('no','Sign off')}</div>${leave?`<a class="calendar-leave-note" href="#/events/${ev.id}">On leave · Manage signup</a>`:''}</div>`;
+ }).join('')}</div>`;
+}
 function monthChip(e, sel, now) {
   const st = myStatus(e);
-  return `<a class="cal-ev ${sel && sel.id === e.id ? 'sel' : ''} ${new Date(e.start) < now ? 'past' : ''}" data-st="${st}" href="#/events/${e.id}" style="--c:${typeColor(e.type)}" title="${esc(e.title)}${e.mandatory ? ' (mandatory)' : ''}, ${goingCount(e)} going${st ? '. ' + STATUS_TEXT[st] : ''}">${e.mandatory ? '<i class="mdot"></i>' : ''}<span class="tm">${timeOf(e.start)}</span><span class="ttl">${esc(e.title)}</span></a>`;
+  return `<a class="cal-ev ${sel && sel.id === e.id ? 'sel' : ''} ${new Date(e.start) < now ? 'past' : ''}" data-st="${st}" href="#/events/${e.id}" style="--c:${typeColor(e.type)}" title="${esc(e.title)}${e.mandatory ? ' (mandatory)' : ''}, ${goingCount(e)} going${st ? '. ' + STATUS_TEXT[st] : ''}"><span class="tm">${timeOf(e.start)}</span><span class="ttl">${esc(e.title)}</span></a>`;
 }
 function weekCard(e, sel, now) {
-  const st = myStatus(e), icon = STATUS_ICON[st] || '';
+  const st = myStatus(e);
   return `<a class="wk-ev ${sel && sel.id === e.id ? 'sel' : ''} ${new Date(e.start) < now ? 'past' : ''}" data-st="${st}" href="#/events/${e.id}" style="--c:${typeColor(e.type)}" ${st ? `title="${esc(STATUS_TEXT[st])}"` : ''}>
-    ${icon ? `<span class="stbadge">${icon}</span>` : ''}
-    <span class="top"><span>${timeOf(e.start)}</span>${e.mandatory ? '<i class="mdot" title="Mandatory"></i>' : ''}</span>
+    
+    <span class="top"><span>${timeOf(e.start)}</span></span>
     <span class="ttl">${esc(e.title)}</span><span class="sub"><i class="tdot"></i>${esc(e.type)}<br>${goingCount(e)} going</span></a>`;
 }
-// The day view's whole point is answering without a trip into the event page and a scroll down to "Your
-// sign-up" - so every one of your own characters gets its Attend/Not-attend buttons right on the card. The
-// title stays a plain link to the full event; the RSVP buttons sit in their own block and stop their click
-// from following it (same card, two independent controls).
 function dayCard(e, sel, now) {
-  const st = myStatus(e), icon = STATUS_ICON[st] || '';
-  const closed = Date.now() >= Date.parse(e.signupClosesAt);
-  const locked = closed && !isOfficer();
-  const my = mine();
-  // Quick RSVP right on the card is a phone-only convenience - on a wider screen the event's own sign-up
-  // panel is already right there next to the calendar, so these would just be a second, redundant set of
-  // buttons cluttering every card for no reason.
-  const quickRsvp = isMobileViewport() && my.length && !locked ? `<div class="day-rsvp">${my.map((m) => {
-    const s = e.rsvps[m.id] || 'none';
-    const b = (val, label) => `<button class="btn sm ${s === val ? 'on' : ''}" data-act="rsvp" data-ev="${e.id}" data-m="${m.id}" data-s="${s === val ? 'none' : val}">${label}</button>`;
-    return `<span class="day-rsvp-row">${my.length > 1 ? `<span class="muted small">${esc(m.name)}</span>` : ''}${b('yes', 'Attend')}${b('no', 'Not attend')}</span>`;
-  }).join('')}</div>` : '';
-  return `<div class="day-card ${sel && sel.id === e.id ? 'sel' : ''} ${new Date(e.start) < now ? 'past' : ''}" data-st="${st}" style="--c:${typeColor(e.type)}">
-    <a class="day-head" href="#/events/${e.id}">${icon ? `<span class="stbadge">${icon}</span>` : ''}
-      <span class="top"><span>${timeOf(e.start)}</span>${e.mandatory ? '<i class="mdot" title="Mandatory"></i>' : ''}</span>
-      <span class="ttl">${esc(e.title)}</span><span class="sub"><i class="tdot"></i>${esc(e.type)} · ${goingCount(e)} going</span></a>${quickRsvp}</div>`;
+ const st=myStatus(e);
+ return `<div class="day-card ${sel && sel.id===e.id?'sel':''} ${Date.parse(e.start)<now?'past':''}" data-st="${st}" style="--c:${typeColor(e.type)}"><a class="day-head" href="#/events/${e.id}" ${st?`title="${esc(STATUS_TEXT[st])}"`:''}><span class="top"><span>${timeOf(e.start)}</span></span><span class="ttl">${esc(e.title)}</span></a>${calendarRsvp(e)}</div>`;
 }
 
 function viewEvents(selId) {
@@ -823,11 +966,9 @@ function viewEvents(selId) {
     for (let i = 0; i < cells; i++) {
       const d = new Date(y, m, 1 - offset + i);
       const evs = byDay[dayKey(d)] || [];
-      const more = evs.length - 4;
       grid += `<div class="cal-cell ${d.getMonth() !== m ? 'out' : ''} ${dayKey(d) === todayKey ? 'today' : ''} ${can}" data-act="cal-day" data-date="${ymd(d)}">
         <div class="cal-num">${d.getDate()}</div>
-        ${evs.slice(0, 4).map((e) => monthChip(e, sel, now)).join('')}
-        ${more > 0 ? `<button class="cal-more" data-act="cal-week" data-date="${ymd(d)}">+${more} more</button>` : ''}</div>`;
+        ${evs.map((e) => monthChip(e, sel, now)).join('')}</div>`;
     }
     body = `<div class="cal-grid">${grid}</div>`;
   } else if (view === 'day') {
@@ -846,10 +987,10 @@ function viewEvents(selId) {
     }).join('')}</div>`;
   }
   return `
-  <div class="page-head"><div><h1>Events</h1><div class="muted">Times are shown in ${esc(TZ())} (${esc(tzAbbr(Date.now()))}). <a href="#/profile">Change your time zone</a>.${isOfficer() ? ' Click an empty part of a day to add an event there.' : ''}</div></div>
+  <section class="event-workspace"><div class="page-head"><div><h1>Events</h1><div class="muted">Times are shown in ${esc(TZ())} (${esc(tzAbbr(Date.now()))}). <a href="#/profile">Change your time zone</a>.${isOfficer() ? ' Click an empty part of a day to add an event there.' : ''}</div></div>
     ${isOfficer() ? '<button class="btn primary" data-act="event-new">New event</button>' : ''}</div>
-  ${typeof seriesPanel === 'function' ? seriesPanel() : ''}
-  <div class="events-layout">
+  ${isOfficer() && typeof seriesPanel === 'function' ? `<details class="event-series fold" data-fold="event-series" ${UI.fold && UI.fold['event-series'] ? 'open' : ''}><summary>Recurring event management</summary>${seriesPanel()}</details>` : ''}
+  <div class="events-layout event-calendar-layout">
   <div class="cal">
     <div class="cal-head"><h2>${title}</h2>
       <span class="seg"><button class="btn sm ${view === 'day' ? 'on' : ''}" data-act="cal-view" data-v="day">Day</button><button class="btn sm ${view === 'week' ? 'on' : ''}" data-act="cal-view" data-v="week">Week</button><button class="btn sm ${view === 'month' ? 'on' : ''}" data-act="cal-view" data-v="month">Month</button></span>
@@ -857,12 +998,11 @@ function viewEvents(selId) {
       <button class="btn sm" data-act="cal-today">Today</button>
       <button class="btn sm" data-act="cal-next" aria-label="Next">Next</button></div>
     ${body}
-    <div class="cal-legend">${S.cfg.eventTypes.map((t) => `<span class="chip" style="--c:${typeColor(t.name)}">${esc(t.name)}</span>`).join('')}<span class="small" style="display:inline-flex;align-items:center;gap:7px"><i class="mdot"></i>Mandatory event</span></div>
+    <div class="cal-legend">${S.cfg.eventTypes.map((t) => `<span class="chip" style="--c:${typeColor(t.name)}">${esc(t.name)}</span>`).join('')}</div>
     <div class="cal-legend status-legend"><span class="muted small">Your events:</span>${['going', 'noshow', 'declined'].map((k) => `<span class="st-key" data-st="${k}"><i></i>${{ going: 'Attending', noshow: 'No-show', declined: 'Not attending' }[k]}</span>`).join('')}</div>
   </div>
-  <aside class="ev-side" aria-label="Event window">${sel ? eventSide(sel) : '<div class="panel side-empty">Click an event in the calendar to see it here: your sign-up and the attendance PIN.</div>'}</aside>
   </div>
-  <div id="ev-detail">${sel ? eventDetail(sel) : '<div class="empty">No events yet.' + (isOfficer() ? ' Click a day in the calendar or use "New event".' : '') + '</div>'}</div>`;
+  <div id="ev-detail">${sel ? eventDetail(sel) : '<div class="empty">No events yet.' + (isOfficer() ? ' Click a day in the calendar or use "New event".' : '') + '</div>'}</div></section>`;
 }
 
 // Everybody who belongs on this event's roster: every active, non-mercenary guild member - not just whoever
@@ -918,7 +1058,7 @@ function rosterRow(ev, m, admin, tracked) {
   const sub = classOf(m) || m.primaryWeapon;
   let control;
   if (admin && tracked) {
-    const val = roster6Key(rsvp, attended);
+    const val = (UI.eventAttendanceDrafts && UI.eventAttendanceDrafts[ev.id] && UI.eventAttendanceDrafts[ev.id][m.id]) || roster6Key(rsvp, attended);
     control = `<select class="status-pick" data-rst="${val}" data-act="roster-stage" data-ev="${ev.id}" data-m="${m.id}" aria-label="Attendance status for ${esc(m.name)}">
       ${Object.keys(ROSTER6).map((k) => `<option value="${k}" ${val === k ? 'selected' : ''}>${esc(ROSTER6_LABEL[k])}</option>`).join('')}
     </select>`;
@@ -958,7 +1098,7 @@ function attCorrectDialog(ev) {
     </div>`, true);
 }
 
-function eventDetail(ev) {
+function eventParticipants(ev) {
   const admin = isOfficer();
   const roster = eventRoster(ev);
   // Someone on an approved leave covering this event's date is left off the Going list entirely (not just
@@ -979,8 +1119,7 @@ function eventDetail(ev) {
   // the matching comment in eventSide() for why this no longer blanks the note out for past events.
   const signupNote = closed ? `Sign-ups closed at ${fmtTime(closesAt)}.${isOfficer() ? ' Officers can still change answers.' : ''}` : `Sign-ups close at ${fmtTime(closesAt)} (${until(closesAt)}).`;
 
-  return `
-  <div class="panel"><h3>Going: ${goingN}${cap} <span class="st-pill ${tracked ? 'st-approved' : 'st-open'}" style="margin-left:8px;vertical-align:middle">${tracked ? '✓ Attendance tracked' : 'Not yet tracked'}</span>${admin && tracked && roster.length ? `<button class="btn sm" style="margin-left:8px;vertical-align:middle" data-act="att-correct" data-id="${ev.id}">Correct manually</button>` : ''}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
+return `  <div class="panel">${Object.keys((UI.eventAttendanceDrafts || {})[ev.id] || {}).length ? `<div class="event-attendance-unsaved">Unsaved attendance changes <button class="btn sm" data-act="event-attendance-discard" data-id="${ev.id}">Discard changes</button></div>` : ''}<h3>Going: ${goingN}${cap} <span class="st-pill ${tracked ? 'st-approved' : 'st-open'}" style="margin-left:8px;vertical-align:middle">${tracked ? '✓ Attendance tracked' : 'Not yet tracked'}</span>${admin && tracked && roster.length ? `<button class="btn sm" style="margin-left:8px;vertical-align:middle" data-act="att-correct" data-id="${ev.id}">Correct manually</button>` : ''}</h3>${typeof goingChart === 'function' ? goingChart(ev) : ''}
     ${roster.length ? `<div class="cols">${S.cfg.roles.map((r) => {
       const g = visibleRoster.filter((m) => m.role === r).sort((a, b) => rosterSortKey(ev, a, tracked) - rosterSortKey(ev, b, tracked) || a.name.localeCompare(b.name));
       return `<div class="col" style="--c:${roleColor(r)}"><h3><span>${esc(r)}</span><span>${g.length}</span></h3>
@@ -994,15 +1133,13 @@ function eventDetail(ev) {
       <span class="muted small">Puts attendance back to how it was before this event was ever tracked, undoing every save made since - not just the last one (last touched by ${esc(ev.attendanceUndoSavedBy)}, ${until(ev.attendanceUndoSavedAt)}). Saving again after this starts a fresh one to undo back to.</span></div>` : ''}
   </div>
 
-  ${(() => {
-    // On a phone, scrolling through every party is the single biggest source of scroll on the whole event page
-    // - so there the board starts collapsed and the header gets a plain Show/Hide button for it. On a wider
-    // screen the board is the point of this panel, so it still starts open, same as before.
-    const key = 'parties-' + ev.id;
-    const partiesOpen = (UI.fold && Object.prototype.hasOwnProperty.call(UI.fold, key)) ? UI.fold[key] : !isMobileViewport();
+`;
+}
+function eventPartyWorkspace(ev) { return `  ${(() => {
+    // Opening the Parties tab shows the shared board directly.
+    const partiesOpen = true;
     return `<div class="panel"><div class="ev-title"><h3>Parties</h3>
     <span class="seg">
-      <button class="btn sm" data-act="parties-fold" data-id="${ev.id}">${partiesOpen ? 'Hide parties' : 'Show parties'}</button>
       ${ev.parties.length ? `<button class="btn sm" data-act="parties-view" data-id="${ev.id}" title="Shows the parties as one readable picture - handy on a phone">View parties</button>` : ''}
       ${isOfficer() ? `
       <button class="btn sm" data-act="parties-build" data-id="${ev.id}">Auto-build from going</button>
@@ -1016,9 +1153,73 @@ function eventDetail(ev) {
     ${partiesOpen ? `${partyBuilderNotePanel()}<div style="margin-top:14px">${ev.parties.length || isOfficer() ? board({ kind: 'event', id: ev.id }, ev.parties, ev) : '<div class="muted">No parties posted yet.</div>'}</div>` : `<div class="muted small" style="margin-top:10px">${ev.parties.length ? `${ev.parties.length} ${ev.parties.length === 1 ? 'party' : 'parties'} hidden - tap "Show parties" above to view or edit them.` : `No parties yet.${isOfficer() ? ' Tap "Show parties" above to add one.' : ''}`}</div>`}
   </div>`;
   })()}
+`; }
 
-  ${isOfficer() ? automationPanel(ev) : ''}`;
+const EVENT_ART_PRESETS = ['auto','siege','stone','boss','raid','training','insanity'];
+function eventArtwork(ev) {
+ if (/^event-[a-f0-9]{12}\.(png|jpg|gif|webp)$/.test(ev.imageFile || '')) return '/uploads/' + ev.imageFile;
+ let key = EVENT_ART_PRESETS.includes(ev.artworkPreset) && ev.artworkPreset !== 'auto' ? ev.artworkPreset : '';
+ const type = String(ev.type || '').toLowerCase();
+ if (!key) key = /siege|belager/.test(type) ? 'siege' : /stone/.test(type) ? 'stone' : /archboss|worldboss/.test(type) ? 'boss' : /dungeon|raid|guild bosses/.test(type) ? 'raid' : /training|wargame|practice/.test(type) ? 'training' : 'insanity';
+ return '/img/event-' + key + '.png';
 }
+function eventSignupSummary(ev) {
+ const roster=eventRoster(ev), visible=roster.filter(m=>!onLeaveAt(m.owner,Date.parse(ev.start)) || loaOverridden(ev,m.owner));
+ const yes=visible.filter(m=>ev.rsvps[m.id]==='yes'), no=visible.filter(m=>ev.rsvps[m.id]==='no');
+ const summary=ev.attendanceSummary, past=Date.parse(ev.start)<=Date.now();
+ const results=summary?.tracked && past;
+ const numbers=results ? [[summary.present,'Present'],[summary.noShow,summary.inProgress?'Not seen yet':'No-show'],[summary.notRecorded,'Not recorded']] : [[yes.length,'Attending'],[no.length,'Not attending'],[visible.length-yes.length-no.length,'No reply']];
+ return `<section class="panel event-signup-stats"><h3>${results ? (summary.inProgress?'Attendance so far':'Attendance results') : 'Sign-ups'}</h3>
+ ${past && !summary?.tracked ? '<p class="event-results-note">Attendance has not been recorded. These are sign-up responses.</p>' : ''}
+ <div class="event-signup-numbers">${numbers.map(([count,label])=>`<div><strong>${count}</strong><span>${label}</span></div>`).join('')}</div>
+ <div class="event-role-counts">${S.cfg.roles.map(r=>`<span style="--c:${roleColor(r)}">${esc(r)} <b>${results ? (summary.roles[r] || 0) : yes.filter(m=>m.role===r).length}</b></span>`).join('')}</div>
+ ${results ? `<p class="event-results-note">Saved attendance${summary.inProgress?' · Tracking in progress':''}. Not recorded includes players without an attendance credit who did not sign up as attending.</p><div class="event-original-signups"><strong>Sign-up responses</strong><span>${yes.length} attending · ${no.length} not attending · ${visible.length-yes.length-no.length} no reply</span></div>` : ''}
+ ${(results?summary.onLeave:roster.length-visible.length) ? `<small class="muted">${results?summary.onLeave:roster.length-visible.length} on approved leave excluded.</small>` : ''}${ev.maxSignups ? `<small class="muted">Sign-up limit: ${ev.maxSignups}</small>` : ''}</section>`;
+}
+function eventAttendanceOverview(ev) {
+ const summary=ev.attendanceSummary;
+ return `${pinSide(ev,false)}${isOfficer() ? `<div class="event-tracking-summary" aria-label="Recorded attendance summary">${summary?.tracked ? `<strong>${summary.present} recorded · ${summary.noShow} ${summary.inProgress?'not seen yet':'no-show'} · ${summary.notRecorded} not recorded</strong><span class="muted small">${summary.inProgress?'Tracking in progress — results are provisional.':'Saved attendance, including manual corrections.'}</span>` : '<span class="muted small">Attendance has not been recorded yet.</span>'}<div class="seg"><button class="btn sm" data-act="event-tab" data-tab="participants" data-id="${ev.id}">View attendance</button>${Object.keys(ev.voiceTracking?.seen || {}).length ? `<button class="btn sm" data-act="voicetrack-seen" data-id="${ev.id}">Who got tracked</button>` : ''}</div></div>` : ''}`;
+}
+function eventOwnParty(ev) {
+ const own = new Set(mine().map(m=>m.id));
+ const parties=(ev.parties || []).filter(p=>p.members.some(id=>own.has(id)));
+ return `<section class="panel event-my-party"><h3>My party</h3>${parties.length ? parties.map(p=>`<div class="event-my-party-head"><strong>${esc(p.name)}</strong><span>${p.members.length} / ${S.cfg.partySize}</span></div><div class="event-personal-members">${p.members.map(id=>{
+  const m=byId(S.members,id);if(!m)return '';
+  const b=effectiveBuild(m,p);
+  return `<div class="event-personal-member ${own.has(id)?'is-you':''}" style="--c:${roleColor(b.role)}"><div><strong>${esc(m.name)}</strong>${p.leader===id?CROWN:''}${own.has(id)?'<span class="tag">You</span>':''}</div><div class="event-personal-class"><span class="wicons">${[b.primaryWeapon,b.secondaryWeapon].filter(Boolean).map(weaponIcon).join('')}</span><span>${esc(classFor(b.primaryWeapon,b.secondaryWeapon) || b.role)}${b.specialization?`<small>${esc(b.specialization)}</small>`:''}</span></div>${!m.mercenary && ev.rsvps[id]!=='yes'?'<small class="muted">Not confirmed</small>':''}</div>`;
+ }).join('')}</div>`).join('') : '<div class="event-no-party"><strong>No party assigned yet</strong><p>Your assigned group will appear here when the line-up is ready.</p></div>'}<button class="event-shortcut" data-act="event-tab" data-tab="parties" data-id="${ev.id}">View all parties →</button></section>`;
+}
+function eventOfficerTools(ev) {
+ if(!isOfficer())return '';
+ const sameDay=S.events.filter(e=>wallKey(Date.parse(e.start))===wallKey(Date.parse(ev.start)) && Date.parse(e.start)>Date.now());
+ return `<section class="event-officer-tools" aria-label="Officer tools"><div class="event-officer-heading"><h3>Officer tools</h3><p>Event settings, Discord, Shotcaller and attendance controls.</p></div><div class="event-officer-body"><div class="seg"><button class="btn" data-act="event-edit" data-id="${ev.id}">Edit event</button>${ev.seriesId && S.series.some(s=>s.id===ev.seriesId)?`<button class="btn" data-act="series-edit" data-id="${ev.seriesId}">Edit series</button>`:''}<button class="btn" data-act="event-tab" data-tab="parties" data-id="${ev.id}">Party presets & Discord</button><button class="btn" data-act="event-tab" data-tab="participants" data-id="${ev.id}">Manage attendance</button>
+ ${Date.parse(ev.start)>Date.now()?`<button class="btn" data-act="reminder-send" data-id="${ev.id}">Send reminder now</button>${sameDay.length>1?`<button class="btn" data-act="reminder-send-day" data-id="${ev.id}">Remind all today's events (${sameDay.length})</button>`:''}`:''}</div>${automationPanel(ev)}</div></section>`;
+}
+function eventDetail(ev) {
+ const selectedTab=(UI.eventTabs || {})[ev.id] || 'overview';
+ const tab=selectedTab==='officer' && !isOfficer() ? 'overview' : selectedTab;
+ const closed=Date.now()>=Date.parse(ev.signupClosesAt), locked=closed&&!isOfficer();
+ const status=myStatus(ev);
+ const tabs=[['overview','Overview'],['participants','Participants'],['parties','Parties'],...(isOfficer()?[['officer','Officer tools']]:[])];
+ return `<section class="event-briefing" aria-label="Selected event">
+ <header class="event-hero"><img src="${eventArtwork(ev)}" alt="" width="240" height="140"><div class="event-hero-info"><span class="event-type-label">${esc(ev.type)}</span><h2>${esc(ev.title)}</h2><div class="event-hero-date">${fmtDate(ev.start)}</div><div class="event-hero-meta">${ev.mandatory?'<span class="pill-m">Mandatory</span>':''}${ev.seriesId && typeof seriesLine==='function' && seriesLine(ev)?`<span class="type-pill">${esc(seriesLine(ev))}</span>`:''}<span>${closed?'Sign-ups closed':'Sign-ups close'} ${fmtShort(ev.signupClosesAt)}</span>${ev.points && pointsOn()?`<span>${ev.points} points</span>`:''}</div></div><aside class="event-hero-notes"><h3>Event briefing</h3><div>${ev.description?linkify(ev.description):'<span class="muted">No briefing has been added yet.</span>'}</div></aside></header>
+ <nav class="event-detail-tabs" aria-label="Selected event sections">${tabs.map(([key,label])=>`<button data-act="event-tab" data-tab="${key}" data-id="${ev.id}" class="${tab===key?'active':''}" ${tab===key?'aria-current="page"':''}>${label}${key==='participants' && Object.keys((UI.eventAttendanceDrafts || {})[ev.id] || {}).length?' <small>Unsaved</small>':''}</button>`).join('')}</nav>
+ <div class="event-tab-content">
+ ${tab==='overview'?`<div class="event-overview-grid">
+  <section class="panel event-signup"><div class="event-panel-title"><h3>Your signup</h3>${status?`<span class="mystatus" data-st="${status}">${esc(STATUS_TEXT[status])}</span>`:''}</div><p class="event-signup-deadline">${closed?'Sign-ups are closed.':'Choose your attendance for this event.'}${closed && isOfficer()?' Officers can still change answers.':''}</p>${mine().map(m=>rsvpRow(ev,m,locked)).join('') || '<p class="muted">You have no active character available to sign up.</p>'}</section>
+  <section class="panel event-attendance">${eventAttendanceOverview(ev)}</section>
+  ${eventOwnParty(ev)}
+  <div class="event-overview-right">${eventSignupSummary(ev)}</div>
+ </div><div class="event-overview-shortcuts"><button class="event-shortcut" data-act="event-tab" data-tab="participants" data-id="${ev.id}">View all participants →</button><button class="event-shortcut" data-act="event-tab" data-tab="parties" data-id="${ev.id}">View all parties →</button></div>` : tab==='participants' ? eventParticipants(ev) : tab==='officer' ? eventOfficerTools(ev) : eventPartyWorkspace(ev)}
+ </div></section>`;
+}
+ACTIONS['event-tab']=(el,d)=>{
+ if(!['overview','participants','parties','officer'].includes(d.tab) || (d.tab==='officer' && !isOfficer()))return;
+ (UI.eventTabs ||= {})[d.id]=d.tab;
+ render();
+ document.querySelector('.event-detail-tabs [data-tab="'+d.tab+'"]')?.focus({preventScroll:true});
+};
+ACTIONS['event-attendance-discard']=(el,d)=>{ if(UI.eventAttendanceDrafts)delete UI.eventAttendanceDrafts[d.id];render(); };
 
 // The window on the right of the calendar: the event, my sign-up, and the attendance PIN.
 function eventSide(ev) {
@@ -1056,7 +1257,7 @@ function pinState(ev) {
   const around = new Date(info.scheduledAt).getTime();
   return Date.now() > around + (info.windowMinutes || 15) * 60000 ? 'none' : 'early';
 }
-function pinSide(ev) {
+function pinSide(ev, showReminders = true) {
   const own = mine();
   // The officer's two reminder buttons live right here, under the attendance box, rather than further down the
   // page (in "PIN and reminders") - this card is the first thing you see on a phone after opening an event, so
@@ -1064,7 +1265,7 @@ function pinSide(ev) {
   // and voice-tracking versions below - neither one changes anything about reminders.
   const upcoming = new Date(ev.start) > new Date();
   const sameDay = upcoming ? S.events.filter((e) => wallKey(new Date(e.start).getTime()) === wallKey(new Date(ev.start).getTime()) && new Date(e.start) > Date.now()) : [];
-  const reminderBtns = isOfficer() && upcoming ? `<div class="seg" style="margin-top:10px">
+  const reminderBtns = showReminders && isOfficer() && upcoming ? `<div class="seg" style="margin-top:10px">
       <button class="btn sm" data-act="reminder-send" data-id="${ev.id}">Send reminder now</button>
       ${sameDay.length > 1 ? `<button class="btn sm" data-act="reminder-send-day" data-id="${ev.id}" title="Sends a reminder for every one of today's events that has not started yet">Send reminders for all of today's events (${sameDay.length})</button>` : ''}
     </div>` : '';
@@ -1076,11 +1277,11 @@ function pinSide(ev) {
   if (ev.effectiveAttendanceMode === 'voice') {
     const rows = own.map((m) => {
       const label = `<span><b>${esc(m.name)}</b> ${roleChip(m.role)}</span>`;
-      const status = ev.attended.includes(m.id) ? '<span class="ok-text">Recorded &#10003;</span>' : '<span class="muted small">Not seen yet</span>';
+      const status = ev.attended.includes(m.id) ? '<span class="ok-text">Recorded &#10003;</span>' : `<span class="muted small">${ev.attendanceSummary?.tracked && !ev.attendanceSummary.inProgress ? 'Not recorded' : 'Not seen yet'}</span>`;
       return `<div class="pin-row">${label}${status}</div>`;
     }).join('');
     return `<div class="pin-box" data-pin="voice"><h3 class="side-h">Attendance</h3>
-      <div class="muted small" style="margin:-2px 0 8px">Tracked automatically from Shotcaller voice chat - join your party's voice channel during the session and you'll be marked present, usually within a minute or two. Nothing to type in.</div>
+      <div class="muted small" style="margin:-2px 0 8px">${ev.attendanceSummary?.tracked && !ev.attendanceSummary.inProgress ? 'Attendance has been recorded for this event. Contact an officer if your saved result needs correcting.' : "Join your party’s Shotcaller voice channel during tracking to have your attendance recorded. No PIN is required."}</div>
       ${own.length ? rows : '<div class="muted small">Add a character to be tracked.</div>'}${reminderBtns}</div>`;
   }
   const info = ev.pinInfo || {}, kind = pinState(ev);
@@ -1102,14 +1303,13 @@ function pinSide(ev) {
     <div class="muted small" style="margin:-2px 0 8px">${text}</div>${own.length ? rows : '<div class="muted small">Add a character to check in with the PIN.</div>'}${reminderBtns}</div>`;
 }
 
-// (old layout, no longer used) The attendance PIN, as seen by players: type it in while the window is open.
-// Shared by both the PIN and voice-tracking versions of the admin automation panel below.
+// Shared reminder status and delivery log in the PIN and voice versions of Officer tools.
 function remindersBlock(ev) {
   const st = S.settings;
   const hrs = (m) => (m % 60 === 0 ? `${m / 60}h` : `${Math.round(m / 6) / 10}h`);
   return `<div class="small" style="margin-top:12px">
       <div class="ev-title"><span class="muted">Reminders for players who have not answered.</span></div>
-      <div class="muted" style="margin-top:2px">${!st.remindersEnabled ? 'Automatic reminders are switched off in Admin' : ev.reminders === false ? 'Automatic reminders are off for this event' : `Automatic: ${st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set'}`}. <span class="muted">(The "Send reminder now" button moved up to the event card above.)</span></div>
+      <div class="muted" style="margin-top:2px">${!st.remindersEnabled ? 'Automatic reminders are switched off in Admin' : ev.reminders === false ? 'Automatic reminders are off for this event' : `Automatic: ${st.reminderMinutes.length ? st.reminderMinutes.map(hrs).join(' and ') + ' before the start' : 'none set'}`}.</div>
       ${(ev.reminderLog || []).map((l) => `<div class="muted">Reminder ${l.manual ? `(sent by ${esc(l.by)})` : l.number}: ${l.sent} delivered${l.failed.length ? `, ${l.failed.length} not delivered (${l.failed.map((f) => esc(f.name)).join(', ')})` : ''} at ${fmtTime(l.at)}.</div>`).join('')}</div>`;
 }
 
@@ -1327,9 +1527,8 @@ function memberMenu(m, at, o) {
   </div></details>`;
 }
 
-// One member row. Shows role colour, party-leader crown, class (with its weapon icons), and - on its own line
-// below, so a long one has room to actually be read instead of getting crushed into "Class | Spec..." - the
-// specialization.
+// Compact member row: name, weapon icons and class share the first line.
+// Specialization gets the full second line and scrolls only if it still overflows.
 function memberRow(m, at, o) {
   const off = isOfficer();
   const eff = effectiveBuild(m, o.from === 'party' ? (o.parties || [])[o.i] : null);     // the class this player plays in this party
@@ -1339,7 +1538,7 @@ function memberRow(m, at, o) {
   // Already-safe HTML either way (weapon names, the class and the specialization are all escaped here), so the
   // render below must not escape this a second time - that would show the icon markup as literal text.
   const meta = `${icons}${cls ? `<span class="cls">${esc(cls)}</span>` : wpns.map((n) => esc(n)).join(' / ')}`;
-  const spec = eff.specialization ? `<div class="mspec spec">${esc(eff.specialization)}</div>` : '';
+  const spec = eff.specialization ? `<button type="button" class="mspec spec specialization-scroll" draggable="false" title="${esc(eff.specialization)}" aria-label="Specialization: ${esc(eff.specialization)}. Tap to start or stop scrolling." aria-pressed="false"><span class="specialization-text">${esc(eff.specialization)}</span></button>` : '';
   const tag = o.ev && o.from === 'pool' ? (o.ev.rsvps[m.id] === 'yes' ? 'going' : '') : '';
   // Someone on an approved leave of absence covering this event (and not overridden - see loaOverridden) is
   // dimmed everywhere they show up here, with their own "LoA" badge, instead of the plain "not confirmed"
@@ -1356,7 +1555,7 @@ function memberRow(m, at, o) {
   const canToggleLoa = onLeave && (off || m.owner === S.user.key);
   return `<div class="mrow ${dimKind ? `dim dim-${dimKind}` : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${dimTitle ? ' (' + dimTitle + ')' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}
-    <div class="mtxt"><div class="mname">${esc(m.name)}${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}${loa ? '<span class="tag loa" title="Approved leave of absence covering this event">LoA</span>' : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div>${spec}
+    <div class="mtxt"><div class="midentity"><div class="mname"><span class="member-name-text">${esc(m.name)}</span>${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}${loa ? '<span class="tag loa" title="Approved leave of absence covering this event">LoA</span>' : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div></div>${spec}
     ${canToggleLoa ? `<div class="loa-inline"><button class="btn sm loa-toggle" data-act="loa-override" data-ev="${o.ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Remove override' : 'Attend anyway'}</button></div>` : ''}</div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
@@ -1730,6 +1929,13 @@ function eventDialog(ev, dateStr) {
         <option value="pin" ${ev.attendanceModeOverride === 'pin' ? 'selected' : ''}>Always use the Attendance PIN for this event</option>
         <option value="voice" ${ev.attendanceModeOverride === 'voice' ? 'selected' : ''}>Always use Shotcaller voice presence for this event</option>
       </select></div>` : ''}
+    <div class="field event-artwork-picker"><label for="ev-artwork-preset">Event artwork</label>
+      <select id="ev-artwork-preset" name="artworkPreset" data-act="event-artwork-preset">${EVENT_ART_PRESETS.map(key => `<option value="${key}" ${(ev.artworkPreset || 'auto')===key?'selected':''}>${({auto:'Automatic — follows event type',siege:'Castle Siege',stone:'Riftstone / Boonstone',boss:'World / Archboss',raid:'Dungeon / Guild raid',training:'Training / Wargames',insanity:'Insanity / Other'})[key]}</option>`).join('')}</select>
+      <input type="hidden" id="ev-artwork-file" name="imageFile" value="${esc(ev.imageFile || '')}">
+      <img id="ev-artwork-preview" src="${eventArtwork(ev)}" alt="Selected event artwork preview" width="240" height="120">
+      <label for="ev-artwork-upload">Custom image (optional, PNG/JPEG/GIF/WebP, up to 3 MB)</label><input id="ev-artwork-upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-act="event-artwork-upload">
+      <button type="button" class="btn sm" data-act="event-artwork-clear">Use preset image</button><span id="ev-artwork-status" class="muted small" role="status"></span>
+    </div>
     <div class="field"><label>Details</label><textarea name="description" maxlength="1500" placeholder="Where to meet, what to bring, voice channel">${esc(ev.description)}</textarea></div>
     <div class="dlg-actions">
       ${isNew ? '' : '<button type="button" class="btn danger left" data-act="event-delete">Delete</button>'}
@@ -1788,45 +1994,57 @@ function autoParties(ev) {
 }
 
 /* ================= loot ================= */
-function viewLoot() {
-  const off = isOfficer();
-  const q = UI.lootQ.toLowerCase();
-  const nameOf = (id) => (byId(S.members, id) || { name: '(removed)' }).name;
-  const list = S.loot.filter((l) => (!UI.lootPlayer || l.memberId === Number(UI.lootPlayer)) && (!UI.lootType || l.type === UI.lootType) && (!q || `${l.item} ${nameOf(l.memberId)}`.toLowerCase().includes(q)))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-  const active = S.members.filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name));
-  // No outside item catalog - just everything typed in here before, so a name only ever needs typing once and
-  // the next entry can pick it from the list instead of risking a slightly different spelling.
-  const itemNames = [...new Set(S.loot.map((l) => l.item).filter(Boolean))].sort();
-  const itemDatalist = `<datalist id="item-names">${itemNames.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>`;
-  return `
-  ${itemDatalist}
-  <div class="page-head"><div><h1>Loot</h1><div class="muted">Who received which item, and on which day. The dashboard reads its "items received" numbers from this list.${isOfficer() ? '' : ' You only see your own loot.'}</div></div></div>
-  ${off ? `<div class="panel" style="margin-bottom:16px"><h3>Give out loot</h3>
-    ${active.length ? `<form data-form="loot" class="loot-form">
-      <div class="field"><label for="lf-m">Player</label><select id="lf-m" name="memberId" required>${active.map((m) => `<option value="${m.id}" ${Number(UI.lootMember) === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
-      <div class="field"><label for="lf-t">Type</label><select id="lf-t" name="type" data-act="loot-type">${S.cfg.lootTypes.map((t) => `<option ${(UI.lootFormType || S.cfg.lootDefaultType) === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
-      ${(() => { const lu = (UI.lootFormType || S.cfg.lootDefaultType) === 'Lucent'; return `
-      <div class="field wide slidefield ${lu ? 'off' : ''}" id="lf-item-field"><label for="lf-i">Item</label><input id="lf-i" name="item" ${lu ? '' : 'required'} maxlength="120" placeholder="Item name" autocomplete="off" list="item-names"></div>
-      <div class="field wide slidefield ${lu ? '' : 'off'}" id="lf-amt-field"><label for="lf-a">Amount of Lucent</label><input id="lf-a" name="amount" type="number" min="1" ${lu ? 'required' : ''} placeholder="For example 1500" autocomplete="off"></div>`; })()}
-      <div class="field"><label for="lf-d">Given out on</label><input id="lf-d" name="date" type="date" value="${esc(UI.lootDate || todayTz())}" required></div>
-      <div class="field"><label for="lf-r">Decision (optional)</label><select id="lf-r" name="reason"><option value="">-</option>${S.cfg.lootReasons.map((r) => `<option>${esc(r)}</option>`).join('')}</select></div>
-      <div class="field"><label for="lf-p">Purpose (optional)</label><select id="lf-p" name="purpose"><option value="">-</option>${S.cfg.lootPurposes.map((p) => `<option>${esc(p)}</option>`).join('')}</select></div>
-      <button class="btn primary">Add</button>
-    </form>` : '<div class="muted">Add characters on the Member page first.</div>'}</div>` : ''}
-  <div class="toolbar">
-    <input type="search" placeholder="Search player or item" value="${esc(UI.lootQ)}" data-ui="lootQ" aria-label="Search loot">
-    <select data-ui="lootPlayer" aria-label="Player"><option value="">All players</option>${S.members.slice().sort((a, b) => a.name.localeCompare(b.name)).map((m) => `<option value="${m.id}" ${Number(UI.lootPlayer) === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
-    <select data-ui="lootType" aria-label="Loot type"><option value="">All types</option>${S.cfg.lootTypes.map((t) => `<option ${UI.lootType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
-    <span class="muted small">${list.length} ${list.length === 1 ? 'entry' : 'entries'}</span>
-  </div>
-  ${list.length ? `<div class="tbl-wrap"><table>
-    <thead><tr><th>Given out</th><th>Player</th><th>Type</th><th>Item</th><th></th></tr></thead>
-    <tbody>${list.map((l) => { const m = byId(S.members, l.memberId); return `<tr>
-      <td class="nowrap">${fmtLootDate(l.date)}</td><td><b>${esc(nameOf(l.memberId))}</b> ${m ? roleChip(m.role) : ''}</td><td><span class="type-pill t-${esc(l.type)}">${esc(l.type || 'Item')}</span></td><td>${l.type === 'Lucent' ? `<b>${Number(l.amount).toLocaleString()}</b> Lucent` : esc(l.item)}${l.fromRequest ? ' <span class="muted small">(from a request)</span>' : ''}${l.reason || l.purpose ? `<div class="muted small">${[l.reason, l.purpose].filter(Boolean).join(' · ')}</div>` : ''}</td>
-      <td>${off ? `<span class="seg">${l.proofConfirmed ? `<button class="btn sm" data-act="loot-proof" data-id="${l.id}" data-on="0" style="color:#7cc4b8;border-color:#7cc4b8" title="Confirmed by ${esc(l.proofConfirmedBy || '')}, ${l.proofConfirmedAt ? fmtShort(l.proofConfirmedAt) : ''} - click to undo">✓ Proof confirmed</button>` : `<button class="btn sm" data-act="loot-proof" data-id="${l.id}" data-on="1">Confirm proof of use</button>`}<button class="btn sm" data-act="loot-edit" data-id="${l.id}">Edit</button></span>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
-    : `<div class="empty">${S.loot.length ? 'Nothing matches your search.' : 'No loot has been given out yet.' + (off ? ' Use the form above to add the first entry.' : '')}</div>`}`;
+function lootEntryDraft() {
+ if(UI.lootDraftOwner!==S.user.key){UI.lootDraftOwner=S.user.key;UI.lootDraft={};}
+ return {memberId:UI.lootMember||'',type:UI.lootFormType||S.cfg.lootDefaultType,date:UI.lootDate||todayTz(),item:'',amount:'',reason:'',purpose:'',...UI.lootDraft};
 }
+function captureLootEntryDraft(form) {
+ if(!form||form.dataset.form!=='loot'||!isOfficer())return;
+ UI.lootDraftOwner=S.user.key;
+ UI.lootDraft=Object.fromEntries(['memberId','type','item','amount','date','reason','purpose'].map(key=>[key,form.elements[key]?.value||'']));
+}
+function lootEntryForm(active) {
+ const draft=lootEntryDraft(),type=S.cfg.lootTypes.includes(draft.type)?draft.type:S.cfg.lootDefaultType,lu=type==='Lucent';
+ return `<aside class="loot-entry-panel"><h2>Record distribution</h2><p>Add a distribution that took place in game.</p>${active.length?`<form data-form="loot" class="loot-entry-form"><fieldset class="loot-entry-fields" ${UI.lootSaving?'disabled':''}><div class="field"><label for="lf-m">Recipient</label><select id="lf-m" name="memberId" required><option value="">Select player</option>${active.map(m=>`<option value="${m.id}" ${String(draft.memberId)===String(m.id)?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div><fieldset class="loot-type-picker"><legend>Type</legend>${S.cfg.lootTypes.map((t,i)=>`<label class="loot-type-choice"><input type="radio" name="type" value="${esc(t)}" data-act="loot-type" ${type===t?'checked':''} required><span>${esc(t)}</span></label>`).join('')}</fieldset>
+ <div class="field ${lu?'off':''}" id="lf-item-field"><label for="lf-i">Item name</label><input id="lf-i" name="item" value="${esc(draft.item)}" maxlength="120" placeholder="Item name" list="item-names" autocomplete="off" ${lu?'disabled':'required'}></div>
+ <div class="field ${lu?'':'off'}" id="lf-amt-field"><label for="lf-a">Amount of Lucent</label><input id="lf-a" name="amount" type="number" min="1" max="1000000000" value="${esc(draft.amount)}" placeholder="For example 1500" ${lu?'required':'disabled'}></div>
+ <div class="loot-entry-pair"><div class="field"><label for="lf-d">Given out on</label><input id="lf-d" name="date" type="date" value="${esc(draft.date)}" required></div><div class="field"><label for="lf-r">Decision</label><select id="lf-r" name="reason"><option value="">Optional</option>${S.cfg.lootReasons.map(r=>`<option ${draft.reason===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div></div><div class="field"><label for="lf-p">Purpose</label><select id="lf-p" name="purpose"><option value="">Optional</option>${S.cfg.lootPurposes.map(p=>`<option ${draft.purpose===p?'selected':''}>${esc(p)}</option>`).join('')}</select></div><button class="btn primary loot-save" type="submit">${UI.lootSaving?'Saving…':'Save record'}</button><button type="button" class="loot-clear" data-act="loot-form-clear">Clear form</button></fieldset></form>`:'<div class="empty">No active players available.</div>'}</aside>`;
+}
+function viewLoot() {
+ const off=isOfficer(),q=UI.lootQ.toLowerCase(),nameOf=id=>(byId(S.members,id)||{name:'Removed player'}).name;
+ const own=new Set(mine().map(m=>m.id));
+ const available=S.loot; // The server already limits records to the viewer's permissions.
+ const list=available.filter(l=>(!UI.lootPlayer||l.memberId===Number(UI.lootPlayer))&&(!UI.lootType||l.type===UI.lootType)&&(!UI.lootProof||(UI.lootProof==='confirmed'?!!l.proofConfirmed:!l.proofConfirmed))&&(!q||`${l.item} ${l.type} ${l.amount||''} ${nameOf(l.memberId)}`.toLowerCase().includes(q))).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+ const active=S.members.filter(m=>m.active).sort((a,b)=>a.name.localeCompare(b.name));
+ const recipients=S.members.filter(m=>off||own.has(m.id)||available.some(l=>l.memberId===m.id)).slice().sort((a,b)=>a.name.localeCompare(b.name));
+ const itemNames=[...new Set(available.map(l=>l.item).filter(Boolean))].sort();
+ const lucent=list.filter(l=>l.type==='Lucent').reduce((sum,l)=>sum+(Number(l.amount)||0),0);
+ return `<section class="loot-workspace"><datalist id="item-names">${itemNames.map(n=>`<option value="${esc(n)}">`).join('')}</datalist><header class="page-head"><div><div class="loot-eyebrow">GUILD LOOT · DISTRIBUTION WORKSPACE</div><h1>Loot</h1><p>A clear record of every guild distribution.${off?'':' Showing records available to your account.'}</p></div>${off?'<button class="btn primary loot-form-shortcut" data-act="loot-form-focus">Record loot</button>':''}</header><div class="loot-summary-strip"><span><strong>${list.length}</strong> ${list.length===1?'record':'records'}</span><span><strong>${new Set(list.map(l=>l.memberId)).size}</strong> recipients</span><span class="loot-lucent"><strong>${lucent.toLocaleString('en-US')}</strong> Lucent recorded</span><small>Current filters</small></div>
+ <div class="loot-workspace-grid ${off?'':'is-readonly'}"><section class="loot-ledger-panel"><h2>Recent distributions</h2><div class="loot-ledger-toolbar"><input type="search" data-ui="lootQ" value="${esc(UI.lootQ)}" placeholder="Search player or item…" aria-label="Search player or item"><select data-ui="lootPlayer" aria-label="Filter by recipient"><option value="">${off?'All players':'Available players'}</option>${recipients.map(m=>`<option value="${m.id}" ${Number(UI.lootPlayer)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select><select data-ui="lootType" aria-label="Filter loot type"><option value="">All types</option>${S.cfg.lootTypes.map(t=>`<option ${UI.lootType===t?'selected':''}>${esc(t)}</option>`).join('')}</select><select data-ui="lootProof" aria-label="Filter proof of use"><option value="">Any proof</option><option value="confirmed" ${UI.lootProof==='confirmed'?'selected':''}>Confirmed</option><option value="unconfirmed" ${UI.lootProof==='unconfirmed'?'selected':''}>Unconfirmed</option></select></div>
+ ${list.length?`<div class="loot-ledger-wrap"><table><thead><tr><th>Date</th><th>Recipient</th><th>Distribution</th><th>Proof of use</th>${off?'<th><span class="sr-only">Edit</span></th>':''}</tr></thead><tbody>${list.map(l=>{const m=byId(S.members,l.memberId),proof=l.proofConfirmed?'Confirmed':'Unconfirmed';return `<tr><td data-label="Date">${fmtLootDate(l.date)}</td><td data-label="Recipient"><strong>${esc(nameOf(l.memberId))}</strong>${m?`<small>${esc(m.role)}</small>`:''}</td><td data-label="Distribution"><span class="loot-kind" data-kind="${esc(l.type)}">${esc(l.type||'Item')}</span><strong class="${l.type==='Lucent'?'loot-lucent':''}">${l.type==='Lucent'?Number(l.amount).toLocaleString('en-US')+' Lucent':esc(l.item)}</strong>${l.fromRequest?'<span class="loot-request-tag">From request</span>':''}${l.reason||l.purpose?`<small>${esc([l.reason,l.purpose].filter(Boolean).join(' · '))}</small>`:''}</td><td data-label="Proof of use">${off?`<button class="loot-proof-state ${l.proofConfirmed?'confirmed':''}" data-act="loot-proof" data-id="${l.id}" data-on="${l.proofConfirmed?'0':'1'}" aria-label="${l.proofConfirmed?'Undo proof confirmation':'Confirm proof of use'} for ${esc(l.item||l.type)} given to ${esc(nameOf(l.memberId))}" title="${l.proofConfirmed?esc(`Confirmed by ${l.proofConfirmedBy||'an officer'}${l.proofConfirmedAt?', '+fmtShort(l.proofConfirmedAt):''}. Click to undo.`):'Click to confirm proof of use'}"><i aria-hidden="true"></i>${proof}</button>`:`<span class="loot-proof-state ${l.proofConfirmed?'confirmed':''}"><i aria-hidden="true"></i>${proof}</span>`}</td>${off?`<td class="loot-ledger-actions"><button class="btn sm" data-act="loot-edit" data-id="${l.id}" aria-label="Edit loot record for ${esc(nameOf(l.memberId))}">Edit</button></td>`:''}</tr>`;}).join('')}</tbody></table></div>`:`<div class="empty">${available.length?'No distributions match these filters.':off?'No distributions recorded yet. Use the form to add the first record.':'No loot has been recorded for you yet.'}</div>`}<div class="loot-ledger-caption">${list.length} ${list.length===1?'record':'records'} · Newest first</div></section>${off?lootEntryForm(active):''}</div></section>`;
+}
+
+ACTIONS['loot-form-focus']=()=>{document.querySelector('.loot-entry-panel')?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});document.getElementById('lf-m')?.focus({preventScroll:true});};
+ACTIONS['loot-form-clear']=()=>{if(UI.lootSaving)return;UI.lootDraft={};UI.lootMember='';UI.lootDate='';UI.lootFormType='';render();};
+function captureLootEntryEvent(event) {
+ const form=event.target.closest?.('.loot-entry-form');if(form&&!UI.lootSaving)captureLootEntryDraft(form);
+}
+document.addEventListener('input',captureLootEntryEvent,true);
+document.addEventListener('change',captureLootEntryEvent,true);
+FORMS.loot=async(form,fd)=>{
+ if(!isOfficer()||UI.lootSaving)return;
+ captureLootEntryDraft(form);const owner=S.user.key;let saved=false;
+ UI.lootSaving=true;const fields=form.querySelector('.loot-entry-fields');if(fields)fields.disabled=true;
+ try{
+  await api('/api/loot','POST',fd);saved=true;
+  if(S.user?.key===owner){UI.lootMember=fd.memberId;UI.lootDate=fd.date;UI.lootFormType=fd.type;UI.lootDraft={...fd,item:'',amount:''};}
+  await refresh(true);toast('Distribution recorded');
+ }catch(error){toast(saved?'Distribution saved, but the list could not refresh. Reload to see it.':error.message,true);}
+ finally{
+  UI.lootSaving=false;if(fields)fields.disabled=false;render();
+  if(saved&&route().page==='loot')document.getElementById(fd.type==='Lucent'?'lf-a':'lf-i')?.focus();
+ }
+};
 
 function lootDialog(l) {
   const players = S.members.filter((m) => m.active || m.id === l.memberId).sort((a, b) => a.name.localeCompare(b.name));
@@ -1970,7 +2188,7 @@ function adminCustomizingText() {
 
 /* ================= dialog ================= */
 function openDialog(html, wide) { const d = $('#dlg'); d.innerHTML = html; d.classList.toggle('wide', !!wide); if (!d.open) d.showModal(); const f = d.querySelector('input,select'); f && f.focus(); autosizeAll(d); }
-function closeDialog() { const d = $('#dlg'); if (d.open) d.close(); }
+function closeDialog() { const d = $('#dlg'); if (d.open && typeof canCloseAttendanceReview === 'function' && !canCloseAttendanceReview()) return; if (d.open) d.close(); }
 $('#dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeDialog(); });
 
 /* ================= events (delegated) ================= */
@@ -2061,7 +2279,7 @@ document.addEventListener('click', async (e) => {
     UI.lootCompare = UI.lootCompare.includes(id) ? UI.lootCompare.filter((x) => x !== id) : [...UI.lootCompare, id];
     render();
   }
-  else if (a === 'loot-give') { UI.lootMember = d.id; }
+  else if (a === 'loot-give') { UI.lootMember = d.id; if(UI.lootDraftOwner===S.user.key && UI.lootDraft)UI.lootDraft.memberId=d.id; }
   else if (a === 'test-dm') act(async () => { const r = await api('/api/admin/test-dm', 'POST', {}); if (!r.ok) throw new Error(r.error || 'The message could not be sent.'); toast('Test message sent. Check your Discord messages.'); });
   else if (a === 'link-owner') act(async () => { const r = await api('/api/admin/link-owner', 'POST', { from: d.from, to: $('#lk-' + d.i).value }); toast(`${r.moved} characters linked`); });
   else if (a === 'pin-send') act(() => api(`/api/events/${d.id}/pin/send`, 'POST', { mode: d.mode }), d.mode === 'new' ? 'New PIN created and sent' : d.mode === 'reopen' ? 'PIN window reopened' : 'PIN sent');
@@ -2116,6 +2334,7 @@ document.addEventListener('click', async (e) => {
           try { await api(`/api/events/${d.id}/rsvp`, 'POST', c); }
           catch (e) { failed.push(`${(byId(S.members, c.memberId) || {}).name || c.memberId}: ${e.message}`); }
         }
+        if (!failed.length && UI.eventAttendanceDrafts) delete UI.eventAttendanceDrafts[d.id];
         toast(failed.length ? `Attendance saved, but ${failed.length} RSVP ${failed.length === 1 ? 'change' : 'changes'} failed - ${failed.join('; ')}` : 'Attendance saved', failed.length > 0);
       } catch (e) { toast(e.message, true); }
       await refresh(true);
@@ -2154,7 +2373,7 @@ document.addEventListener('click', async (e) => {
   // read back the override itself as already active and compute against the wrong (stale) placeholder value.
   else if (a === 'party-placeholder-toggle') mutateParties(el, (ps, i) => { const was = partyIsPlaceholder(ps[i]); ps[i].placeholderOverride = true; ps[i].placeholder = !was; });
   else if (a === 'p-left' || a === 'p-right') mutateParties(el, (ps, i) => { const j = i + (a === 'p-right' ? 1 : -1); if (j >= 0 && j < ps.length) [ps[i], ps[j]] = [ps[j], ps[i]]; });
-  else if (a === 'cal-day') { if (!e.target.closest('a') && isOfficer()) eventDialog(null, d.date); }
+  else if (a === 'cal-day') { if (!e.target.closest('a,button,.wk-ev,.cal-ev,.day-card') && isOfficer()) eventDialog(null, d.date); }
   else if (a === 'points-focus') { UI.pointsFocus = d.id ? Number(d.id) : null; render(); }
   else if (a === 'points-del') { if (confirm('Delete this ledger entry?')) act(() => api('/api/points/' + d.id, 'DELETE')); }
   else if (a === 'export') {
@@ -2177,7 +2396,11 @@ document.addEventListener('change', (e) => {
   // Once attendance is tracked, the roster's 6-state dropdowns stage locally only - see rosterRow() - so this
   // just keeps the row's own colour in sync with whatever is currently picked. Nothing is sent to the server
   // until "Save attendance" (ACTIONS['roster-save']) is clicked.
-  else if (el.dataset.act === 'roster-stage') el.dataset.rst = el.value;
+  else if (el.dataset.act === 'roster-stage') {
+    el.dataset.rst = el.value;
+    (UI.eventAttendanceDrafts ||= {})[el.dataset.ev] ||= {};
+    UI.eventAttendanceDrafts[el.dataset.ev][el.dataset.m] = el.value;
+  }
   else if (el.dataset.act === 'loot-date') act(() => api('/api/settings', 'PUT', { lootFrom: el.value }), 'Loot window updated');
   else if (el.dataset.act === 'preset-load') {
     const evn = byId(S.events, el.dataset.ev), p = byId(S.presets, el.value);
@@ -2206,6 +2429,7 @@ document.addEventListener('change', (e) => {
     f.text().then((t) => act(() => api('/api/import', 'POST', JSON.parse(t)), 'Backup restored')).catch(() => toast('That file could not be read.', true));
   }
   else if (el.id === 'ev-type') {
+    if(el.form && el.form.querySelector('#ev-artwork-preview'))previewEventArtwork(el.form);
     if ($('#ev-pts')) $('#ev-pts').value = el.selectedOptions[0].dataset.pts;
     $('#ev-mand').checked = el.selectedOptions[0].dataset.mand === '1';
     if ($('#ev-pin')) $('#ev-pin').checked = $('#ev-mand').checked;   // follows the type's default too, same as Mandatory - still a separate switch from here
@@ -2218,7 +2442,7 @@ document.addEventListener('input', (e) => {
     if (c) c.textContent = `${e.target.value.length} / ${e.target.maxLength}`;
   }
   const k = e.target.dataset.ui;
-  if (k === 'rosterQ' || k === 'lootQ' || k === 'lootCompareQ') {
+  if (k === 'rosterQ' || k === 'lootQ' || k === 'lootCompareQ' || k === 'vodLibraryQ' || k === 'reqQ' || k === 'leaveQ' || k === 'warnQ' || k === 'approvalQ') {
     UI[k] = e.target.value; const pos = e.target.selectionStart; render();
     const i = $(`[data-ui=${k}]`); i.focus(); i.setSelectionRange(pos, pos);
   }
@@ -2317,40 +2541,29 @@ function classOfOwner(owner) {
 const vodOwnerClass = (v) => v.ownerClass || classOfOwner(v.owner) || '';
 const vodOwnerName = (v) => v.ownerName || ownerName(v.owner);
 function viewVods() {
-  const vods = S.vods || [];
-  // Folders are class-first - the first thing anyone sees on this page - because that is how a coach actually
-  // goes looking for footage ("show me Oracle VODs"), not by hunting through every player one at a time. A
-  // class folder exists only once a VOD from someone currently playing it actually exists; it is never created
-  // or managed by hand. Players with no resolvable class (an unmapped weapon pair, or no active character at
-  // all) land in one "Other" folder rather than being silently dropped. A spectator/overview recording is not
-  // really about whoever posted it at all - marking it as such (see the posting form) pulls it out of the
-  // class grouping entirely into its own folder, shown first since it tends to be what a coach checks for
-  // whole-fight analysis before drilling into any one player's own view.
-  const spectatorVods = vods.filter((v) => v.spectator);
-  const byClass = {};
-  for (const v of vods) { if (v.spectator) continue; const cls = vodOwnerClass(v) || 'Other'; (byClass[cls] ??= []).push(v); }
-  const classFolders = Object.entries(byClass).sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
-  return `
-  <div class="page-head"><div><h1>VODs</h1><div class="muted">Post a YouTube link for a coach to review live over Discord, or browse what has been shared with you.</div></div></div>
-  <button class="btn primary" style="margin-bottom:16px" data-act="vod-post-open">+ Post a VOD</button>
-  ${spectatorVods.length ? vodClassFolder('Spectator PoV', spectatorVods, '🎥') : ''}
-  ${classFolders.length ? classFolders.map(([cls, list]) => vodClassFolder(cls, list)).join('') : (spectatorVods.length ? '' : '<div class="empty">No VODs yet.</div>')}`;
+  const all = S.vods || [], q = (UI.vodLibraryQ || '').trim().toLowerCase();
+  const vods = all.filter(v => (!q || [v.title, vodOwnerName(v), vodOwnerClass(v), v.note, v.type].join(' ').toLowerCase().includes(q)) && (!UI.vodLibraryType || v.type === UI.vodLibraryType) && (!UI.vodLibraryStatus || (UI.vodLibraryStatus === 'finished' ? v.finished : !v.finished)));
+  const byClass = new Map();
+  for (const v of vods) { if (v.spectator) continue; const cls = vodOwnerClass(v) || 'Other'; if (!byClass.has(cls)) byClass.set(cls, []); byClass.get(cls).push(v); }
+  const folders = [...byClass].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
+  const spectator = vods.filter(v => v.spectator);
+  return `<section class="vod-library"><div class="page-head"><div><h1>VODs</h1><div class="muted">Your footage. Your class. Your next improvement.</div></div><button class="btn primary" data-act="vod-post-open">+ Post a VOD</button></div>
+    <div class="panel vod-library-filters"><input aria-label="Search recordings or players" placeholder="Search recordings or players…" data-ui="vodLibraryQ" value="${esc(UI.vodLibraryQ || '')}"><select aria-label="Recording type" data-ui="vodLibraryType">${opts(S.cfg.vodTypes || [], UI.vodLibraryType || '', 'All types')}</select><select aria-label="Review status" data-ui="vodLibraryStatus"><option value="">All review states</option><option value="finished" ${UI.vodLibraryStatus === 'finished' ? 'selected' : ''}>Finished</option><option value="unfinished" ${UI.vodLibraryStatus === 'unfinished' ? 'selected' : ''}>Not finished</option></select><span class="muted small">${vods.length} of ${all.length} recordings</span></div>
+    ${spectator.length ? vodClassFolder('Spectator PoV', spectator, true) : ''}
+    ${folders.map(([cls, list], i) => vodClassFolder(cls, list, false, i === 0)).join('')}
+    ${!vods.length ? `<div class="empty">${all.length ? 'No recordings match your filters.' : 'No VODs yet. Post a YouTube link to get started.'}</div>` : ''}</section>`;
 }
-function vodClassFolder(label, vods, fixedIcon) {
-  const classDef = !fixedIcon && (S.cfg.classes || []).find((c) => c.name === label);
-  const icons = fixedIcon ? `<span class="wicons" style="font-size:18px">${fixedIcon}</span>` : classDef ? `<span class="wicons">${classDef.weapons.map(weaponIcon).join('')}</span>` : '';
-  const byOwner = {};
-  for (const v of vods) (byOwner[v.owner] ??= []).push(v);
-  const ownerFolders = Object.entries(byOwner).map(([owner, list]) => ({ owner, list: list.slice().sort((a, b) => b.recordedDate.localeCompare(a.recordedDate) || b.id - a.id) }))
-    .sort((a, b) => vodOwnerName(a.list[0]).localeCompare(vodOwnerName(b.list[0])));
-  return `<details class="fold" style="margin-bottom:12px"><summary>${icons}${esc(label)} <span class="muted small">(${vods.length})</span></summary>
-    <div class="fold-body">${ownerFolders.map((f) => vodFolder(f.owner, f.list)).join('')}</div>
-  </details>`;
+function vodClassFolder(label, vods, spectator = false, first = false) {
+  const classDef = !spectator && (S.cfg.classes || []).find(c => c.name === label);
+  const icons = classDef ? `<span class="wicons">${classDef.weapons.map(weaponIcon).join('')}</span>` : '<span class="vod-collection-symbol" aria-hidden="true">▷</span>';
+  const byOwner = new Map();
+  for (const v of vods) { if (!byOwner.has(v.owner)) byOwner.set(v.owner, []); byOwner.get(v.owner).push(v); }
+  const groups = [...byOwner].map(([owner, list]) => ({owner, list: list.slice().sort((a,b) => String(b.recordedDate || '').localeCompare(String(a.recordedDate || '')) || b.id-a.id)})).sort((a,b) => vodOwnerName(a.list[0]).localeCompare(vodOwnerName(b.list[0])));
+  const key = 'vod-collection-' + encodeURIComponent(label), open = (UI.vodLibraryQ || '').trim() || (UI.fold?.[key] ?? first);
+  return `<details class="vod-collection" data-fold="${esc(key)}" ${open ? 'open' : ''}><summary>${icons}<strong>${esc(label)}</strong><span class="muted small">${vods.length} recordings · ${groups.length} players</span></summary><div class="vod-collection-body">${groups.map(g => vodFolder(g.owner,g.list)).join('')}</div></details>`;
 }
 function vodFolder(owner, list) {
-  return `<details class="fold vod-player-fold" style="margin-bottom:10px"><summary>${esc(vodOwnerName(list[0]))} <span class="muted small">(${list.length})</span></summary>
-    <div class="fold-body">${list.map((v) => vodRow(v)).join('')}</div>
-  </details>`;
+  return `<section class="vod-player-group"><h3>${esc(vodOwnerName(list[0]))}<span class="muted small">${list.length} recordings</span></h3>${list.map(vodRow).join('')}</section>`;
 }
 function vodPostDialog() {
   const coach = S.isCoach, students = S.myStudents || [], studentNames = S.myStudentNames || {};
@@ -2377,19 +2590,28 @@ function fmtVodTimestamp(seconds) {
 }
 // Just the "Coaching points" list - pulled out of viewVodReview so it can also be redrawn on its own (see
 // vodPatchReview below), without touching the player/iframe next to it.
+function vodToolIcon(name) {
+  const paths = {
+    pen: 'M15 4l5 5M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z',
+    clear: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
+    expand: 'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5',
+    plus: 'M12 5v14M5 12h14'
+  };
+  return `<svg class="vod-tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || paths.plus}"/></svg>`;
+}
 function vodMarkerPanelHtml(v) {
   const markers = Array.isArray(v.markers) ? v.markers : [];
-  return `<h3 style="margin-top:0">Coaching points <span class="muted small">(${markers.length})</span></h3>
+  return `<div class="vod-points-count muted small">${markers.length} saved ${markers.length === 1 ? 'point' : 'points'}</div>
       ${markers.length ? `<div class="vod-marker-list">${markers.map((m) => `<div class="vod-marker" data-marker-row="${m.id}">
         <button type="button" class="vod-marker-jump" data-act="vod-marker-jump" data-marker-id="${m.id}" title="Jump to ${fmtVodTimestamp(m.timestamp)}">
           <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)} <span class="muted small" style="font-weight:400">${esc(m.createdByName || m.createdBy)}</span></span><span class="vod-marker-note">${esc(m.note)}</span>
         </button>
-        ${v.canManage ? `<button type="button" class="btn sm danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete</button>` : ''}
+        ${v.canManage ? `<details class="menu vod-marker-actions"><summary aria-label="Actions for coaching point at ${fmtVodTimestamp(m.timestamp)}">⋯</summary><div class="menu-list"><button type="button" class="danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete coaching point</button></div></details>` : ''}
       </div>`).join('')}</div>` : '<div class="empty">No coaching points yet.</div>'}`;
 }
 function vodReviewSubtitle(v) {
   const visText = v.visibility === 'everyone' ? 'Shared with everyone' : v.visibility === 'class' ? `Shared with ${esc(v.visibleClass)}` : 'Private';
-  return `${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''} · ${visText}`;
+  return `<span>${esc(vodOwnerName(v))}</span><span class="vod-visibility-badge">${visText}</span>${v.note ? '<span class="vod-header-note">' + esc(v.note) + '</span>' : ''}`;
 }
 // A small checkmark next to the title wherever the VOD is listed or opened - driven by the coach's own
 // "Mark as finished" toggle (see vodReviewsPanelHtml), not by whether a review note has been written: writing
@@ -2411,7 +2633,7 @@ function vodReviewEntryHtml(v, r) {
 function vodReviewsPanelHtml(v) {
   if (v.spectator) return '';
   const reviews = Array.isArray(v.reviews) ? v.reviews : [];
-  return `<h3 style="margin-top:0">Review${vodReviewedBadge(v)}</h3>
+  return `<div class="vod-review-status muted small">${v.finished ? 'Finished' : 'Not finished'}</div>
     ${reviews.length ? `<div class="vod-review-list">${reviews.map((r) => vodReviewEntryHtml(v, r)).join('')}</div>` : '<div class="empty">Not reviewed yet.</div>'}
     ${v.canReview ? `<div class="seg" style="margin-top:10px;flex-wrap:wrap">
       <button type="button" class="btn sm primary" data-act="vod-review-open" data-id="${v.id}">${reviews.length ? 'Add review' : 'Write a review'}</button>
@@ -2422,10 +2644,9 @@ function viewVodReview(id) {
   const v = (S.vods || []).find((x) => x.id === Number(id));
   if (!v) return `<div class="page-head"><h1>VOD not found</h1></div><div class="empty">This VOD may have been deleted, or you may not have access to it.</div>`;
   return `
-  <div class="page-head"><div><h1 id="vod-review-title">${esc(v.title)}${vodReviewedBadge(v)}</h1><div class="muted" id="vod-review-sub">${vodReviewSubtitle(v)}</div></div>
-    <a href="#/vods" class="btn sm">← Back to VODs</a></div>
-  <div class="vod-review-grid">
-    <div class="panel">
+  <div class="page-head vod-studio-head"><div><a href="#/vods" class="vod-back-link">← Back to VODs</a><h1 id="vod-review-title">${esc(v.title)}${vodReviewedBadge(v)}</h1><div class="muted" id="vod-review-sub">${vodReviewSubtitle(v)}</div></div></div>
+  <div class="vod-review-grid vod-studio">
+    <div class="vod-studio-video">
       <div id="vod-player-wrap" class="vod-player-wrap">
         <div class="vod-video-area">
           <div id="vod-yt-player"></div>
@@ -2433,26 +2654,53 @@ function viewVodReview(id) {
         </div>
         <div class="vod-toolbar">
           <span class="vod-colors" id="vod-colors">${['#e2685c', '#e8c468', '#7cc4b8', '#ebe5e3'].map((c, i) => `<button type="button" class="vod-color ${i === 0 ? 'active' : ''}" data-act="vod-color" data-color="${c}" style="background:${c}" aria-label="Draw in this colour"></button>`).join('')}</span>
-          <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn">✏️ Draw</button>
-          <button type="button" class="btn sm" data-act="vod-draw-clear">🗑️ Clear</button>
-          <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">⛶ Fullscreen</button>
+          <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn" aria-pressed="false">${vodToolIcon('pen')}<span>Draw</span></button>
+          <button type="button" class="btn sm" data-act="vod-draw-clear">${vodToolIcon('clear')}<span>Clear</span></button>
+          <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">${vodToolIcon('expand')}<span>Fullscreen</span></button>
+          ${v.canManage ? `<button type="button" class="btn sm primary" data-act="vod-compose">${vodToolIcon('plus')}<span>Add coaching point</span></button>` : ''}
         </div>
       </div>
-      ${v.canManage ? `<form data-form="vod-marker" class="panel" style="margin-top:12px">
-        <h3 style="margin-top:0">Save coaching point</h3>
-        <div class="muted small" style="margin:-4px 0 10px">Saved at the video's current position. Draw on the video first if you want a marking attached - otherwise this saves as a plain timestamped note.</div>
-        <div class="row">
+      ${v.canManage ? `<details class="vod-composer panel" id="vod-composer"><summary>Add a coaching point</summary><form data-form="vod-marker">
+        <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" data-autogrow required></textarea></div>
+        <div class="link-row vod-composer-save"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
+        <p class="muted small vod-composer-hint">Saved at the current video position, with any drawing attached.</p>
+        <details class="vod-drawing-settings"><summary>Drawing settings</summary><div class="row">
           <div class="field"><label for="vm-before">Show marking before (seconds)</label><input id="vm-before" name="beforeSeconds" type="number" min="0" max="10" step="0.5" value="2"></div>
           <div class="field"><label for="vm-after">Show marking after (seconds)</label><input id="vm-after" name="afterSeconds" type="number" min="0" max="10" step="0.5" value="2"></div>
-        </div>
-        <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" data-autogrow required></textarea></div>
-        <div class="link-row"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
-      </form>` : ''}
-      ${vodReviewsPanelHtml(v) ? `<div class="panel vod-review-panel" style="margin-top:12px">${vodReviewsPanelHtml(v)}</div>` : ''}
+        </div></details>
+      </form></details>` : ''}
     </div>
-    <div class="panel vod-marker-panel">${vodMarkerPanelHtml(v)}</div>
+    <aside class="panel vod-studio-sidebar">
+      <div class="vod-studio-tabs" role="tablist" aria-label="Coaching workspace">
+        <button type="button" role="tab" id="vod-tab-points" aria-controls="vod-pane-points" aria-selected="true" data-act="vod-studio-tab" data-tab="points">Coaching points</button>
+        ${!v.spectator ? '<button type="button" role="tab" id="vod-tab-review" aria-controls="vod-pane-review" aria-selected="false" tabindex="-1" data-act="vod-studio-tab" data-tab="review">Review</button>' : ''}
+      </div>
+      <div id="vod-pane-points" role="tabpanel" aria-labelledby="vod-tab-points"><div class="vod-marker-panel">${vodMarkerPanelHtml(v)}</div></div>
+      ${!v.spectator ? `<div id="vod-pane-review" role="tabpanel" aria-labelledby="vod-tab-review" hidden><div class="vod-review-panel">${vodReviewsPanelHtml(v)}</div></div>` : ''}
+    </aside>
   </div>`;
 }
+ACTIONS['vod-compose'] = () => {
+  const composer = $('#vod-composer');
+  if (composer) { composer.open = true; const note = $('#vm-note'); if (note) { autosizeTextarea(note); note.focus({preventScroll:true}); } composer.scrollIntoView({block:'nearest',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'}); }
+};
+ACTIONS['vod-studio-tab'] = (el) => {
+  const tab = el.dataset.tab === 'review' ? 'review' : 'points';
+  for (const name of ['points','review']) {
+    const button = $('#vod-tab-' + name), pane = $('#vod-pane-' + name);
+    if (button) { button.setAttribute('aria-selected', String(tab === name)); button.tabIndex = tab === name ? 0 : -1; }
+    if (pane) pane.hidden = tab !== name;
+  }
+};
+// Native button keyboard support plus conventional arrow navigation between tabs.
+document.addEventListener('keydown', e => {
+  if (!e.target?.matches?.('[data-act="vod-studio-tab"]') || !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+  const buttons = [...document.querySelectorAll('[data-act="vod-studio-tab"]')];
+  if (!buttons.length) return;
+  e.preventDefault();
+  const index = buttons.indexOf(e.target), next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length-1 : (index + (e.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length;
+  buttons[next].focus(); ACTIONS['vod-studio-tab'](buttons[next]);
+});
 // Re-render while the SAME VOD review page is already open updates just the header text and the coaching-point
 // list, in place - leaving the player wrap (iframe, canvas, toolbar) completely alone. This is what actually
 // fixes the mobile "save a coaching point -> black screen -> nothing works after that" bug: the earlier fix
@@ -2542,7 +2790,8 @@ ACTIONS['vod-draw-toggle'] = (el) => {
   const canvas = $('#vod-draw-canvas'), on = !canvas.classList.contains('active');
   canvas.classList.toggle('active', on);
   el.classList.toggle('primary', on);
-  el.textContent = on ? '✏️ Drawing (on)' : '✏️ Draw';
+  el.innerHTML = vodToolIcon('pen') + `<span>${on ? 'Drawing on' : 'Draw'}</span>`;
+  el.setAttribute('aria-pressed', String(on));
 };
 ACTIONS['vod-draw-clear'] = () => { if (vodDraw) { vodDraw.strokes = []; vodDraw.currentStroke = null; redrawVodStrokes(); } };
 ACTIONS['vod-color'] = (el) => {
@@ -2725,13 +2974,17 @@ function vodRow(v) {
   // picker at all; a coach or officer keeps the full one, since sharing a VOD across classes is sometimes
   // exactly the point for them.
   const selfOnly = !!v.promoteOwnClassOnly;
-  return `<div class="rule-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
-    <div style="flex:1;min-width:220px">
+  const videoId = /^[A-Za-z0-9_-]{11}$/.test(v.videoId || '') ? v.videoId : '';
+  return `<article class="vod-recording"><div class="vod-recording-main">
+    <a class="vod-thumbnail" href="#/vods/${v.id}" aria-label="${esc('Open review: ' + v.title)}"><span aria-hidden="true">▷</span>${videoId ? `<img src="https://i.ytimg.com/vi/${videoId}/hqdefault.jpg" loading="lazy" referrerpolicy="no-referrer" alt="">` : ''}</a>
+    <div class="vod-recording-info">
       <a href="#/vods/${v.id}" class="plain"><b>${esc(v.title)}</b>${vodReviewedBadge(v)}</a>
       <a href="${esc(v.url)}" target="_blank" rel="noopener" class="muted small" style="margin-left:6px">Open on YouTube ↗</a>
       <div class="muted small">${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''}</div>
     </div>
-    <div style="align-self:center">${visBadge}</div>
+    <div class="vod-recording-meta"><span class="muted small">${esc(v.type || '')} · ${esc(v.recordedDate || '')} · ${(v.markers || []).length} coaching points</span>${visBadge}<span class="vod-state ${v.finished ? 'finished' : ''}">${v.finished ? 'Finished' : 'Not finished'}</span></div>
+    <a class="btn sm" href="#/vods/${v.id}">Open review →</a></div>
+    ${v.canPromote || v.canManage ? '<details class="vod-recording-options"><summary>Manage recording</summary><div class="link-row">' : ''}
     ${v.canPromote ? `<form data-form="vod-vis" data-id="${v.id}" class="seg" style="align-items:center">
       <select name="visibility" data-act="vod-vis">
         <option value="private" ${v.visibility === 'private' ? 'selected' : ''}>Private</option>
@@ -2742,7 +2995,8 @@ function vodRow(v) {
       <button class="btn sm">Save</button>
     </form>` : ''}
     ${v.canManage ? `<button class="btn sm danger" data-act="vod-delete" data-id="${v.id}">Delete</button>` : ''}
-  </div>`;
+    ${v.canPromote || v.canManage ? '</div></details>' : ''}
+  </article>`;
 }
 // ---------------------------------------------------------------- Gear threads (admin index)
 // Sits right below VODs in the main nav, visible to officers (everyone's thread) and to real, in-guild class
@@ -2923,8 +3177,9 @@ CHANGES['loot-type'] = (el) => {
   const lu = el.value === 'Lucent', item = $('#lf-item-field'), amt = $('#lf-amt-field');
   item.classList.toggle('off', lu); amt.classList.toggle('off', !lu);
   $('#lf-i').required = !lu; $('#lf-a').required = lu;
-  if (lu) $('#lf-i').value = ''; else $('#lf-a').value = '';
+  $('#lf-i').disabled=lu;$('#lf-a').disabled=!lu;
   UI.lootFormType = el.value;
+  if(el.form)captureLootEntryDraft(el.form);
 };
 CHANGES['loot-type-edit'] = (el) => {
   const lu = el.value === 'Lucent';
@@ -2997,3 +3252,100 @@ function sizePartyPools(sidebar) {
     hint.textContent = rows + ' visible · ' + count + ' total · Scroll ↕';
   });
 }
+
+window.addEventListener('hashchange', closeMobileNav);
+
+function renderNavProfile(page) {
+ const name = String(S.user.name || 'Member'), role = isOfficer() ? 'Leadership' : S.user.role === 'applicant' ? 'Applicant' : 'Member';
+ const avatar = avatarImg(S.user) || '<span class="nav-avatar-fallback" aria-hidden="true">' + esc(name.slice(0,2).toUpperCase()) + '</span>';
+ $('#who').innerHTML = '<span class="nav-account-avatar">' + avatar + '</span><span class="nav-account-info"><b>' + esc(name) + '</b><span class="nav-account-role">' + role + '</span></span><span class="nav-profile-chevron" aria-hidden="true">⌄</span>';
+ $('#who').setAttribute('aria-label', 'Account menu for ' + name);
+ $('#who').title = name + ' · ' + role;
+ $('#nav-profile').open = UI.navProfileOpen !== false;
+ $('#nav-profile-links').innerHTML =
+   (canSee('profile') ? '<a href="#/profile" data-nav="profile" class="nav-account-link ' + (page === 'profile' ? 'active' : '') + '" ' + (page === 'profile' ? 'aria-current="page"' : '') + ' title="My profile">' + navIcon('profile') + '<span>My profile</span></a>' : '') +
+   '<a href="#" data-act="logout" class="nav-account-link" title="Sign out">' + navIcon('logout') + '<span>Sign out</span></a>';
+}
+function updateNavScrollCue() {
+ const list = $('#nav-links'), cue = $('#nav-scroll-cue');
+ if (!list || !cue) return;
+ cue.hidden = list.scrollHeight - list.clientHeight - list.scrollTop < 4;
+}
+document.addEventListener('toggle', e => {
+ if (e.target.id === 'nav-profile') { UI.navProfileOpen = e.target.open; if (window.requestAnimationFrame) window.requestAnimationFrame(updateNavScrollCue); }
+ if (e.target.classList && e.target.classList.contains('nav-group') && window.requestAnimationFrame) window.requestAnimationFrame(updateNavScrollCue);
+}, true);
+$('#nav-links').addEventListener('scroll', updateNavScrollCue, { passive:true });
+window.addEventListener('resize', updateNavScrollCue);
+
+function previewEventArtwork(form) {
+ const preview = form.querySelector('#ev-artwork-preview');
+ preview.src = eventArtwork({type:form.elements.type.value,artworkPreset:form.elements.artworkPreset.value,imageFile:form.elements.imageFile.value});
+}
+CHANGES['event-artwork-preset'] = el => { el.form.elements.imageFile.value='';previewEventArtwork(el.form); };
+CHANGES['event-artwork-upload'] = async el => {
+ const file=el.files && el.files[0]; if(!file)return;
+ const form=el.form, save=form.querySelector('.dlg-actions .btn.primary'), status=form.querySelector('#ev-artwork-status');
+ if(file.size>3e6){toast('Event images can be up to 3 MB.',true);el.value='';return;}
+ const controls=[save,el,form.elements.artworkPreset,form.querySelector('[data-act="event-artwork-clear"]')];
+ controls.forEach(control=>control.disabled=true); status.textContent='Uploading image…';
+ try {
+  const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});
+  const result=await api('/api/events/artwork','POST',{data});
+  if(form.isConnected){form.elements.imageFile.value=result.imageFile;previewEventArtwork(form);status.textContent='Image ready — save the event to apply.';}
+ } catch(error){if(form.isConnected)status.textContent='Upload failed.';toast(error.message || 'Could not upload image.',true);}
+ finally{if(form.isConnected){controls.forEach(control=>control.disabled=false);el.value='';}}
+};
+ACTIONS['event-artwork-clear'] = el => { const form=el.closest('form');form.elements.imageFile.value='';previewEventArtwork(form);form.querySelector('#ev-artwork-status').textContent='Using preset image.'; };
+
+
+// Bind only to the current render; release animations and observers before binding the next one.
+let specializationScrollCleanup = [];
+function initSpecializationScroll() {
+ specializationScrollCleanup.forEach(dispose=>dispose());
+ specializationScrollCleanup=[];
+ document.querySelectorAll('.board .specialization-scroll').forEach(button=>{
+  const text=button.querySelector('.specialization-text');
+  if(!text)return;
+  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
+  let animation=null,hovered=false,focused=false,pinned=false,disposed=false,distance=0;
+  const cancel=()=>{if(animation){animation.cancel();animation=null;}};
+  const update=()=>{
+   if(disposed)return;
+   cancel();
+   button.setAttribute('aria-pressed',String(pinned));
+   if(!(hovered||focused||pinned)||distance<=1||reduced.matches||typeof text.animate!=='function')return;
+   const pause=1200,travel=Math.max(1800,distance/22*1000),duration=pause*2+travel*2;
+   animation=text.animate([
+    {transform:'translateX(0)',offset:0},
+    {transform:'translateX(0)',offset:pause/duration},
+    {transform:'translateX(-'+distance+'px)',offset:(pause+travel)/duration},
+    {transform:'translateX(-'+distance+'px)',offset:(pause*2+travel)/duration},
+    {transform:'translateX(0)',offset:1}
+   ],{duration,iterations:Infinity,easing:'linear'});
+  };
+  const measure=()=>{
+   if(disposed)return;
+   const next=Math.max(0,text.scrollWidth-button.clientWidth);
+   button.classList.toggle('has-overflow',next>1);
+   button.disabled=next<=1;
+   if(next!==distance){distance=next;update();}
+  };
+  button.addEventListener('pointerenter',event=>{if(event.pointerType==='mouse'){hovered=true;update();}});
+  button.addEventListener('pointerleave',()=>{hovered=false;update();});
+  button.addEventListener('focus',()=>{focused=button.matches(':focus-visible');update();});
+  button.addEventListener('blur',()=>{focused=false;update();});
+  button.addEventListener('click',event=>{
+   event.stopPropagation();
+   if(reduced.matches||typeof text.animate!=='function'){toast(text.textContent);return;}
+   pinned=!pinned;update();
+  });
+  button.addEventListener('keydown',event=>{if(event.key==='Escape'){pinned=false;hovered=false;focused=false;update();}});
+  const observer=typeof ResizeObserver!=='undefined'?new ResizeObserver(measure):null;
+  if(observer){observer.observe(button);observer.observe(text);}
+  reduced.addEventListener?.('change',update);
+  measure();
+  specializationScrollCleanup.push(()=>{disposed=true;cancel();observer?.disconnect();reduced.removeEventListener?.('change',update);});
+ });
+}
+AFTER_RENDER.push(initSpecializationScroll);
