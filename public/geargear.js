@@ -145,8 +145,8 @@ function gearScreensHtml(t) {
   const selected = gearSelectedTopic(t);
   const tabs = t.screens.map(s => `<button type="button" role="tab" id="gear-topic-${s.sectionId}" aria-controls="gslide-${s.sectionId}" aria-selected="${String(s.sectionId) === selected}" tabindex="${String(s.sectionId) === selected ? 0 : -1}" class="gear-tab ${String(s.sectionId) === selected ? 'active' : ''}" data-act="gear-slide" data-section="${s.sectionId}">${esc(s.label)}</button>`).join('');
   const slides = t.screens.map(s => `<div class="gear-slide" role="tabpanel" aria-labelledby="gear-topic-${s.sectionId}" id="gslide-${s.sectionId}" ${String(s.sectionId) === selected ? '' : 'hidden'}>
-      <div class="gear-screenshot-preview">${s.image ? `<a href="${esc(s.image)}" target="_blank" rel="noopener noreferrer" aria-label="${esc('Open full-size ' + s.label + ' screenshot')}"><img class="gear-shot" src="${esc(s.image)}" alt="${esc(s.label)}"></a>` : '<div class="empty">No screenshot yet. Upload an image of your current setup.</div>'}</div>
-      <div class="gear-slide-head"><button type="button" class="btn sm" data-act="gear-screen-upload-open" data-section="${s.sectionId}" data-label="${esc(s.label)}">${s.image ? 'Replace image' : 'Upload image'}</button><span class="muted small">Images up to 6 MB</span></div>
+      <div class="gear-screenshot-preview">${s.image ? `<button type="button" class="gear-image-open" data-act="gear-image-open" data-section="${s.sectionId}" aria-label="${esc('Enlarge ' + s.label + ' screenshot')}"><img class="gear-shot" src="${esc(s.image)}" alt="${esc(s.label)}"></button>` : '<div class="empty">No screenshot yet. Upload an image of your current setup.</div>'}</div>
+      <div class="gear-slide-head"><button type="button" class="btn sm" data-act="gear-screen-upload-open" data-section="${s.sectionId}" data-label="${esc(s.label)}">${s.image ? 'Replace image' : 'Upload image'}</button><span class="muted small">Images up to 6 MB · paste a screenshot with Ctrl+V</span></div>
       <form data-form="gear-note" data-id="${t.memberId}" data-section="${s.sectionId}" class="gear-screenshot-note">
         <label for="gear-note-${s.sectionId}">Screenshot note</label><div class="gear-note-controls"><textarea id="gear-note-${s.sectionId}" name="note" maxlength="1000" placeholder="Anything the screenshot does not show…" data-autogrow>${esc(gearDraftValue(t,'gear-note','note',s.note,s.sectionId))}</textarea><button class="btn sm primary">Save note</button></div>
       </form>
@@ -164,6 +164,18 @@ ACTIONS['gear-slide'] = (el, d) => {
     if (button) { button.classList.toggle('active',active); button.setAttribute('aria-selected',String(active)); button.tabIndex = active ? 0 : -1; }
   }
 };
+ACTIONS['gear-image-open'] = (el,d) => {
+  const t=GEARTHREAD.data;
+  const image=d.section!==undefined ? t?.screens.find(s=>String(s.sectionId)===String(d.section)) : t?.folder.find(f=>f.kind==='image' && String(f.id)===String(d.item));
+  if(!image?.image)return;
+  const label=image.label || 'Coach folder image';
+  openDialog(`<section class="gear-image-viewer" aria-label="${esc(label)}"><div class="gear-image-toolbar"><h2>${esc(label)}</h2><button type="button" class="btn sm" data-act="gear-image-zoom" aria-pressed="false">Actual size</button><button type="button" class="btn sm" data-act="dlg-close" autofocus>Close</button></div><div class="gear-image-viewport" tabindex="0" aria-label="Screenshot — scroll to inspect when zoomed"><img src="${esc(image.image)}" alt="${esc(label)}"></div></section>`,true);
+};
+ACTIONS['gear-image-zoom'] = el => {
+  const image=$('#dlg .gear-image-viewport img');if(!image)return;
+  const zoomed=el.getAttribute('aria-pressed')!=='true';
+  image.classList.toggle('actual-size',zoomed);el.setAttribute('aria-pressed',String(zoomed));el.textContent=zoomed?'Fit to screen':'Actual size';
+};
 document.addEventListener('keydown', e => {
   if (!e.target?.matches?.('.gear-topic-tabs [role="tab"]') || !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
   const buttons = [...document.querySelectorAll('.gear-topic-tabs [role="tab"]')];
@@ -178,25 +190,37 @@ document.addEventListener('keydown', e => {
 // a single-image upload needs the same popup (so far just this one, but the folder's "attach image" could
 // grow into it later without duplicating the dropzone markup/handlers).
 function gearUploadDialog({ title, section, onFile }) {
-  gearDropHandler = onFile;
   openDialog(`<h2>${esc(title)}</h2>
-    <div class="gear-dropzone" id="gear-dropzone" data-section="${section == null ? '' : section}">
+    <div class="gear-dropzone" id="gear-dropzone" tabindex="0" aria-label="Image upload: drop, choose a file or paste with Ctrl+V" data-section="${section == null ? '' : section}">
       <div class="gear-dropzone-inner">
         <div>Drag and drop an image here</div>
+        <div class="muted small" style="margin-top:8px">or paste a screenshot with Ctrl+V (⌘+V on Mac)</div>
         <div class="muted small" style="margin:8px 0">or</div>
         <button type="button" class="btn primary" data-act="gear-dropzone-pick">Choose a file</button>
         <input type="file" id="gear-dropzone-input" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" data-act="gear-dropzone-file">
       </div>
     </div>
+    <p id="gear-upload-status" class="muted small" role="status" aria-live="polite">PNG, JPEG, GIF or WebP · up to 6 MB</p>
     <div class="row" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn" data-act="dlg-close">Cancel</button></div>`);
+  const context=gearUploadContext={thread:GEARTHREAD,zone:document.getElementById('gear-dropzone'),busy:false};
+  gearDropHandler=async file=>{
+    if(!gearUploadIsCurrent(context) || context.busy)return;
+    context.busy=true;context.zone.setAttribute('aria-busy','true');
+    const status=$('#gear-upload-status'),pick=document.getElementById('gear-dropzone-input');
+    if(status)status.textContent='Uploading screenshot…';if(pick)pick.disabled=true;
+    try{const ok=await onFile(file,context);if(ok && gearUploadIsCurrent(context))closeDialog();}
+    finally{context.busy=false;context.zone.removeAttribute('aria-busy');if(pick)pick.disabled=false;if(gearUploadIsCurrent(context) && status)status.textContent='PNG, JPEG, GIF or WebP · up to 6 MB';}
+  };
+  context.zone?.focus();
 }
-let gearDropHandler = null;
+let gearDropHandler = null, gearUploadContext = null;
+const gearUploadIsCurrent = context => context===gearUploadContext && GEARTHREAD===context.thread && onGearThreadPage(context.thread.id) && $('#dlg')?.open && document.getElementById('gear-dropzone')===context.zone;
 ACTIONS['gear-screen-upload-open'] = (el, d) => {
-  const sectionId = d.section;
-  gearUploadDialog({ title: `Upload ${d.label} screenshot`, section: sectionId, onFile: (file) => gearUploadScreenFile(sectionId, file) });
+  const screen=GEARTHREAD.data?.screens.find(s=>String(s.sectionId)===String(d.section));if(!screen)return;
+  gearUploadDialog({ title: `Upload ${screen.label} screenshot`, section: screen.sectionId, onFile: (file,context) => gearUploadScreenFile(screen.sectionId, file,context) });
 };
 ACTIONS['gear-dropzone-pick'] = () => { const i = document.getElementById('gear-dropzone-input'); if (i) i.click(); };
-CHANGES['gear-dropzone-file'] = (el) => { const file = el.files[0]; if (file && gearDropHandler) gearDropHandler(file); };
+CHANGES['gear-dropzone-file'] = (el) => { const file = el.files[0]; el.value=''; if (file && gearDropHandler) gearDropHandler(file); };
 // Delegated so it survives every re-render of the dialog's contents, same reasoning as the chat list's
 // scroll listener above - the actual .gear-dropzone element is destroyed and recreated each time openDialog runs.
 document.addEventListener('dragover', (e) => { const z = e.target.closest && e.target.closest('.gear-dropzone'); if (z) { e.preventDefault(); z.classList.add('over'); } });
@@ -207,13 +231,35 @@ document.addEventListener('drop', (e) => {
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (file && gearDropHandler) gearDropHandler(file);
 });
-function gearUploadScreenFile(sectionId, file) {
-  if (!/^image\//.test(file.type)) { toast('That is not an image file.', true); return; }
-  if (file.size > 6e6) { toast('That picture is too large (limit 6 MB).', true); return; }
-  const thread = GEARTHREAD, id = thread.id, build = gearBuildKey();
-  const r = new FileReader();
-  r.onload = () => { if (GEARTHREAD !== thread) return; closeDialog(); gearAct(() => api(`/api/gearthreads/${id}/screens/${sectionId}`, 'PUT', { image: r.result, build })).then((ok) => ok && toast('Screenshot uploaded')); };
-  r.readAsDataURL(file);
+function gearClipboardImage(data) {
+  return [...(data?.files || [])].find(f=>f.type.startsWith('image/')) || [...(data?.items || [])].find(i=>i.kind==='file' && i.type.startsWith('image/'))?.getAsFile();
+}
+document.addEventListener('paste',e=>{
+  if(!onGearThreadPage(GEARTHREAD.id))return;
+  const upload=gearUploadContext && gearUploadIsCurrent(gearUploadContext);
+  const folder=!$('#dlg')?.open && e.target?.closest?.('form[data-form="gear-folder-post"]') && GEARTHREAD.data?.canPostFolder;
+  const pagePaste=!$('#dlg')?.open && !folder && !e.target?.closest?.('input,textarea,select,[contenteditable]') && GEARTHREAD.data?.screens.length;
+  if(!upload && !folder && !pagePaste)return;
+  const file=gearClipboardImage(e.clipboardData);if(!file)return;
+  e.preventDefault();
+  if(upload)gearDropHandler(file);
+  else if(folder)CHANGES['gear-folder-image']({files:[file],value:''});
+  else {ACTIONS['gear-screen-upload-open'](null,{section:gearSelectedTopic(GEARTHREAD.data)});gearDropHandler?.(file);}
+});
+function gearValidImage(file) {
+  if(!/^image\/(png|jpeg|gif|webp)$/i.test(file.type)){toast('Use a PNG, JPEG, GIF or WebP image.',true);return false;}
+  if(file.size>6e6){toast('That picture is too large (limit 6 MB).',true);return false;}
+  return true;
+}
+async function gearUploadScreenFile(sectionId, file,context) {
+  if(!gearValidImage(file))return false;
+  const thread=GEARTHREAD,id=thread.id,build=gearBuildKey();
+  try{
+    const image=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Could not read this image. Please try again.'));r.onabort=()=>reject(Error('Image reading was cancelled.'));r.readAsDataURL(file);});
+    if(!gearUploadIsCurrent(context))return false;
+    const ok=await gearAct(()=>api(`/api/gearthreads/${id}/screens/${sectionId}`,'PUT',{image,build}));
+    if(ok && GEARTHREAD===thread)toast('Screenshot uploaded');return ok;
+  }catch(e){toast(e.message,true);return false;}
 }
 FORMS['gear-note'] = (f, fd) => {
   const t = GEARTHREAD.data;
@@ -328,7 +374,7 @@ function gearFolderHtml(t) {
     <div class="gear-folder-item">
       <div class="gear-chat-meta"><b>${esc(f.postedByName)}</b><span class="muted small">${new Date(f.at).toLocaleString()}</span>
         ${(isOfficer() || f.postedBy === S.user.key) ? `<button type="button" class="x" data-act="gear-folder-del" data-id="${t.memberId}" data-item="${f.id}" aria-label="Remove">×</button>` : ''}</div>
-      ${f.kind === 'image' ? `<img class="gear-shot" style="max-height:220px" src="${esc(f.image)}" alt="">` : ''}
+      ${f.kind === 'image' ? `<button type="button" class="gear-image-open" data-act="gear-image-open" data-item="${f.id}" aria-label="Enlarge coach folder image"><img class="gear-shot" style="max-height:220px" src="${esc(f.image)}" alt="Coach folder image"></button>` : ''}
       ${f.kind === 'link' ? `<a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.text || f.url)}</a>` : ''}
       ${f.kind === 'text' || (f.kind !== 'link' && f.text) ? `<div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(f.text)}</div>` : ''}
     </div>`).join('') : '<div class="muted small">Nothing posted here yet.</div>';
@@ -339,17 +385,18 @@ function gearFolderHtml(t) {
         <div class="field" style="flex:1"><input name="url" type="url" aria-label="Resource link" value="${esc(gearDraftValue(t,'gear-folder-post','url'))}" placeholder="https://... (optional link)" maxlength="300"></div>
         <label class="btn sm" style="margin:0">Attach image<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-act="gear-folder-image" class="hidden"></label>
       </div>
-      <div class="muted small" id="gear-folder-imgname"></div>
+      <div class="muted small" id="gear-folder-imgname">Attach an image or paste one here with Ctrl+V.</div>
       <button class="btn primary">Post</button>
     </form>` : '';
   return `<div class="gear-folder-list">${items}</div>${composer}`;
 }
 CHANGES['gear-folder-image'] = (el) => {
   const file = el.files[0]; if (!file) return;
-  if (file.size > 6e6) { toast('That picture is too large (limit 6 MB).', true); el.value = ''; return; }
+  if (!gearValidImage(file)) { el.value = ''; return; }
   const thread = GEARTHREAD;
   const r = new FileReader();
   r.onload = () => { if (GEARTHREAD !== thread) return; gearFolderImage = r.result; const n = $('#gear-folder-imgname'); if (n) n.textContent = 'Attached: ' + file.name; };
+  r.onerror = () => toast('Could not read this image. Please try again.',true);
   r.readAsDataURL(file);
 };
 FORMS['gear-folder-post'] = (f, fd) => {
