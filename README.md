@@ -3,6 +3,12 @@
 A small, self-hosted guild manager for Throne and Liberty. No database, no build step,
 no dependencies: just Node 18+ and one JSON file of data.
 
+## Skill-core update (v29)
+
+Gear Threads now include 271 source-attributed English Skill Core records, a shared
+Owned collection and per-build Active slots (1 weapon + 2 armor/accessory).
+See [SKILLCORES.md](SKILLCORES.md) for usage, source limitations and catalog imports.
+
 ## What it does
 
 - **Sign in with Discord**: every player signs in with their Discord account, like on the original guild manager.

@@ -181,10 +181,10 @@ if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE,
 // done - that pile-up is what "nearly crashed the server". Fixed by only ever marking the data dirty here and
 // actually writing it out a short moment later, asynchronously, so a whole burst of changes within that window
 // collapses into one disk write instead of one per request, and no request ever blocks on disk I/O at all.
-let dirty = false, writing = false, flushTimer = null;
+let dirty = false, writing = false, flushTimer = null, flushInFlight = null, shuttingDown = false;
 const SAVE_DEBOUNCE_MS = Number(process.env.SAVE_DEBOUNCE_MS || 200);
 function scheduleFlush() {
-  if (flushTimer || writing) return;            // a flush is already queued or in progress - it will pick up this change too
+  if (shuttingDown || flushTimer || writing) return; // shutdown performs its own final save after the current write
   flushTimer = setTimeout(flush, SAVE_DEBOUNCE_MS);
   flushTimer.unref?.();                         // a pending save should never be the reason the process stays alive
 }
@@ -199,11 +199,12 @@ function scheduleFlush() {
 // check), copy it out and run it through `python3 -m json.tool` or `jq .` - that re-indents a copy without
 // costing anything on every single save the server itself makes.
 const dbJson = () => JSON.stringify(db);
-async function flush() {
+function flush() {
   flushTimer = null;
-  if (!dirty) return;
+  if (!dirty || shuttingDown) return;
   dirty = false;
   writing = true;
+  flushInFlight = (async () => {
   try {
     const tmp = DB_FILE + '.tmp';
     await fs.promises.writeFile(tmp, dbJson());
@@ -215,6 +216,8 @@ async function flush() {
     writing = false;
     if (dirty) scheduleFlush();                   // more changes arrived while this write was in flight
   }
+  })();
+  return flushInFlight;
 }
 function save() { dirty = true; scheduleFlush(); }
 // Only used right before the process actually exits (see shutdown() below), where "a moment later" is too late -
@@ -228,7 +231,13 @@ function saveSync() {
   fs.writeFileSync(tmp, dbJson());
   fs.renameSync(tmp, DB_FILE);
 }
-function shutdown(code) {
+async function shutdown(code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  // An in-flight flush has already cleared dirty but may not have renamed its file yet.
+  // Let it finish before the final synchronous save, so it cannot overwrite newer data.
+  if (flushInFlight) await flushInFlight;
   try { saveSync(); } catch (e) { console.error('final save failed:', e); }
   process.exit(code);
 }

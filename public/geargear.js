@@ -251,16 +251,58 @@ FORMS['gear-chat'] = async (f, fd) => {
   finally { gearChatSending.delete(key); if (GEARTHREAD === thread && onGearThreadPage(thread.id)) render(); }
 };
 
-/* ---- skill cores (section 3) ---- */
-// The catalog (what skill cores even exist) is still to come - see server-geargear.js's SKILLCORE_CATALOG.
-// Until then there is nothing real to pick from, so this says so plainly instead of showing an empty, useless
-// checklist.
-function gearSkillcoresHtml(t) {
-  if (!t.skillcores.catalog.length) return '<div class="gear-not-configured">Not configured yet</div><p class="muted small">The skill core catalogue is not available in this version.</p>';
-  // Built once real catalog data exists (see the module comment above) - two checkbox columns, "Owned" and
-  // "Active", with Active implicitly limited to whatever is already ticked as Owned.
-  return '<div class="gear-not-configured">Not available yet</div><p class="muted small">Skill core editing is not implemented in this version.</p>';
+/* ---- source-attributed skill-core collection ---- */
+let gearCoreDialogContext = null, gearCoreSaving = false;
+const gearCoreCompatible = (core,t) => !core.weapons?.length || core.weapons.some(w=>(t.skillcores.weapons || []).includes(w));
+function gearCoreTile(core) {
+  const warning=core.descriptionStatus==='unresolved-source-tokens'?' Source contains unresolved values.':'';
+  return `<button type="button" class="gear-core-tile" data-act="gear-core-open" data-core="${esc(core.id)}" title="${esc(core.name+' · '+(core.weapons.join(' / ') || 'Universal')+'\n'+core.description+warning)}"><img src="${esc(core.icon)}" alt="" width="28" height="28" loading="lazy" referrerpolicy="no-referrer"><span>${esc(core.name)}</span></button>`;
 }
+function gearSkillcoresHtml(t) {
+  const skills={catalog:[],active:[],owned:[],...t.skillcores}, lookup=new Map(skills.catalog.map(c=>[c.id,c]));
+  const active=skills.active.map(id=>lookup.get(id)).filter(Boolean), unused=skills.owned.filter(id=>!skills.active.includes(id)).map(id=>lookup.get(id)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name));
+  const weapon=active.filter(c=>c.slot==='weapon'), equipment=active.filter(c=>c.slot==='equipment');
+  return `<section class="gear-core-collection"><h3>Active <span class="muted small">${active.length}/3</span></h3><div class="gear-core-slot-label">Weapon · ${weapon.length}/1</div>${weapon.map(gearCoreTile).join('') || '<div class="gear-core-empty">No weapon core active</div>'}<div class="gear-core-slot-label">Armor / accessories · ${equipment.length}/2</div>${equipment.map(gearCoreTile).join('') || '<div class="gear-core-empty">No equipment cores active</div>'}<div class="gear-core-owned-head"><h3>Owned <span class="muted small">${unused.length}</span></h3><button type="button" class="btn sm" data-act="gear-core-picker">+ Add</button></div><div class="gear-core-owned-list">${unused.map(gearCoreTile).join('') || '<div class="muted small">No additional cores in your collection.</div>'}</div><p class="gear-core-source muted small">${skills.owned.length} owned in total · shared across builds</p></section>`;
+}
+function gearCorePickerResults() {
+  const t=GEARTHREAD.data;if(!t)return '';
+  const q=(UI.gearCoreQ || '').trim().toLowerCase();
+  const list=t.skillcores.catalog.filter(c=>(UI.gearCoreLegacy || c.availability!=='legacy') && (!UI.gearCoreSlot || c.slot===UI.gearCoreSlot) && (!UI.gearCoreWeapon || (UI.gearCoreWeapon==='universal'?!c.weapons.length:c.weapons.includes(UI.gearCoreWeapon))) && (!q || (c.name+' '+c.description).toLowerCase().includes(q)));
+  return `<div class="muted small gear-core-result-count">${list.length} cores · ${t.skillcores.metadata?.verifiedAt ? 'Source snapshot '+esc(t.skillcores.metadata.verifiedAt) : 'Local catalog'}</div><div class="gear-core-picker-list">${list.map(gearCoreTile).join('') || '<div class="empty">No matching skill cores.</div>'}</div>`;
+}
+ACTIONS['gear-core-picker'] = () => {
+  const t=GEARTHREAD.data;if(!t)return;
+  openDialog(`<div class="gear-core-picker"><h2>Skill cores</h2><p class="muted small">Choose a core to view its effect and add it to your collection.</p><div class="gear-core-filters"><input type="search" aria-label="Search skill cores" placeholder="Search name or effect…" data-core-search value="${esc(UI.gearCoreQ || '')}"><select aria-label="Skill-core slot" data-act="gear-core-filter" data-field="gearCoreSlot"><option value="">All slots</option><option value="weapon" ${UI.gearCoreSlot==='weapon'?'selected':''}>Weapon</option><option value="equipment" ${UI.gearCoreSlot==='equipment'?'selected':''}>Armor / accessories</option></select><select aria-label="Skill-core weapon" data-act="gear-core-filter" data-field="gearCoreWeapon">${opts(['',...new Set(t.skillcores.catalog.flatMap(c=>c.weapons))].filter(Boolean).sort(),UI.gearCoreWeapon,'All weapons')}<option value="universal" ${UI.gearCoreWeapon==='universal'?'selected':''}>Universal</option></select><label class="small muted"><input type="checkbox" data-act="gear-core-filter" data-field="gearCoreLegacy" ${UI.gearCoreLegacy?'checked':''}> Include historical entries</label></div><div id="gear-core-results">${gearCorePickerResults()}</div><div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Close</button></div></div>`,true);
+};
+function refreshGearCoreResults(){const results=$('#gear-core-results');if(results)results.innerHTML=gearCorePickerResults();}
+CHANGES['gear-core-filter']=el=>{if(!['gearCoreSlot','gearCoreWeapon','gearCoreLegacy'].includes(el.dataset.field))return;UI[el.dataset.field]=el.type==='checkbox'?el.checked:el.value;refreshGearCoreResults();};
+document.addEventListener('input',e=>{if(e.target.matches?.('[data-core-search]')){UI.gearCoreQ=e.target.value;refreshGearCoreResults();}});
+ACTIONS['gear-core-open']=(el,d)=>{
+  const thread=GEARTHREAD,t=thread.data,core=t?.skillcores.catalog.find(c=>c.id===d.core);if(!core)return;
+  gearCoreDialogContext={thread,core};
+  const skills=t.skillcores,owned=skills.owned.includes(core.id),active=skills.active.includes(core.id),sameSlot=skills.active.map(id=>skills.catalog.find(c=>c.id===id)).filter(c=>c?.slot===core.slot).length;
+  const available=sameSlot<(core.slot==='weapon'?1:2) && skills.active.length<3,compatible=gearCoreCompatible(core,t);
+  openDialog(`<div class="gear-core-details"><div class="gear-core-detail-head"><img src="${esc(core.icon)}" alt="" width="44" height="44" referrerpolicy="no-referrer"><h2>${esc(core.name)}</h2></div><p class="muted small">${core.slot==='weapon'?'Weapon':'Armor / accessories'} · ${esc(core.weapons.join(' / ') || 'Universal')}</p><div class="gear-core-effect">${esc(core.description)}</div>${core.descriptionStatus==='unresolved-source-tokens'?'<p class="gear-core-notice">The source contains unresolved formula values. These values have not been guessed.</p>':''}${core.availability==='legacy'?'<p class="gear-core-notice">Historical entry retained by the source. Verify availability in your game version.</p>':''}<a href="${esc(core.sourceUrl)}" target="_blank" rel="noopener noreferrer">View source ↗</a>${owned && !active && (!compatible || !available)?`<p class="muted small">${!compatible?'This core does not match this build’s weapons.':'Deactivate another core in this slot before activating this one.'}</p>`:''}<div class="dlg-actions"><button type="button" class="btn" data-act="gear-core-picker">Browse catalog</button>${owned?`<button type="button" class="btn danger" data-act="gear-core-update" data-operation="remove" ${active?'disabled title="Deactivate this core first"':''}>Remove from Owned</button><button type="button" class="btn primary" data-act="gear-core-update" data-operation="${active?'deactivate':'activate'}" ${!active && (!compatible || !available)?'disabled':''}>${active?'Deactivate':'Set active'}</button>`:'<button type="button" class="btn primary" data-act="gear-core-update" data-operation="add">Add to Owned</button>'}<button type="button" class="btn" data-act="dlg-close">Close</button></div></div>`,true);
+};
+ACTIONS['gear-core-update']=async(el,d)=>{
+  if(gearCoreSaving)return;
+  const context=gearCoreDialogContext;
+  if(!context || GEARTHREAD!==context.thread){toast('This build has changed. Open the skill core again.',true);return;}
+  const t=context.thread.data,id=context.core.id,body={build:t.buildKey};
+  if(d.operation==='add')body.addOwned=[id];else if(d.operation==='remove')body.removeOwned=[id];else if(d.operation==='activate')body.active=[...t.skillcores.active,id];else if(d.operation==='deactivate')body.active=t.skillcores.active.filter(x=>x!==id);else return;
+  gearCoreSaving=true;el.disabled=true;
+  try{const ok=await gearAct(()=>api(`/api/gearthreads/${t.memberId}/skillcores`,'PUT',body));if(ok){closeDialog();toast('Skill cores saved');}else el.disabled=false;}finally{gearCoreSaving=false;}
+};
+// Optional catalog updates remain officer-only and never scrape an external site during page use.
+function gearSkillCatalogAdmin(){
+  const meta=UI.gearCatalogAdminMeta;
+  return `<div class="panel"><h3>Skill-core catalog</h3><p class="muted small">A local English source snapshot is bundled. Import a validated JSON catalog to update it; existing player references are protected.</p>${meta?`<p>${meta.entries?.length ?? meta.count} entries · ${esc(meta.source)} · ${esc(meta.verifiedAt)}</p>`:''}<div class="link-row"><button type="button" class="btn sm" data-act="gear-core-catalog-check">Catalog details</button><label class="btn sm">Import JSON<input type="file" class="hidden" accept="application/json,.json" data-act="gear-core-catalog-import"></label></div><p class="muted small">Source snapshots may contain historical entries or unresolved formulas. Effects are displayed as published, without guessed values.</p></div>`;
+}
+ACTIONS['gear-core-catalog-check']=async()=>{try{UI.gearCatalogAdminMeta=await api('/api/admin/skillcores/catalog');render();}catch(e){toast(e.message,true);}};
+CHANGES['gear-core-catalog-import']=async el=>{
+  const file=el.files?.[0];if(!file)return;if(file.size>4e6){toast('Catalog files can be up to 4 MB.',true);return;}
+  try{const data=JSON.parse(await file.text());UI.gearCatalogAdminMeta=await api('/api/admin/skillcores/catalog','PUT',data);render();toast('Catalog imported');}catch(e){toast(e.message,true);}finally{el.value='';}
+};
 
 /* ---- questlog (section 4) - the same field a character's own edit form already has ---- */
 function gearQuestlogHtml(t) {
@@ -350,3 +392,10 @@ function renderGearThread(t, chat, chatHasMore, chatLoadingOlder) {
     </div>
   </div>`;
 }
+
+// Skill-core icons come from Questlog's CDN. If it can't be reached (offline server, blocked host, moved file) show a
+// plain empty square instead of the browser's broken-image glyph.
+document.addEventListener('error', (e) => {
+  const t = e.target;
+  if (t && t.tagName === 'IMG' && t.closest && t.closest('.gear-core-tile, .gear-core-detail-head')) t.classList.add('icon-missing');
+}, true);
