@@ -1552,10 +1552,11 @@ function memberRow(m, at, o) {
   const rsvp = o.ev ? (o.ev.rsvps[m.id] === 'yes' ? 'yes' : o.ev.rsvps[m.id] === 'no' ? 'no' : 'none') : 'none';
   const dimKind = loa ? 'loa' : o.dim ? (rsvp === 'no' ? 'declined' : 'noreply') : null;
   const dimTitle = { loa: 'on an approved leave covering this event', declined: 'said not attending', noreply: 'has not answered yet' }[dimKind] || '';
+  const attendanceBadge = dimKind ? `<span class="member-attendance-badge attendance-${dimKind}">${{declined:'Not attending',noreply:'No reply',loa:'On leave'}[dimKind]}</span>` : '';
   const canToggleLoa = onLeave && (off || m.owner === S.user.key);
   return `<div class="mrow ${dimKind ? `dim dim-${dimKind}` : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${dimTitle ? ' (' + dimTitle + ')' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}
-    <div class="mtxt"><div class="midentity"><div class="mname"><span class="member-name-text">${esc(m.name)}</span>${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}${loa ? '<span class="tag loa" title="Approved leave of absence covering this event">LoA</span>' : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div></div>${spec}
+    <div class="mtxt"><div class="midentity"><div class="mname"><span class="member-name-text">${esc(m.name)}</span>${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div></div>${spec}${attendanceBadge}
     ${canToggleLoa ? `<div class="loa-inline"><button class="btn sm loa-toggle" data-act="loa-override" data-ev="${o.ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Remove override' : 'Attend anyway'}</button></div>` : ''}</div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
@@ -1591,23 +1592,23 @@ function partyCard(ctx, parties, p, i, ev, clearOn) {
   const attending = ev ? ms.filter((m) => m.mercenary || (ev.rsvps[m.id] === 'yes' && !loa(m))) : ms;
   if (clearOn && !attending.length) return '';
   const notAttending = (clearOn || !ev) ? [] : ms.filter((m) => !m.mercenary && (ev.rsvps[m.id] !== 'yes' || loa(m)));
-  return `<div class="party ${ms.length >= size ? 'party-full' : ''}" data-party="${i}">
+  return `<div class="party ${attending.length === size ? 'party-full' : ''}" data-party="${i}">
     <div class="phead">
       ${off ? `<span class="grip" draggable="true" data-drag="party" data-i="${i}" title="Drag to reorder parties" aria-hidden="true"></span>` : ''}
       ${off ? `<input class="party-name" ${at} data-act="party-rename" value="${esc(p.name)}" maxlength="40" aria-label="Party name">` : `<span class="party-title">${esc(p.name)}</span>`}
       <span class="muted small ${attending.length > size ? 'over-cap' : ''}">${attending.length}/${size}</span>
-      ${ph ? `<span class="muted small" title="${p.placeholderOverride ? 'Marked as placeholder' : 'Treated as a placeholder automatically (3 or fewer members)'}">Placeholder</span>` : ''}
+      ${ph ? `<span class="muted small" title="${p.placeholderOverride ? 'Marked as placeholder' : 'Treated as a placeholder automatically (no assigned members)'}">Placeholder</span>` : ''}
       ${off ? `<details class="menu"><summary aria-label="Options for ${esc(p.name)}">&hellip;</summary><div class="menu-list">
         <button data-act="p-left" ${at}>Move party left</button><button data-act="p-right" ${at}>Move party right</button>
         <button data-act="party-placeholder-toggle" ${at}>${ph ? 'Unmark as placeholder' : 'Mark as placeholder'}</button>
         <button data-act="p-clear" ${at}>Remove all members</button><button class="danger" data-act="party-del" ${at}>Delete party</button></div></details>` : ''}
     </div>
-    <div class="party-composition">${S.cfg.roles.map(r => `<span style="--c:${roleColor(r)}">${attending.filter(m => effectiveBuild(m, p).role === r).length} ${esc(r)}</span>`).join('')} ${ms.length >= size ? '<span class="full-label">Full</span>' : ''}</div>
+    <div class="party-composition">${S.cfg.roles.map(r => `<span style="--c:${roleColor(r)}">${attending.filter(m => effectiveBuild(m, p).role === r).length} ${esc(r)}</span>`).join('')} ${attending.length === size ? '<span class="full-label">Full</span>' : ''}</div>
     <div class="pdrop" ${off ? 'data-drop="party"' : ''} data-i="${i}">
       ${attending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev })).join('')}
-      ${notAttending.length ? `<div class="pnotattending"><div class="muted small">Not confirmed for this event</div>
+      ${Array.from({ length: Math.max(0, size - attending.length) }, () => `<div class="party-slot"><span>＋</span><span>Open slot</span></div>`).join('')}
+      ${notAttending.length ? `<div class="pnotattending" role="group" aria-label="Not confirmed for this event"><div class="not-confirmed-heading">Not confirmed <span>· ${notAttending.length}</span></div>
         ${notAttending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev, dim: true })).join('')}</div>` : ''}
-      ${Array.from({ length: Math.max(0, size - ms.length) }, (_, slot) => `<div class="party-slot"><span>＋</span><span>Open slot</span></div>`).join('')}
     </div></div>`;
 }
 
