@@ -2413,7 +2413,7 @@ const ADMIN_CATEGORIES = [
   ['appearance','Appearance',[appearanceAdmin,quotesAdmin]],
   ['discord','Discord',[discordAdmin,dailyScheduleAdmin,mercenariesAdmin]],
   ['people','People & access',[officersAdmin,coachesAdmin,adminPlayersList,approvalRulesAdmin,accessAdmin,adminSignIn]],
-  ['gear','Gear threads',[gearSectionsAdmin]],
+  ['gear','Gear threads',[gearSectionsAdmin,()=>typeof gearSkillCatalogAdmin==='function'?gearSkillCatalogAdmin():'']],
   ['shotcaller','Shotcaller',[()=>shotcallerAdmin()]],
   ['events','Events & attendance',[complianceAdmin,adminEventRules,adminPointsToggle]],
   ['experience','Notices & tags',[noticesAdmin,tagsAdmin]],

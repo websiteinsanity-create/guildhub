@@ -6,8 +6,8 @@
 //   - gearScreens: one screenshot+note slot per admin-defined topic (db.gearSectionTypes, officer-managed in
 //     Admin - see the routes near the bottom of this file) - a screen row is keyed by the topic's stable id,
 //     not its label, so renaming a topic in Admin never orphans the screenshot already sitting under it
-//   - gearSkills: per-character "which skill cores do you own, which are active right now" - the catalog
-//     itself (what skill cores exist at all) is still to come from the user, so it's empty until then
+//   - gearSkills: active cores per build; gearSkillOwnership: shared ownership per player.
+//     A source-attributed bundled English catalog is installed locally; officers may import updates.
 //   - questlogs: NOT owned here - it's the same field a character's own edit form already has
 //     (server-features.js's pickMember/cleanLinks); this module only adds a second, coach-reachable door to it
 //   - gearFolder: one-directional postings from admins/coaches that the player can see but not add to
@@ -82,10 +82,11 @@ module.exports = function install(ctx) {
   // renaming a topic carries its screenshot and note forward instead of orphaning them under the old name.
   const sectionTypes = () => db().gearSectionTypes;
 
-  // Skill core catalog: intentionally empty. The user is supplying the real list of skill cores later -
-  // until then, every thread's "owned"/"active" picker has nothing to offer and says so plainly rather than
-  // silently doing nothing.
-  const SKILLCORE_CATALOG = [];
+  // Source snapshot is bundled; no dependency on Questlog availability during normal use.
+  const {validateCatalog,validateActive} = require('./skillcore-catalog');
+  const bundledCatalog=validateCatalog(require('./catalog/skillcores.en.json'));
+  const catalog = () => db().skillCoreCatalog || bundledCatalog;
+  const catalogEntries = () => catalog().entries;
 
   // ---------------------------------------------------------------- images (screenshots, folder attachments)
   // Same sniff-by-magic-bytes + content-hash-filename approach as the branding upload in server-features.js,
@@ -120,15 +121,24 @@ module.exports = function install(ctx) {
         : { sectionId: t.id, label: t.label, image: '', note: '', updatedAt: null, updatedByName: '' };
     });
   }
-  // Skill cores and build links are per build too: main keeps the keys it always had (the member id; m.questlogs),
+  // Active cores and build links are per build: main keeps the original keys (member id; m.questlogs),
   // every other build gets "<memberId>:<buildId>" and its own entry in db.gearLinks.
   const skillKey = (memberId, key) => (key === 'main' ? memberId : `${memberId}:${key}`);
   const linksKey = (memberId, key) => `${memberId}:${key}`;
   const linksFor = (m, key) => (key === 'main' ? m.questlogs || [] : db().gearLinks[linksKey(m.id, key)] || []);
-  function skillsFor(memberId, key) {
-    const row = db().gearSkills[skillKey(memberId, key)] || { owned: [], active: [] };
-    return { catalog: SKILLCORE_CATALOG, owned: row.owned || [], active: row.active || [] };
+  function ownedFor(m) {
+    const shared = (db().gearSkillOwnership || {})[m.owner];
+    if (Array.isArray(shared)) return shared;
+    // Migrate legacy per-build ownership by union, including every class on this player's character.
+    return [...new Set(Object.entries(db().gearSkills).filter(([k])=>k===String(m.id) || k.startsWith(m.id+':')).flatMap(([,row])=>row.owned || []))];
   }
+  function skillsFor(m, b) {
+    const row = db().gearSkills[skillKey(m.id,b.key)] || {active:[]};
+    const build = b.key==='main'?m:(m.builds || []).find(x=>String(x.id)===b.key);
+    const owned=ownedFor(m), active=(row.active || []).filter(id=>owned.includes(id));
+    return {catalog:catalogEntries(),metadata:{source:catalog().source,gameVersion:catalog().gameVersion,verifiedAt:catalog().verifiedAt,count:catalogEntries().length},owned,active,weapons:[build?.primaryWeapon,build?.secondaryWeapon].filter(Boolean)};
+  }
+
   // threadFor() deliberately does NOT include chat any more - a coach's VOD review can run to several
   // thousand characters repeated many times over a long thread (real example: a single timestamped breakdown
   // of one VOD ran ~3000 characters on its own), so a thread's chat history needs to be paged, not shipped
@@ -143,7 +153,7 @@ module.exports = function install(ctx) {
       canPostFolder: canPostFolder(user, m, b),
       isOwner: m.owner === user.key,
       screens: screensFor(m.id, key),
-      skillcores: skillsFor(m.id, key),
+      skillcores: skillsFor(m, b),
       questlogs: linksFor(m, key),
       folder: D.gearFolder.filter((f) => f.memberId === m.id && rowKey(f) === key).map((f) => (f.image ? { ...f, image: '/uploads/' + f.image } : f))
         .sort((a, b) => b.at.localeCompare(a.at)),
@@ -284,15 +294,40 @@ module.exports = function install(ctx) {
     return sectionTypes();
   }, { officer: true });
 
-  // ---------------------------------------------------------------- skill cores (no change history - "just an adding feature")
+  // ---------------------------------------------------------------- skill cores
+  route('GET','/api/admin/skillcores/catalog',()=>catalog(),{officer:true});
+  route('PUT','/api/admin/skillcores/catalog',({body,user})=>{
+    let next;try{next=validateCatalog(body);}catch(e){need(false,400,e.message);}
+    const lookup=new Map(next.entries.map(e=>[e.id,e]));
+    const referenced=new Set([...Object.values(db().gearSkillOwnership || {}).flat(),...Object.values(db().gearSkills).flatMap(row=>[...(row.owned || []),...(row.active || [])])]);
+    need([...referenced].every(id=>lookup.has(id)),409,'The new catalog would remove skill cores still referenced by players. Keep their stable IDs in the catalog.');
+    const previous=new Map(catalogEntries().map(e=>[e.id,e]));
+    need([...referenced].every(id=>!previous.has(id) || (lookup.get(id).slot===previous.get(id).slot && JSON.stringify(lookup.get(id).weapons)===JSON.stringify(previous.get(id).weapons))),409,'Referenced skill-core slot and weapon compatibility cannot be changed by an import.');
+    db().skillCoreCatalog=next;save();audit(user,'skillcores.catalog.import',{type:'guild'},`${user.name} imported ${next.entries.length} skill cores (${next.gameVersion}).`);
+    return {count:next.entries.length,source:next.source,gameVersion:next.gameVersion,verifiedAt:next.verifiedAt};
+  },{officer:true});
   route('PUT', '/api/gearthreads/:id/skillcores', ({ body, user, params }) => {
-    const m = member(params.id), b = buildFor(user, m, body.build);
-    const catalogIds = new Set(SKILLCORE_CATALOG.map((s) => s.id));
-    const owned = [...new Set((Array.isArray(body.owned) ? body.owned : []).map(String))].filter((id) => catalogIds.has(id));
-    const active = [...new Set((Array.isArray(body.active) ? body.active : []).map(String))].filter((id) => owned.includes(id));
-    db().gearSkills[skillKey(m.id, b.key)] = { owned, active };
-    save();
-    return threadFor(user, m, b);
+    const m=member(params.id), b=buildFor(user,m,body.build), entries=catalogEntries(), ids=new Set(entries.map(e=>e.id));
+    const list=value=>{need(Array.isArray(value) && value.every(id=>typeof id==='string'),400,'Skill cores must be an array of IDs.');return [...new Set(value)];};
+    const oldOwned=ownedFor(m), current=db().gearSkills[skillKey(m.id,b.key)] || {active:[]};
+    // Delta updates prevent a coach editing one build from overwriting ownership added on another.
+    let owned=oldOwned.slice();
+    if(body.addOwned!==undefined){const add=list(body.addOwned);need(add.every(id=>ids.has(id)),400,'Unknown skill core.');owned=[...new Set([...owned,...add])];}
+    if(body.removeOwned!==undefined){const remove=list(body.removeOwned);owned=owned.filter(id=>!remove.includes(id));}
+    if(body.owned!==undefined){owned=list(body.owned);need(owned.every(id=>ids.has(id)),400,'Unknown skill core.');}
+    const removed=oldOwned.filter(id=>!owned.includes(id));
+    // Coaches may not remove ownership that affects an inaccessible build. Owners/officers can remove
+    // only after deactivating that core everywhere; no silent cross-build changes.
+    const affected=Object.entries(db().gearSkills).filter(([k])=>k===String(m.id) || k.startsWith(m.id+':')).some(([,row])=>(row.active || []).some(id=>removed.includes(id)));
+    need(!affected,409,'Deactivate this skill core in every build before removing it from Owned.');
+    const active=body.active===undefined?(current.active || []):list(body.active);
+    need(active.every(id=>owned.includes(id)),400,'Active skill cores must be owned.');
+    const build=b.key==='main'?m:(m.builds || []).find(x=>String(x.id)===b.key);
+    try{validateActive(active,entries,[build?.primaryWeapon,build?.secondaryWeapon].filter(Boolean));}catch(e){need(false,400,e.message);}
+    db().gearSkillOwnership ||= {};Object.defineProperty(db().gearSkillOwnership,m.owner,{value:owned,writable:true,enumerable:true,configurable:true});
+    for(const [k,row] of Object.entries(db().gearSkills))if(k===String(m.id)||k.startsWith(m.id+':'))delete row.owned;
+    db().gearSkills[skillKey(m.id,b.key)]={active};save();
+    return threadFor(user,m,b);
   });
 
   // ---------------------------------------------------------------- questlog (same field as the character's own edit form - see pickMember/cleanLinks - just reachable from a coach here too)

@@ -1,0 +1,3800 @@
+{
+  "schemaVersion": 1,
+  "language": "en",
+  "source": "Questlog Skill Cores (English / global page)",
+  "gameVersion": "Not stated by source",
+  "verifiedAt": "2026-10-25",
+  "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+  "entries": [
+    {
+      "id": "equipment:staff:absolute-zero",
+      "name": "Absolute Zero",
+      "slot": "equipment",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Significantly decreases the casting time of Frost Smokescreen's Specialization [Designated Ground Targeting]. Increases range to a 6m radius and has a 100% chance to apply Weaken: Frostbite that decreases Movement Speed by 20% per stack per sec for 3s to enemies within the area. Applies Bind: Icebound at 5 stacks. Frost Smokescreen's Burning Smokescreen specialization not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_91.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:acidic-poison",
+      "name": "Acidic Poison",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "At 25 stacks of Gale, creates an Acidic Poison area within a 3m radius for 2s that deals 120% of Base Damage to all enemies in the area every 0.5s and applies Weaken: Acidic Poison Weaken: Acidic Poison reduces all Defense by 100 and Movement Speed by 20% for 1s and stacks up to 10 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_141.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:adentus-s-fury",
+      "name": "Adentus's Fury",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When attacking with a Greatsword, increases Base Damage by 0.4% per 1,000 of current Health. Increases by up to 14.4% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_103.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:gauntlet:aftershock",
+      "name": "Aftershock",
+      "slot": "equipment",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Earthquake hit count by 2.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_GroundSmash.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:ahzreil-s-magic-defensive-wall",
+      "name": "Ahzreil's Magic Defensive Wall",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Damage Reduction +280 when using Shield Survival Technique",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_108.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:akman-s-fragment",
+      "name": "Akman's Fragment",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "While Selfless Diffusion is active, when Quick Fire connects, shoots an additional projectile that deals 120% of Base Damage and can be transferred up to 2 times to other enemies within a 3m radius. The projectile does not activate effects on hit, but applies the Gale effect. Does not apply additional effects from additional projectiles.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_56.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:ambush",
+      "name": "Ambush",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Shadow Strike, if your Critical Hit Chance is less than 3,000, increases Critical Hit Chance by 700 for 3s. If your Critical Hit Chance is 3,000 or higher, increases Critical Damage by 35% for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_158.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:ancient-demonic-beast-s-command",
+      "name": "Ancient Demonic Beast's Command",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Summon Constellation, the Milky Way skill can be used 1 time within 6s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_127.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:ancient-demonic-beast-s-footsteps",
+      "name": "Ancient Demonic Beast's Footsteps",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When affected by Collision: Prone from Ascending Cleave, Ascending Slash, Ankle Strike, Desperate Clash, or Tempest Strike, Shield Survival Technique can be used. Immediately removes Bind, Collision, Fear, Silence, Sleep and Stun, dealing 100% of Base Damage to enemies within 3m, and has a 80% chance to apply Collision: Push. Cooldown: 2 min",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_119.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:ancient-demonic-beast-s-strike",
+      "name": "Ancient Demonic Beast's Strike",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Each attack with Vampiric Strike has a(n) 70% chance to deal fixed damage equal to 400% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_120.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:angel-above-the-frontier-s-mind-s-eye",
+      "name": "Angel Above the Frontier's Mind's Eye",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Range +9% for the user and their party members within 16m",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_19.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:aridus-s-fury",
+      "name": "Aridus's Fury",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Base Damage by 12% if the user is stationary for 3s. Lasts for 2s after moving.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_115.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:assault-stance",
+      "name": "Assault Stance",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Collision: Push hit with Strategic Rush, increases Collision Chance by 60 for 4s. Max 5 stacks.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_147.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:atirat-s-claw",
+      "name": "Atirat's Claw",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes the range of Mad Sword Dance to 10m. Deactivates all targets to self upon skill activation. Boosts Off-hand Weapon Attack Chance by 70% and makes all attacks back attacks for 2s. Ignores Shield Health when dealing damage to PvP targets with Mad Sword Dance. With all damage dealt to PvP targets with Health at 50% or lower, ignores Defense by 2.5% of the target's Max Health. Boosts damage against monsters by up to 50% proportional to Frenzied Sword Dance's growth tier.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_160.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:atirat-s-flame",
+      "name": "Atirat's Flame",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Wild Barrage to an instant cast skill and changes the Attack Range to a 60-degree cone. On hit, has a(n) 80% chance to apply a Weaken effect to the target for 9s that deals Defense-ignoring damage equal to 30% of Base Damage + 6 damage per sec and decreases all CC Resistances by 20. Stacks up to 25 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_165.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:attack-defense-swap",
+      "name": "Attack Defense Swap",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Eclipse of Blood, increases Critical Damage and Heavy Attack Damage by 16% for 10s. When using Composure, increases Critical Damage Resistance and Heavy Attack Damage Resistance by 16% for 10s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_BloodCycle.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:sword-shield:barrier-crusher",
+      "name": "Barrier Crusher",
+      "slot": "equipment",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When dealing damage with A Shot at Victory, Annihilation Blade, or Earth Strike, has a(n) 80% chance to decrease Shield Health Received by 80% for 9s. If the target is already Shielded, applies Fixed Damage equal to 900% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_49.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:battle",
+      "name": "Battle",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On each Critical Hit or Heavy Attack hit, increases Block Chance by 1.6% for 3s. Stacks up to 10 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_StackingGuard.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:battlefield-frenzy",
+      "name": "Battlefield Frenzy",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Death Knell to Battlefield Frenzy. Increases Skill Damage Boost by 30 and Attack Speed by 3% for 6s on hit with Spear Active Skills. Stacks up to 3 times. At 3 stacks, applies a 15 cooldown.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_181.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:battlefield-momentum",
+      "name": "Battlefield Momentum",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Precision Dash can be charged up to 3 times. When the dash ends, creates a 7m radius area that increases allies' Defense by 5% and decreases enemies' Defense by 5% for 3s. Reusing it within 3s removes the effect for the target.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_151.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:beast-king-s-dream-demon",
+      "name": "Beast King's Dream Demon",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Blocking a melee attack decreases the attacker's Move and Attack Speed by 30% for 3s and applies Sleep: Curse for the next 3s (6s for monsters). Cooldown 30s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_29.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:black-anvil-passion",
+      "name": "Black Anvil Passion",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Sollant Bonus Increase 50% Weapon Mastery EXP Bonus Increase 50% Does not stack with other Black Anvil weapon effects",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:black-rage-s-boost",
+      "name": "Black Rage's Boost",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Magic, Melee, and Ranged Critical Hit Chance +20 per 1m of distance between the user and the target",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_23.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:crossbow:blade-storm",
+      "name": "Blade Storm",
+      "slot": "equipment",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Rapid Shot to [Blade Storm]. Attacks the target 5 times to deal damage proportional to Base Damage and applies a Weaken effect that decreases Magic, Melee, and Ranged Magic Defense by 250 for 6s. Does not apply Multi-Shot's Specialization Shield Removal effect",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_32.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:blazing-tornado",
+      "name": "Blazing Tornado",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Devastating Tornado's Attack Speed +100%, Movement Speed +20% for skill's duration. Attacks apply Serial Fire Bombs' Burning effect.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_42.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:blessed-haze",
+      "name": "Blessed Haze",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Karmic Haze to Blessed Haze. Instead of spreading curses to enemies, spreads your Enchanting Time and Valorous Barrier to allies at 33% of their remaining duration.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_143.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:blessing-steal",
+      "name": "Blessing Steal",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with Wind Snatcher, has a(n) 90% chance to remove 1 buff from target. Applicable skill effects Invincible Wall, Stalwart Bastion, Fortifying Shell, Trance, Counter Barrier, Unyielding Sentinel, Blessed Barrier, Restoring Constellation, Nature's Blessing, DaVinci's Courage, Starving Shadow, High Focus, Selfless Diffusion, Pain Harvest, Brilliant Moonlight, Umbral Spirit, Distortion Veil, Healing Touch, Inner Peace",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_164.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:blood-valley-fury",
+      "name": "Blood Valley Fury",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Melee Heavy Attack +95 for 6s upon applying Stun or Shock with Stunning Blow",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_38.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:blue-flash",
+      "name": "Blue Flash",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Javelin Inferno and Explosive Fury to [Lightning Javelin] and [Explosive Lightning Slash]. [Lightning Javelin] Throws a spear at the designated target to deal damage proportional to Base Damage, then chains up to 3 times to 4 random targets within a 4m radius. Lightning Javelin can only be used while the Lightning effect is active. [Explosive Lightning Slash] Deals damage proportional to Base Damage to enemies within an area 1.6x Attack Range. Can be used up to 3 times in succession, and obtains the Lightning effect when dealing damage to enemies. Does not apply Vicious Fury's Additional Condition specialization",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_59_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:burning-purgatory-s-vigor",
+      "name": "Burning Purgatory's Vigor",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On using DaVinci's Courage, Health Regen effect disappears. Base Damage increases by 16, and Duration increases by 1.5s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_59.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:chaos-grasp",
+      "name": "Chaos Grasp",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Has a(n) 7.5% chance to apply Touch of Chaos Mastery to all enemy targets.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_176.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:chernobog-s-sleep-venom",
+      "name": "Chernobog's Sleep Venom",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon using Annihilating Slash, has a(n) 80% chance to apply Slow to up to 6 enemies within 5m for 3s, then puts them to Sleep for 6s. Against players, duration is halved. Cooldown: 30s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_105.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:clay-s-purification",
+      "name": "Clay's Purification",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Clay's Salvation specialization's Weaken removal effect to debuff removal.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_178.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:cold-snap-erosion",
+      "name": "Cold Snap Erosion",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Frost Cleaving, the area persists for 4s. Applies 2 stacks of Frost to targets in the area, identical to DaVinci's Chill and Ice Tornado. When applying Frost with DaVinci's Chill or Ice Tornado skills within the area, applies 1 additional stack. Boosts Ice Tornado skill damage to Icebound targets by 50%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_154.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:daggers:contagion",
+      "name": "Contagion",
+      "slot": "equipment",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When the Fatal Stigma effect ends, applies Fatal Stigma to up to 4 targets within a 4m radius after 0.4s. The transferred Fatal Stigma deals damage that is reduced by 50% after 0.4s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_18.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:cornelius-s-shock",
+      "name": "Cornelius's Shock",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with Provoking Roar or Cleaving Roar with [Bonus Damage] Specialization, creates a 4m radius area that explodes after 3s, dealing 400% of Base Damage to targets within the area. Reduces Bonus Damage of targets hit by the explosion by 250% for 5s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_106.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:corrupt-hero-s-lantern",
+      "name": "Corrupt Hero's Lantern",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Damage dealt by Vicious Fury, Brutal Fury, and Explosive Fury increases by 8%. On Critical Hit, cooldown of Cyclonic Fury and Phoenix Barrage decrease by 5% proportional to time remaining.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_82.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:daggers:creeping-death",
+      "name": "Creeping Death",
+      "slot": "equipment",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Venomous Edge activates, has a(n) 12% chance to create a 1.5m radius Poison Cloud that follows the attacked target. The Poison Cloud lasts for 3s and deals 140% of Base Damage + 100 damage every sec to targets within range. Boosts damage by 3% per Poison stack. Boosts Poison Cloud Damage by 15%. Does not apply additional effects from Poison Cloud Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_15.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:gauntlet:crimson-echo",
+      "name": "Crimson Echo",
+      "slot": "equipment",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Blood Explosion Damage by 10%, and the target's Bleed Damage over time can no longer be removed.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_PersistentBleed.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:gauntlet:crimson-imprint",
+      "name": "Crimson Imprint",
+      "slot": "equipment",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Decreases Blood Explosion Damage by 40%, and changes to fixed damage that continues for 3s on hit. Stacks up to 3 times. Damage over time from this effect does not trigger Heavy Attack.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_BloodVeinPierce.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:gauntlet:crimson-pursuit",
+      "name": "Crimson Pursuit",
+      "slot": "equipment",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "If a target attacked with Blood Explosion dies within 3s, decreases the skill's cooldown by 12s. Decreases Blood Explosion PvP Damage by 90%. Increases Blood Explosion Damage against monsters by 35%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_BloodFlowAccel.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:criticality-explosion",
+      "name": "Criticality Explosion",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Phoenix Barrage, increases Skill Damage by 8% per stack of Weaken: Burst applied to the target. When each hit of Phoenix Barrage lands as a Critical Hit, applies 3 stacks of Weaken: Ignite. When Phoenix Barrage hits a target with 10 stacks of Weaken: Ignite, deals explosion damage equal to 690% of Base Damage + 399 damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_183.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:daigon-s-fury",
+      "name": "Daigon's Fury",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Staff Fire Skill's damage increases 5%, Burning damage increases 15%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_54.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:daigon-s-storm",
+      "name": "Daigon's Storm",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Whirling Shield Damage by 25%, and increases Whirling Shield's ricochet effect to 7 times. The shield can hit the same target multiple times. Upon landing a Shield Strike after using Whirling Shield for 6s, has a(n) 80% chance to fire a Whirling Shield projectile that deals 135% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_58.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:dark-order-s-shock-wave",
+      "name": "Dark Order's Shock Wave",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Shield Strike, Stun the target for 0.3s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_107.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:universal:dark-wing-s-bulwark",
+      "name": "Dark Wing's Bulwark",
+      "slot": "equipment",
+      "weapons": [],
+      "rarity": "Not specified by source",
+      "description": "Max Health increases 2,000 Magic Defense increases 300",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Armor_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "legacy"
+    },
+    {
+      "id": "equipment:universal:dark-wing-s-power",
+      "name": "Dark Wing's Power",
+      "slot": "equipment",
+      "weapons": [],
+      "rarity": "Not specified by source",
+      "description": "Melee and Ranged Defense 300 Max Mana 1000",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Accessory_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "legacy"
+    },
+    {
+      "id": "weapon:staff:dead-man-s-armor",
+      "name": "Dead Man's Armor",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Icebound Armor skill to Dead Man's Armor. Deals 80% of Base Damage as Icebound damage per sec and applies Frost to nearby foes, and has a(n) 80% chance to apply Terror: Pull.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_172.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:deadly-grave",
+      "name": "Deadly Grave",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Creates an area in a 3m radius around Brutal Arrow's target location that deals 40% of Base Damage every 0.5s for 5s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_48.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:deception",
+      "name": "Deception",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Threat Boost and Taunt duration by 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_BloodDominion.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:deckman-s-rampage",
+      "name": "Deckman's Rampage",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Ray of Disaster damage increases by 25%. Inflicts the Corrupted Magic Circle effect on the targets. Target number increases to 4 with target expansion.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_55.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:deluzhnoa-s-barrier",
+      "name": "Deluzhnoa's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Phantom Smokescreen's cooldown is decreased by 30%, and has a(n) 80% chance to apply Petrification: Icebound to all enemies within range for 1.5s every sec. Disabled upon getting hit once.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_68.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:deluzhnoa-s-cold",
+      "name": "Deluzhnoa's Cold",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Arrow Vortex cooldown -30%. Deals 100% of Base Damage to the first enemy hit by Arrow Vortex. Also deals 120% of Base Damage to all enemies within 3m of the initial target. Has a(n) 80% chance to apply Collision: Push and send target airborne for 3s. Damage boost +50% against monsters. Transfers the effect to another target within a 5m radius area once. Deals damage up to 6 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_66.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:deluzhnoa-s-hail",
+      "name": "Deluzhnoa's Hail",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Hellfire Rain changes into Ice Rain. The Casting Speed increases by 50%, the range changes to 5m, and Rain quantity increases to 18. Removes Burning effects. Increases damage by 15%, and has a(n) 80% chance to Weaken targets, reducing their Movement Speed by 51% for 2.5s. Staff Ice Skill Damage Boost +10%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_70.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:deluzhnoa-s-torrent",
+      "name": "Deluzhnoa's Torrent",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Chain Strike: Uppercut hit, summons a vortex in a 3m radius area that deals 80% of Base Damage per sec for 3s. On Bloodstorm: Blood Talon use, deals 160% of Base Damage in a 5m radius area per sec for 3s. Damaged targets have a 80% chance to be affected by Collision: Airborne for 1.5s. Boosts damage against monsters by 160%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_TidalWeave.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:deluzhnoa-s-touch",
+      "name": "Deluzhnoa's Touch",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Controlling Rake's hit area to 4m and reduces Movement Speed of all enemies in the area by 60%. On a successful hit, Damage Reduction +6 for 5s. Stacks up to 10 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_72.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:deluzhnoa-s-waves",
+      "name": "Deluzhnoa's Waves",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Rising Slash's range to 8m and boosts damage by 60%. Rising Slash can be used in the target direction. Activates an additional Active skill 1s after use, and has an 80% chance to apply Collision: Push to targets while charging. Targets that collide with a wall are stunned for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_84.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:destruction-empress-s-gale",
+      "name": "Destruction Empress's Gale",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Base Damage +25 for 3s upon using Daggers Mobility Skills",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_31.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:destructive-monarch-s-barrier",
+      "name": "Destructive Monarch's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Adds an effect to Invincible Wall that reduces Damage Taken by -5% and increases Healing Received by 10%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_62.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:devastating-chain",
+      "name": "Devastating Chain",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Chain Hook additionally attacks 1 enemy in a 5m radius around the target.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_40.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:devotion-barrier",
+      "name": "Devotion Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Blood Devotion or Devoted Sanctuary, creates a shield on you and a target equal to 15% of your Max Health that ignores shield removal effects for 6s, and removes Shield Health ▼ and Shield Health Received ▼ effects.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_152.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:disruption-shot",
+      "name": "Disruption Shot",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Recoil Shot hit, has a(n) 100% chance to apply a Weaken effect for 6s that decreases Magic, Melee, and Ranged Hit Chance by 60 and Magic, Melee, and Ranged Evasion by 60. On Wave Shot hit, applies 3 stacks",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_162.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:divine-retribution",
+      "name": "Divine Retribution",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On dealing damage to a target with 5 stacks of Burst using Ascending Cleave, decreases Ascending Cleave's cooldown by 2.5s. Boosts Ascending Cleave's damage against monsters by 30%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_63.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:double-trap",
+      "name": "Double Trap",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Explosive Trap can now be charged up to 2 times, the number that can be set up simultaneously increases by 1, and explosion time decreases by 1s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_163.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:dragon-s-counterattack",
+      "name": "Dragon's Counterattack",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Valiant Brawl or Slash Wave hit, has a(n) 80% chance to apply Provoke to the target for 4s and grants the attacker an effect that has a(n) 70% chance to deal counter damage equal to 75% of Base Damage when hit by a taunted target within 15m. Boosts Valiant Brawl, Cruel Smite, and Slash Wave damage by 35% and increases their cooldown by 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_155.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:dragon-s-intimidation",
+      "name": "Dragon's Intimidation",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Fountain of Life to [Dragon's Intimidation]. Applies Fountain of Life to 1 party member at the designated location and follows the target. When used, has a(n) 60% chance to apply Fear to enemies within range or enemies entering within range for 3s, ignoring Evasion and Resistance. Targets affected by Fear become immune to that Fear for 20s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_180.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:sword-shield:earth-strike",
+      "name": "Earth Strike",
+      "slot": "equipment",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes A Shot at Victory to [Earth Strike]. Deals damage proportional to Base Damage to all targets within a 3m radius, and grants an effect that increases damage of sword skills for a set duration after using the skill. Does not apply A Shot at Victory's Annihilation Blade specialization",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_47.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:elemental-fusion",
+      "name": "Elemental Fusion",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Activates Special Skills in addition to the existing effects when the Elemental Awakening Skill is changed to [Elemental Fusion] and 7 Elemental stacks are reached. Frost Smokescreen and Burning Smokescreen Skills change to [Lava Dust] (Fury Attack). Deals 300% of Base Damage per sec to foes within range and applies Weaken: Lava Dust for 6s. When Weaken: Lava Dust reaches 4 stacks, applies Petrify for 4s. [Designated Ground Targeting] Specialization can be applied. - Ice Spear Bombardment and Detonator Bombardment Skills change to [Magnetic Field]. Deals Lightning Damage equal to 1100% of Base Damage to hit enemies and applies Weaken: Magnetic Field, which decreases Movement Speed by 60% for 2.5s. Magnetic Field transfers to foes within 5m up to 2 times, with 1 additional transfer if the target is Wet or affected by your own Frost Effect. Decreases damage by 20% with each transfer. - Inferno Wave and Frenzied Lightning Wave Skills change to [Firestorm]. Firestorm follows the target for 6s and deals damage equal to 360% of Base Damage and applies Weaken: Burning.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_175.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:enraged-akman-s-fragment",
+      "name": "Enraged Akman's Fragment",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "While Selfless Diffusion is active, when Quick Fire connects, shoots an additional projectile that deals 180% of Base Damage and can be transferred up to 2 times to other enemies within a 3m radius. The projectile does not activate effects on hit, but applies the Gale effect. Does not apply additional effects from additional projectiles.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_56_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:enraged-daigon-s-fury",
+      "name": "Enraged Daigon's Fury",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Staff Fire Skill's damage increases 8%, Burning damage increases 25%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_54_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:enraged-daigon-s-storm",
+      "name": "Enraged Daigon's Storm",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Whirling Shield Damage by 35%, and increases Whirling Shield's ricochet effect to 7 times. The shield can hit the same target multiple times. Upon landing a Shield Strike after using Whirling Shield for 6s, has a(n) 80% chance to fire a Whirling Shield projectile that deals 200% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_58_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:enraged-deckman-s-rampage",
+      "name": "Enraged Deckman's Rampage",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Ray of Disaster damage increases by 35%. Inflicts the Corrupted Magic Circle effect on the targets. Target number increases to 4 with target expansion.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_55_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:enraged-deluzhnoa-s-barrier",
+      "name": "Enraged Deluzhnoa's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Decreases Phantom Smokescreen's cooldown by 30% and increases the area radius by 2m. Has a(n) 80% chance to apply Petrification: Icebound to all enemies within range for 1.5s every sec. Disabled upon getting hit once.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_130.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:enraged-deluzhnoa-s-cold",
+      "name": "Enraged Deluzhnoa's Cold",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Arrow Vortex cooldown -30%. Deals 100% of Base Damage to the first enemy hit by Arrow Vortex. Also deals 120% of Base Damage to all enemies within 3m of the initial target. Has a(n) 80% chance to apply Collision: Push and send target airborne for 3s and remove one shield type. Damage boost +50% against monsters. Transfers the effect to another target within a 5m radius area once. Deals damage up to 6 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_131.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:enraged-deluzhnoa-s-hail",
+      "name": "Enraged Deluzhnoa's Hail",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Hellfire Rain changes into Ice Rain. The Casting Speed increases by 50%, the range changes to 5m, and Rain quantity increases to 18. Removes Burning effects, but increases damage by 15% and has a(n) 80% chance to Weaken targets, decreasing Movement Speed by 51% for 2.5s, and decreasing all Heavy Attack Evasion by 150 for 6s. Staff Ice Skill Damage Boost +10%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_133.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:enraged-deluzhnoa-s-torrent",
+      "name": "Enraged Deluzhnoa's Torrent",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Chain Strike: Uppercut hit, summons a vortex in a 3m radius area that deals 120% of Base Damage per sec for 3s. On Bloodstorm: Blood Talon use, summons a vortex that deals 240% of Base Damage per sec for 3s in a 5m radius area. Has a(n) 80% chance to apply Collision: Airborne for 1.5s to damaged targets. Increases damage against monsters by 160%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_TidalWeave_Upgrade.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:enraged-deluzhnoa-s-touch",
+      "name": "Enraged Deluzhnoa's Touch",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Controlling Rake's hit area to 4m and reduces Movement Speed of all enemies in the area by 60%. On a successful hit, Damage Reduction +6 for 5s. Stacks up to 10 times. When applying Collision: Pull or hitting a Collision Immune Monster target, has a(n) 80% chance to apply Weaken, reducing All Defense by 500 for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_128.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:enraged-deluzhnoa-s-waves",
+      "name": "Enraged Deluzhnoa's Waves",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Rising Slash's range to 8m and boosts damage by 60%. Rising Slash can be used in the target direction. Activates an additional Active skill 1s after use, and has an 80% chance to apply Collision: Push to targets while charging. If Collision: Push is applied, has a(n) 80% chance to apply a Weaken effect that decreases Heavy Attack Damage Resistance by 20% for 6s. Targets that collide with a wall are stunned for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_135.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:enraged-giant-cordy-s-blessing",
+      "name": "Enraged Giant Cordy's Blessing",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Becomes immune to Bind, Fear, Petrification, Silence, Sleep, and Stun for 2s when casting Invincible Wall, and boosts the effect by 85%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_134.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:enraged-giant-cordy-s-bog",
+      "name": "Enraged Giant Cordy's Bog",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "At 25 Gale stacks, an explosion deals 400% of Base Damage to all enemies within 3.5m, and has a(n) 80% chance to apply Collision: Pull, pulling the target into the center.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_132.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:enraged-giant-cordy-s-forest-resonance",
+      "name": "Enraged Giant Cordy's Forest Resonance",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Guardian Defensive Wall Health by 50%. Using a Guardian Defensive Wall has a(n) 80% chance to apply Collision: Push to enemies within range and push them outside the range. If strengthened with 2 or more Orbs, applies Collision Immunity to party members within range.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_136.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:enraged-giant-cordy-s-spore-poison",
+      "name": "Enraged Giant Cordy's Spore Poison",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with the Death Blow skill, creates a 3m-wide Poison Cloud that ignores Block Chance around the target for 4s. Enemies within the cloud take damage over time equal to 132% of Base Damage every 0.5s, and Magic, Melee, and Ranged Evasion are reduced by 300. Increases damage by 100% against monsters. In PvP, deals Defense-ignoring damage equal to 2% of the target's max Health per sec.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_129.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:enraged-leviathan-s-incineration",
+      "name": "Enraged Leviathan's Incineration",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Evaporation, additionally decreases damage taken by 20% and additionally decreases Movement Speed by 25%. Applies damage over time that deals fixed damage equal to 50% of Base Damage + 120 damage to targets within the area every 0.5s for 1s. Stacks up to 3 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_AbyssEvaporation.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:enraged-leviathan-s-specter",
+      "name": "Enraged Leviathan's Specter",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Umbral Spirit and Thunder Spirit damage increases 30%, Duration on Melee Critical Hit increases 0.2s (up to 20s max)",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_57_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:enraged-leviathan-s-sting",
+      "name": "Enraged Leviathan's Sting",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Zephyr's Nock shoots an additional projectile at up to 2 targets within 5m, dealing damage equal to 450% of Base Damage. Zephyr's Nock damage also increases by 12%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_53_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:enraged-pakilo-naru-s-barrier",
+      "name": "Enraged Pakilo Naru's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On damaging a target with a Spear skill, increases all CC Resistances by 32 for 4s (once per skill). Stacks up to 10 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_78_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:enraged-pakilo-naru-s-cruelty",
+      "name": "Enraged Pakilo Naru's Cruelty",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Valiant Brawl, Cruel Smite, and Slash Wave Damage by 25% and Boosts their Cooldown Reduction effect by 50%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_73_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:enraged-primal-brothers-thunder-strike",
+      "name": "Enraged Primal Brothers' Thunder Strike",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon summoning an Orb, generates a 3m radius area of thunder after 2s at a random enemy location within a 6m radius of the summoned Orb that deals 420% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_97_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:enraged-queen-bellandir-s-corruptive-venom",
+      "name": "Enraged Queen Bellandir's Corruptive Venom",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Critical Hit with crossbows, has 20% chance to apply Weaken: Poison, which deals 170% of Base Damage over time every sec for 5s. Stacks up to 3 times. Damage Reduction decreases by 28 for the Poisoned targets.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_89.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:enraged-queen-bellandir-s-explosive-insect",
+      "name": "Enraged Queen Bellandir's Explosive Insect",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On applying Weaken: Burning with Staff Skills, has a 7% chance to apply the Explosive Insect effect. Explosive Insects explode after 3s, dealing 540% of Base Damage to the target and 1080% of Base Damage to all other enemies in a 4m radius.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_91.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:enraged-queen-bellandir-s-gravity-field",
+      "name": "Enraged Queen Bellandir's Gravity Field",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Explosive Flurry or Blood Spiral hit, applies Collision: Pull to all targets within a 5m radius. This effect ignores the target's Evasion.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_StormPull_Upgrade.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:enraged-queen-bellandir-s-hunger",
+      "name": "Enraged Queen Bellandir's Hunger",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Reduces cooldown of Death From Above by 15s and applies Collision: Pull on Feared enemies through the Death From Above skill. Death From Above Damage +600%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_88.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:enraged-queen-bellandir-s-quicksand",
+      "name": "Enraged Queen Bellandir's Quicksand",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Creates 5m radius of Quicksand on the spot where Annihilating Slash was used. Quicksand decreases enemy Movement Speed by 60% and has a 90% chance to apply Collision: Pull to enemies within the radius when it disappears after 2s. Cooldown 18s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_85.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:enraged-tevent-s-bombardment",
+      "name": "Enraged Tevent's Bombardment",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Shoots a bonus projectile whenever using Strafing, dealing 82% of Base Damage",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_90.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:enraged-tevent-s-corruption",
+      "name": "Enraged Tevent's Corruption",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Applies a Consuming Aura for 10s to the enemy first hit by Star Destroyer or to the nearest enemy within 6m when a Supernova Collapse area is generated. Enemies within 3m of the Aura's range has a(n) 80% chance to receive damage equal to 90% of Base Damage every 0.5s. Damage increases by 300% against monsters. Applies a Weaken effect that increases Debuff Duration per stack by 12%. (Stacks up to 5 times)",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_100.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:enraged-tevent-s-despair-trap",
+      "name": "Enraged Tevent's Despair Trap",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon applying Collision, Shock, or Stun with Greatsword Skills, creates an area in a 1.5m radius around the target that explodes in 1.5s, dealing 325% of Base Damage within the area. It explodes one more time after 1.5s outside the area, and deals 325% damage to the additional 1.5m area. Damage increases by 50% against monsters.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_86.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:enraged-tevent-s-furious-rage",
+      "name": "Enraged Tevent's Furious Rage",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Hit Chance by 250 for 5s after expiration of Camouflage Cloak, and resets cooldown on target kills or kill assists within that duration. Cooldown: 10s Camouflage Cloak deals 410% of Base Damage to all enemies in a 4m radius, with a 70% chance to apply Collision: Push.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_87.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:enraged-tevent-s-hunger",
+      "name": "Enraged Tevent's Hunger",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On applying Curse of the Wand, has a 15% chance to apply Weaken: Curse, which deals 35% of Base Damage per sec and decreases Defense by 10% for 30s. Damage increases by 100% against monsters.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_92.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:excavator-s-barrier",
+      "name": "Excavator's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Swift Healing on a target below 30% Health, applies a Shield equal to 450% of Base Damage +1500. Cooldown: 30s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_116.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:daggers:execution",
+      "name": "Execution",
+      "slot": "equipment",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Fatal Stigma deals PvP damage, if the target's Health is 10% or lower, instantly kills the damaged target.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_20.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:crossbow:explosive-arrow",
+      "name": "Explosive Arrow",
+      "slot": "equipment",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Recoil Shot and Wave Shot to [Explosive Arrow]. When using Recoil Shot, deals damage proportional to Base Damage to all foes within a 3m radius, and has a(n) 80% chance to apply Burning identical to Serial Fire Bombs to the target. When using Wave Shot, deals damage to all foes within a 4m radius of the target and has a(n) 80% chance to apply Burning identical to Serial Fire Bombs. When Gale specialization is active, applies 2 additional stacks of Burning.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_30.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:longbow:eye-of-ventius",
+      "name": "Eye of Ventius",
+      "slot": "equipment",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Creates an aftershock 1s after the Decisive Sniping arrow passes, and applies damage 3 to 6 times on all targets within a 3m radius. Boosts damage dealt with Eye of Ventius against monsters by 20%. Decreases PvP Damage dealt with Eye of Ventius by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_115.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:false-time",
+      "name": "False Time",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Activating an Orb Effect increases duration of Orbs within a 30m radius by 0.5s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_98.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:fear-erosion",
+      "name": "Fear Erosion",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Afterimage's additional effect trait is applied, increases Terror duration by 1s. Additionally, decreases Movement Speed by 40% and decreases all Defense by 500",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_PhantomDread.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:greatsword:flash",
+      "name": "Flash",
+      "slot": "equipment",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On each hit with Devastating Tornado, Blazing Tornado, or Icebound Tornado, boosts damage by 12% for 3s, stacking up to 99 times. Hitting with a skill from behind applies 3 stacks. When hitting monsters with Devastating Tornado, Blazing Tornado, or Icebound Tornado, decreases Devastating Smash cooldown by 0.2s. When applying Stun or Shock on monsters with Greatsword active skills, decreases Mobility Skill cooldown by 0.8s. Increases PvP damage taken by 100%. Decreases PvP damage by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_8.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:crossbow:focused-barrage",
+      "name": "Focused Barrage",
+      "slot": "equipment",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When casting Merciless Barrage or Wild Barrage after installing an Arbalest with Support Fire, the Arbalest uses the same skill. Decreases PvP Damage dealt with Merciless Barrage or Wild Barrage by 30%. Boosts damage dealt to monsters with Merciless Barrage, Annihilation Barrage Shot, and Unrelenting Annihilation by 30%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_31.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:daggers:foretold-agony",
+      "name": "Foretold Agony",
+      "slot": "equipment",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On landing a melee attack, has a(n) 12% chance to activate Venomous Edge. If Creeping Death is equipped, changes activation chance to 20%. Upon applying Collision: Prone or Bind to PvP targets, has a 100% chance to activate Venomous Edge 1 time. If Creeping Death or Venomous Swamp core is equipped, summons a Poison Cloud that deals fixed damage to the target each time Venomous Edge activates. Venomous Edge and Poison Cloud Damage deals fixed damage that ignores PvP targets' Shield Health.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_17.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:frenzied-slash",
+      "name": "Frenzied Slash",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Every Frenzied Sword Dance attack creates an area that deals 60% of Base Damage to all enemies in a 3m radius around the caster.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_43.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:crossbow:frost-expansion",
+      "name": "Frost Expansion",
+      "slot": "equipment",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Rapid Shot to [Frost Expansion]. Deals damage proportional to Base Damage to hit enemies and has a(n) 80% chance to apply Frost and Weaken that decreases Movement Speed by 40% for 1.5s. Does not apply Multi-Shot's Specialization Shield Removal effect When Blade Storm is active, does not apply Frost Expansion",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_34.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:longbow:gale-arrow",
+      "name": "Gale Arrow",
+      "slot": "equipment",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Strafing to [Gale Arrow]. Decreases Base Mana cost, but increases Mana cost with each arrow fired. Strafing can be used while moving. Strafing's Consecutive Use specialization not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_112.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:giant-cordy-s-blessing",
+      "name": "Giant Cordy's Blessing",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Becomes immune to Bind, Petrification, Silence, Sleep, Stun, and Fear for 2s when you cast Invincible Wall, and the effect is boosted by 50%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_71.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:giant-cordy-s-bog",
+      "name": "Giant Cordy's Bog",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "At 25 Gale stacks, an explosion deals 375% of Base Damage to all enemies within 3m, and has a(n) 80% chance to apply Collision: Pull, pulling the target into the center.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_67.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:giant-cordy-s-forest-resonance",
+      "name": "Giant Cordy's Forest Resonance",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Guardian Defensive Wall Health by 30%. Using a Guardian Defensive Wall has a(n) 80% chance to apply Collision: Push to enemies within range and push them outside the range. If strengthened with 2 or more Orbs, applies Collision Immunity to party members within range.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_101.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:giant-cordy-s-spore-poison",
+      "name": "Giant Cordy's Spore Poison",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with the Death Blow skill, creates a 3m-wide Poison Cloud that ignores Block Chance around the target for 4s. Enemies within the cloud take damage over time equal to 120% of Base Damage every 0.5s, and Magic, Melee, and Ranged Evasion are reduced by 300. Increases damage by 100% against monsters.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_69.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:grand-aelon-s-vitality",
+      "name": "Grand Aelon's Vitality",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon Nature's Blessing use, heals 40% of Base Damage +135 Health per sec for 6s. Healing is doubled when it rains.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_113.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:greatsword:gravity",
+      "name": "Gravity",
+      "slot": "equipment",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On the 1st, 4th, 7th, and 10th hit of Devastating Tornado, Blazing Tornado, or Ice Tornado, has a(n) 40% chance to apply Collision: Pull toward the player. PvP targets become immune to Collision: Pull for 3s when affected. Increases PvP Damage taken by 100% while using Devastating Tornado, Blazing Tornado, or Ice Tornado.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_125.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:guardian-constellation",
+      "name": "Guardian Constellation",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When the Restoring Constellation effect is active, increases Skill Damage Resistance by 130 for 9s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_187.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:healing-melody",
+      "name": "Healing Melody",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When an Orb Effect activates after using Healing Wave, reactivates Healing Wave 1 time",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_188.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:hemotoxic-dagger",
+      "name": "Hemotoxic Dagger",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Poison Dagger or Dagger Throw, fires a Hemotoxic Dagger. On hit, the target takes 100% of Base Damage and damage equal to 8% of Max Health per stack. Ignores Shield Health of PvP targets. Against monsters, applies as damage equal to 250% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_139.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:gauntlet:hit-stack",
+      "name": "Hit Stack",
+      "slot": "equipment",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When a target is hit 3 times by Earthquake, has an 80% chance to Stun the target for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_ImpactStack.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:hour-of-judgment",
+      "name": "Hour of Judgment",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "After Ascending Cleave ends, increases PvP Melee Heavy Attack Chance by 200 and Heavy Attack Damage by 10% for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_62.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:ice-dragon-strike",
+      "name": "Ice Dragon Strike",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Flash Wave to [Ice Dragon Strike] (Fury Skill). Depending on charging time, deals Frost Damage equal to Flash Wave boosted by 50% and applies the Frost effect. Frost effect has a(n) 70% chance to apply Bind: Icebound for 3 to 4.5s. Deals bonus damage to Bound or Oppressed targets. When Specialization 3 [Effect Time Increase] is applied, increases Bind: Icebound duration by 1s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_170.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:staff:ice-mist",
+      "name": "Ice Mist",
+      "slot": "equipment",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Grants Stealth 1 time while within the area of Frost Smokescreen Specialization [Designated Ground Targeting]. If Stealth is removed or you leave and re-enter the area, Stealth will no longer be applied. Does not share cooldown with Camouflage Cloak or Temporal Leap.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_93.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:staff:icebound-explosion",
+      "name": "Icebound Explosion",
+      "slot": "equipment",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Frost Smokescreen's Specialization [Designated Ground Targeting] applies Weaken: Frostbite, deals Single Target Damage proportional to Base Damage. When Bind: Icebound ends, deals AoE Damage proportional to Base Damage to up to 6 targets within a 1.5m radius. Boosts damage dealt with Icebound Explosion against monsters by 80% Decreases PvP Damage dealt with Icebound Explosion by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_92.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:icebound-gust",
+      "name": "Icebound Gust",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Binds enemies within the Frost Smokescreen area for 1.4s. Applying the Additional Damage specialization increases damage by 150%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_50.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:icebound-spike",
+      "name": "Icebound Spike",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Icebound Tomb to [Icebound Spike], which hits targets up to 30m based on charging time. Deals Icebound Damage equal to 760% of Base Damage + 84 damage. Creates icy spikes in a straight line forward, applying Weaken: Icebound Spike that increases damage taken by 10% for 5s. Has a(n) 80% chance to apply Weaken to targets that reduces their Movement Speed by 29% for 3s. Applies Frost.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_174.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:immortal-armor",
+      "name": "Immortal Armor",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Fortifying Shell is active, further increases Damage Reduction and Bonus Damage Reduction by 6.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_IndomitableFortify.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:immortal-bond",
+      "name": "Immortal Bond",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Immortal Pride Specialization 1 changes Blessing of Immortality to [Immortal Bond], and increases cooldown by 30s. Grants all party members within a 15m radius an effect that increases Max Health and Current Health by up to 35% proportional to Immortal Pride's level for 6s, and additionally increases Current Health by the amount Max Health is increased.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_148.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:imprint-of-pain",
+      "name": "Imprint of Pain",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Incapacitate and Bleed duration by 20%, and decreases all CC Resistances of affected targets by 250.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_intimidation.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:invigorating-salvation",
+      "name": "Invigorating Salvation",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with Clay's Salvation or Janice's Rage, heals additional 50% of Health per sec for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_52.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:judgment",
+      "name": "Judgment",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Guillotine Blade Damage by 50% when used on targets with 50% Health or less. Additionally boosts the damage by 30% against monsters.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_153.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:judgment-wave",
+      "name": "Judgment Wave",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Gaia Crash attacks the same location 4 times instead of moving forward. Last attack's range +33% and damage +30%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_41.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:junobote-s-inferno",
+      "name": "Junobote's Inferno",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon using Bloodleech Aura, creates a flame zone centered around you that deals 120% of Base Damage per sec for 5s to targets within the area. Applies Ignite effect on Critical Hit.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_117.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:junobote-s-inferno",
+      "name": "Junobote's Inferno",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon using Bloodleech Aura, creates a flame zone centered around you that deals 120% of Base Damage per sec for 5s to targets within the area. Applies Ignite effect on Critical Hit.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_117.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:junobote-s-void",
+      "name": "Junobote's Void",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When hitting an enemy at 50% Health or lower with a Greatsword skill that applies Shock or Stun, increases Shock and Stun durations by 1.5s, and disables Item Use for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_07.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:kaiser-s-thirst",
+      "name": "Kaiser's Thirst",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Witty Retort damage increases 50%, Witty Retort Recovery Effects increase 100%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_61.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:kowazan-s-flame-spirit",
+      "name": "Kowazan's Flame Spirit",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When attacking during the day, increases Attack Speed by 1% and Bonus Damage by 4 for 2s. When attacking at night, reduces target's Movement Speed by 2% and Damage Reduction by 4 for 2s. Stacks up to 15 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_112.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:kowazan-s-frenzy",
+      "name": "Kowazan's Frenzy",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When attacking a target below 50% Health with a dagger at night, increases Critical Damage by 20% for 3s. When attacking a target below 50% Health with a dagger during the day, increases Critical Hit Chance by 650 for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_110.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:last-dragon-s-blessing",
+      "name": "Last Dragon's Blessing",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Threat Boost's Block Chance Boost effect duration by 0.5s, and increases Base Damage by 1 for 6s every time Weaken: Bleed is applied. Stacks up to 100 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_LunarGrace.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:leviathan-s-specter",
+      "name": "Leviathan's Specter",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Umbral Spirit and Thunder Spirit damage increases 20%, Duration on Melee Critical Hit increases 0.2s (up to 20s max)",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_57.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:leviathan-s-sting",
+      "name": "Leviathan's Sting",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Zephyr's Nock shoots an additional projectile at up to 2 targets within 5m, dealing damage equal to 340% of Base Damage. Zephyr's Nock damage also increases by 8%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_53.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:staff:lightning-condensation",
+      "name": "Lightning Condensation",
+      "slot": "equipment",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Decreases the radius of Thunder's Blessing and Thunder's Shadow to 2.5m, but increases damage by WP_Item_Gear_ST_01_2_DD.tooltip1-WP_ST_S_ManaRengeUp_trait1_DD.tooltip1%. Boosts damage by 30% per Weaken: Thunderclouds stack. If any two of Thunder's Shadow, Lightning Condensation, and Thunderclouds Explosion are applied simultaneously, only the highest damage boost effect is applied.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_89.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "unresolved-source-tokens",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:lightning-spear",
+      "name": "Lightning Spear",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Ice Spear changes to a Lightning skill. No longer decreases Movement Speed. Attacking a target that the user has Burned deals additional damage equal to 40% of the remaining Burning Damage. If the target is Frosted or Wet, Damage is transferred once to other enemies within 5m.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_49.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:lionheart-king-s-hunger",
+      "name": "Lionheart King's Hunger",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Heals 61 Health whenever making Off-Hand Weapon attacks for 6s after a successful hit with Off-Hand Weapon. Cooldown 30s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_32.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:lofty-last-shot",
+      "name": "Lofty Last Shot",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Critical Hit with Decisive Sniping, cooldown is reduced by 3s. On Critical Hit with Decisive Bombardment, cooldown is reduced by 2s every hit up to 3 times. Critical Hit of Decisive Sniping and Decisive Bombardment is increased by 500 as well.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_60.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:wand-tome:magic-circle-expansion",
+      "name": "Magic Circle Expansion",
+      "slot": "equipment",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Corrupted Magic Circle's radius to 7.5m, and decreases cooldown by 20%. Corrupted Magic Circle's Decaying Touch specialization not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_103.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:magical-harmony",
+      "name": "Magical Harmony",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Attacking with an Orb Effect reduces remaining Stellar Dash cooldown by 3%. Activates up to 5 times per sec.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_95.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:malakar-s-blazing-wind",
+      "name": "Malakar's Blazing Wind",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Base Damage +2.5% for all party members within 16m.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_111.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:mana-absorption",
+      "name": "Mana Absorption",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Redemptive Barrier's cooldown by 10s, but adds an effect that absorbs 100 Mana from all enemies within 4m every 0.5s for 6s. The Mana absorption effect is also removed when the shield effect ends.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_171.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:daggers:massacre",
+      "name": "Massacre",
+      "slot": "equipment",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Fatal Stigma Specialization Area Damage to [Massacre]. Increases AoE Damage range by 2m, and AoE Damage deals the same damage proportional to the Poison and Thundercloud stacks on the target with the Stigma. Boosts damage dealt with Fatal Stigma against monsters by 60%. .Decreases PvP Damage dealt with Fatal Stigma by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_19.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:minezerok-s-lamentation",
+      "name": "Minezerok's Lamentation",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with Daggers, has an 8% chance to apply Weaken: Curse, which decreases the target's Magic, Melee, and Ranged Defense by 250 for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_109.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:morokai-s-thunderbolt",
+      "name": "Morokai's Thunderbolt",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When applying Shock or Stun, has a 50% chance to deal 600% of Base Damage. The effect chains up to 2 times to other enemies within 10m of the target, amplifying damage by 50% with each chain.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_102.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:mortal-stigma",
+      "name": "Mortal Stigma",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Fatal Stigma range +343% of Attack Range, Damage +24%. Ignore Block Chance.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_44.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:multi-hit",
+      "name": "Multi Hit",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Reduces the duration of the High Focus specialization's target expansion to 5s, but does not apply a reduced effect.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_173.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:orb:nebula-s-echo",
+      "name": "Nebula's Echo",
+      "slot": "equipment",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Adds an effect where the Decrease Base Damage by 25% effect is not applied when Nebula's Resonance effect ends due to consuming all Resonance stacks. Boosts Restoring Constellation's Health Recovery by 5%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_77.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:nebula-s-protection",
+      "name": "Nebula's Protection",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "After Temporal Leap effect ends, reduces damage taken by 40% for 2s After completing Space Transition, reduces damage taken by 40% for 1s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_96.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:orb:nebula-s-pulsation",
+      "name": "Nebula's Pulsation",
+      "slot": "equipment",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Adds an effect where blocking Fury and Wrath attacks with Defensive Skills does not consume Resonance stacks. Boosts Restoring Constellation's Health Recovery by 5%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_76.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:orb:nebula-s-resonance",
+      "name": "Nebula's Resonance",
+      "slot": "equipment",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Restoring Constellation to [Nebula's Resonance]. Grants 5 stacks of Resonance to a friendly target for 9s. Each stack increases Base Damage by 2%, and 1 stack is consumed each time damage is taken. When all stacks are consumed and the effect ends, Base Damage decreases by 25% for 6s. Does not apply Restoring Constellation's Time Dilation, Additional Effect, and Echoes of Distortion specializations",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_75.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:night-of-thunderstorms",
+      "name": "Night of Thunderstorms",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Explosive Fury Damage by 10%. Upon equipping [Blue Flash], changes the max number of uses for Explosive Lightning Slash to 5 and boosts Weaken: Shock 5-stack damage by 30%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_61.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:night-panther",
+      "name": "Night Panther",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Quick Fire cooldown -100% when using Nimble Leap",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_46.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:wand-tome:nightmare-concerto",
+      "name": "Nightmare Concerto",
+      "slot": "equipment",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When waking a target affected by Sleep: Curse or Sleep: Nightmare Melody or attacking Drowsy targets, deals damage equal to 600% of Base Damage + 200 and removes Drowsy. For targets affected by Sleep: Nightmare Melody and Drowsy, additionally reduces remaining cooldown by 30%. Boosts damage dealt with Nightmare Concerto against monsters by 150%. Decreases PvP Damage dealt with Nightmare Concerto by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_102.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:wand-tome:nightmare-conductor",
+      "name": "Nightmare Conductor",
+      "slot": "equipment",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When applying Sleep: Curse through Cursed Nightmare, applies Weaken: Nightmare Terror, which increases the target's damage taken by 4%. If Sleep: Nightmare Melody is applied through Nightmare Melody, applies Weaken: Nightmare Terror, which increases the target's damage taken by 6%. Narrows the field of vision of enemies affected by Weaken: Nightmare Terror.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_101.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:wand-tome:nightmare-melody",
+      "name": "Nightmare Melody",
+      "slot": "equipment",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes the Cursed Nightmare skill to [Nightmare Melody]. Applies Sleep: Nightmare Melody that deals damage proportional to Base Damage. Applies Drowsy on targets immune to Sleep. Boosts damage dealt with Nightmare Melody against monsters by 50%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_100.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:nightmarish-magic-circle",
+      "name": "Nightmarish Magic Circle",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Corrupted Magic Circle changes to a skill that covers 5m around the user for 5s, cursing any enemy entering the area. The curse deals 25% more damage than Corrupted Magic Circle.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_51.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:nirma-s-magic-pulse",
+      "name": "Nirma's Magic Pulse",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Has a 70% chance to apply Collision: Push to a target upon using Shield Strike.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_107.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:orthodox",
+      "name": "Orthodox",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Main Weapon Damage by 40.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_Orthodox.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:pakilo-naru-s-barrier",
+      "name": "Pakilo Naru's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On damaging a target with a Spear skill, all CC Resistances increase by 25 for 3s (once per skill). Stacks up to 10 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_78.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:pakilo-naru-s-cruelty",
+      "name": "Pakilo Naru's Cruelty",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Valiant Brawl, Cruel Smite, and Slash Wave Damage by 15% and Boosts their Cooldown Reduction effect by 50%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_73.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:longbow:pierce-shot",
+      "name": "Pierce Shot",
+      "slot": "equipment",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Decisive Sniping and Decisive Bombardment to [Pierce Shot] When Decisive Sniping and Decisive Bombardment deal damage, has a 100% chance to deal 70% of Base Damage + 100 damage per sec for 6s and apply Weaken: Pierce Shot, which decreases Healing Received by 80%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_117.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:piercing-thunder",
+      "name": "Piercing Thunder",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Javelin Inferno Damage by 10%. Upon equipping [Blue Flash], changes Lightning Javelin's use type to a directional and location skill. Boosts damage dealt with Lightning Javelin against monsters by 50%. Decreases PvP Damage dealt with Lightning Javelin by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_60.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:porfos-breath",
+      "name": "Porfos Breath",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When your Health drops below 20% while using Bloodleech Aura, restores Health by 20000 for 1 time. Each time you remove a recovery effect from an enemy through Starving Shadow, removes 1 Health or Shield Health reduction effect from self.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_184.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:primal-brothers-thunder-strike",
+      "name": "Primal Brothers' Thunder Strike",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon summoning an Orb, generates a 3m radius area of thunder after 2s at a random enemy location within a 6m radius of the summoned Orb that deals 300% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_97.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:prismatic-beam",
+      "name": "Prismatic Beam",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Ray of Disaster to [Prismatic Beam]. You can now place 3 prisms at target locations that last for 6s. Changes Mana Cost to 250. Links Ray of Disaster between the prisms and you. Enemies hit take Bonus Damage equal to 50% of Base Damage in addition to existing Ray of Disaster Damage and decreases the target's Mana by 120. Prisms can be placed again within 6s. When prisms are removed, deals 140% of Base Damage + 17 damage to enemies within a 2.5m radius. Also, casts Dark Explosion after 1s, dealing 50% damage that does not remove curse effects. Boosts damage by 5% per Touch of Despair stack that you apply.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_179.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:purgatorial-barrier",
+      "name": "Purgatorial Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Healing Received +30% during Counter Barrier",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_39.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:purifying-cry",
+      "name": "Purifying Cry",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Purifying Touch to [Purifying Cry]. The skill now removes CC effects from 3 party members including yourself within a radius equal to 33% of your Attack Range. Changes cooldown to 27s and Mana Cost to 260. Removes CC effects in the following order: Actions disabled, Movement disabled, Weaken, Shield Health ▼, Recovery Effect ▼. When removing Weaken, removes up to 20 stacks. When using Blitz Specialization 1 [Limit Break], applies the same effect as the Purifying Touch Enchant effect.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_168.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:orb:purifying-star",
+      "name": "Purifying Star",
+      "slot": "equipment",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Healing Star to [Purifying Star]. Summons an orb that follows the designated party member for a set duration and grants an effect that removes 1 CC effect from all party members within a 4m radius every 3s. Does not apply Star Destroyer's Gravity Star Destroyer specialization.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_78.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:queen-bellandir-s-corruptive-venom",
+      "name": "Queen Bellandir's Corruptive Venom",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Critical Hit with crossbows, has 20% chance to apply Weaken: Poison, which deals 110% of Base Damage over time every sec for 5s. Stacks up to 3 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_16.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:queen-bellandir-s-explosive-insect",
+      "name": "Queen Bellandir's Explosive Insect",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On applying Weaken: Burning with Staff Skills, has a 5% chance to apply the Explosive Insect effect. Explosive Insects explode in 3s, dealing 540% of Base Damage to the target and 1080% of Base Damage to all other enemies in a 3m radius.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_37.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:queen-bellandir-s-gravity-field",
+      "name": "Queen Bellandir's Gravity Field",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Explosive Flurry or Blood Spiral hit, applies Collision: Pull to all targets within a 5m radius.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_StormPull.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:queen-bellandir-s-hunger",
+      "name": "Queen Bellandir's Hunger",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Reduces cooldown of Death From Above by 15s and applies Collision: Pull on Feared enemies through the Death From Above skill.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_81.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:queen-bellandir-s-quicksand",
+      "name": "Queen Bellandir's Quicksand",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Creates 5m radius of Quicksand on the spot where Annihilating Slash was used. Quicksand decreases enemy Movement Speed by 60% and has a 70% chance to apply Collision: Pull to enemies within the radius when it disappears after 2s. Cooldown 34s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_03.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:ramux-s-judgment",
+      "name": "Ramux's Judgment",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Constricting Tempest, has a(n) 100% chance to connect a chain that applies collision and additionally triggers on 2 enemies within a 5m radius of the target. Decreases the Movement Speed of hit targets by 50%, gradually increasing it back up over 3s before ending. When the chain ends, applies Collision: Pull. Applies an effect that decreases Heavy Attack Damage Resistance by 30% for 4s when a target is hit by the chain or when the chain ends. Decreases your PvP damage taken by 15% for 4s when the chain hits or when it ends.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_185.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:greatsword:rear-strike",
+      "name": "Rear Strike",
+      "slot": "equipment",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When hitting a target with Greatsword Mobility Skills or a Greatstword skill that moves your position, applies the Back Attack effect to all attacks and increases all Species Bonus Damage by 200 for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_7.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:recoil",
+      "name": "Recoil",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Earthquake Damage by 30%, and has a(n) 80% chance to apply Collision: Airborne status for 2s to targets hit by the Last Hit.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_SeismicLift.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:redemptive-barrier",
+      "name": "Redemptive Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases the effect range of Blessed Barrier Specialization's Expanded Targets by 5m.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_177.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:orb:redemptive-star",
+      "name": "Redemptive Star",
+      "slot": "equipment",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Adds an effect that restores Health by 160% of Base Damage + 470 when successfully removing a CC effect with Purifying Star Boosts Healing Star's Health Recovery by 5%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_79.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:resolute-breakthrough",
+      "name": "Resolute Breakthrough",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Shield Strike, Piercing Strike, and Annihilating Slash damage by 25%. Shield Strike and Piercing Strike grant Collision: Enchant upon landing a Heavy Attack. Stacks up to 5 times. At 5 stacks, this effect is consumed, and if Strategic Rush hits within 10s, ignores Collision Resistance and has a 100% chance to apply Collision: Push. Collision: Enchant stacks only once per skill.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_137.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:wand-tome:reversal-spell",
+      "name": "Reversal Spell",
+      "slot": "equipment",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases the cooldown of Corrupted Magic Circle and Sacred Magic Circle by 8s and additionally applies an effect that reflects some of the damage received by party members within the field as magic damage. Corrupted Magic Circle's Decaying Touch specialization not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_105.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:greatsword:rift-fracture",
+      "name": "Rift Fracture",
+      "slot": "equipment",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Valiant Brawl, Cruel Smite, or Slash Wave hits, has a(n) 80% chance to decrease the target's Shield Health Received by 80% for 9s. Deals Fixed Damage equal to 300% of Base Damage to Shielded targets. Does not apply Valiant Brawl's Weaken Shield specialization",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_3.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:sword-shield:roar-of-rage",
+      "name": "Roar of Rage",
+      "slot": "equipment",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Cleaving Roar to [Roar of Rage]. Increases Roar of Rage range to 10m and has a(n) 70% chance to apply Weaken: Provoke, which decreases all Endurance and all Heavy Attack Evasion for a set duration. Does not apply Provoking Roar's Cooldown Reduction ▼ and Bonus Damage specializations",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_50.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:sword-shield:roaring-shackles",
+      "name": "Roaring Shackles",
+      "slot": "equipment",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Provoking Roar or Roar of Rage's Weaken: Provoke effect hits a PvP target, applies an effect that decreases Movement Speed by 50% for 6s. Cooldown: 3s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_52.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:sword-shield:roaring-shield",
+      "name": "Roaring Shield",
+      "slot": "equipment",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Creates a shield equal to 3000 of Health for 6s when applying Weaken: Provoke to a monster",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_51.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:rock-arrow",
+      "name": "Rock Arrow",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes the Brutal Arrow skill to [Rock Arrow], dropping 16 arrows in the area that deal 128% of Base Damage + 14, and upon 4 hits, stuns for 3s. When Specialization 2 [Range Increase] is applied, the number of arrows increases to 24.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_169.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:rock-shield-throw",
+      "name": "Rock Shield Throw",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Shield Throw to [Rock Shield Throw] and boosts damage by 50%. Deals 270% of Base Damage and has a(n) 80% chance to apply a Weaken effect that decreases Movement Speed by 35% for 3s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_149.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:ruthless-deluzhnoa-s-barrier",
+      "name": "Ruthless Deluzhnoa's Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Decreases Phantom Smokescreen's cooldown by 30% and increases the area radius by 2m. Has a(n) 80% chance to apply Petrification: Icebound to all enemies within range for 1.5s every sec. Disabled upon getting hit once. Increases all PvP Critical Hit Chances for the caster when in range by 350.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_198.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:ruthless-deluzhnoa-s-cold",
+      "name": "Ruthless Deluzhnoa's Cold",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Arrow Vortex cooldown -30%. Ignores Evasion and deals 110% of Base Damage to the first enemy hit by Arrow Vortex. Also deals 135% of Base Damage to all enemies within 3m of the initial target. Has a(n) 80% chance to apply Collision: Push and send target airborne for 3s and remove one shield type. Damage boost +50% against monsters. Transfers the effect to another target within a 5m radius area once. Deals damage up to 6 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_199.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:ruthless-deluzhnoa-s-froth",
+      "name": "Ruthless Deluzhnoa's Froth",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Chain Strike: Uppercut hit, summons a vortex in a 3m radius area that deals 120% of Base Damage per sec for 3s. On Bloodstorm: Blood Talon use, summons a vortex that deals 240% of Base Damage per sec for 3s in a 5m radius area. Has a(n) 80% chance to apply Collision: Airborne for 1.5s to damaged targets. During Collision: Airborne, all Defense decreases by 10%. Increases damage against monsters by 160%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_205.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:ruthless-deluzhnoa-s-hail",
+      "name": "Ruthless Deluzhnoa's Hail",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Hellfire Rain to Ice Rain. Increases Casting Speed by 50%, Increases range to 5m, and increases Rain quantity to 18. Maintains Burning effects, and increases damage by 15% and has a(n) 80% chance to Weaken targets, decreasing Movement Speed by 51% for 2.5s, and decreasing all Heavy Attack Evasion by 150 for 6s. Staff Ice Skill Damage Boost +10%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_201.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:ruthless-deluzhnoa-s-touch",
+      "name": "Ruthless Deluzhnoa's Touch",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Controlling Rake changes to an Aimed Skill and fires 5 chains in the designated direction up to 3.5 times the Attack Range. Each chain pierces targets, dealing damage equal to 100% of Base Damage to all targets in its path and has a(n) 80% chance to apply Collision: Pull. When Collision: Pull hits, increases Damage Reduction by 5 for 5s. Stacks up to 10 times. When applying Collision: Pull or hitting a Collision Immune Monster target, has a(n) 80% chance to apply a Weaken effect that decreases all Defense by 750 for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_197.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:ruthless-deluzhnoa-s-waves",
+      "name": "Ruthless Deluzhnoa's Waves",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Rising Slash's range to 8m and boosts damage by 60%. Rising Slash can be used in the target direction. Activates an additional Active skill 1s after use, and has an 80% chance to apply Collision: Push to targets while charging. If Collision: Push is applied, has a(n) 80% chance to apply a Weaken effect that decreases Heavy Attack Damage Resistance by 20% for 6s. Targets that collide with a wall are stunned for 3s. If Collision: Push is applied by the additional Active skill, has a(n) 80% chance to individually apply a Weaken effect that decreases Heavy Attack Damage Resistance by 20% and a Weaken effect that decreases all CC Resistances by 250 for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_203.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:ruthless-giant-cordy-s-blessing",
+      "name": "Ruthless Giant Cordy's Blessing",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Becomes immune to Bind, Fear, Petrification, Silence, Sleep, and Stun for 2s when casting Invincible Wall, and boosts the effect by 85%. Damage Reduction + 40.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_202.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:ruthless-giant-cordy-s-bog",
+      "name": "Ruthless Giant Cordy's Bog",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "At 25 Gale stacks, an explosion deals 450% of Base Damage to all enemies within 3.5m, and has a(n) 80% chance to apply Collision: Pull, pulling the target into the center. Decreases Merciless Barrage, Wild Barrage, and Annihilation Barrage Shot Cooldown by 20%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_200.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:ruthless-giant-cordy-s-forest-resonance",
+      "name": "Ruthless Giant Cordy's Forest Resonance",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Guardian Defensive Wall range by 2m and boosts Health by 70%. Has a(n) 80% chance to apply Collision: Push to enemies within range and push them outside the range. If strengthened with 2 or more Orbs, removes all negative effects from all party members within the area and applies Collision Immunity to them.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_204.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:ruthless-giant-cordy-s-spore-poison",
+      "name": "Ruthless Giant Cordy's Spore Poison",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with the Death Blow skill, creates a 3m-wide Poison Cloud that ignores Block Chance around the target for 3s. Enemies within the cloud take damage over time equal to 144% of Base Damage every 0.4s, and Magic, Melee, and Ranged Evasion are reduced by 300 for 4s. Increases damage by 100% against monsters. In PvP, deals Defense-ignoring damage equal to 2.8% of the target's max Health per sec.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_196.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:sacred-king-s-judgment",
+      "name": "Sacred King's Judgment",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When an enemy is defeated with an Orb, increases Base Damage by 15 for 6s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_94.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:wand-tome:sacred-magic-circle",
+      "name": "Sacred Magic Circle",
+      "slot": "equipment",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Corrupted Magic Circle to [Sacred Magic Circle] Removes the damage effect per sec, but increases party members' species damage by 120 for 6s. Corrupted Magic Circle's Decaying Touch and Bonus Damage specializations not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_104.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:scared-to-death",
+      "name": "Scared to Death",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon defeating an enemy with a spear, 25% chance to inflict Fear on up to 2 enemies within an 8m-radius for 5s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_79.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:scorched-earth",
+      "name": "Scorched Earth",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Javelin Surge to pierce enemies, and has an 80% chance to apply a Weaken effect that decreases enemies' Heavy Attack Damage Resistance by 25% for 4s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_83.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:seed-of-the-world-tree",
+      "name": "Seed of the World Tree",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Nature's Blessing changes to [Seed of the World Tree]. You can now place up to 3 seeds at target locations, each lasting for 10s, and Mana cost changes to 90. Allies who step on a seed have Health Regen increased by 228 and then boosted by 12% and also have Mana Regen increased by 294 for 4s. When the effect is applied, removes 1 Weaken effect, and the seed disappears after granting its effect. Seeds can be placed again within 6s. Specialization 3 [Whirlpool] only applies to the first placement.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_167.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:shatter",
+      "name": "Shatter",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Short Jab and Bloodstorm damage by 10%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_BloodBurstBoost.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:shining-moon",
+      "name": "Shining Moon",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Attack Speed +6% per friendly target within the Nature's Blessing area. Effect duration: 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_47.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:silver-reaper-s-gag-order",
+      "name": "Silver Reaper's Gag Order",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Heavy Attack, has a(n) 80% chance to silence the target for 5s. Cooldown: 15 sec",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_118.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:silver-reaper-s-sentence",
+      "name": "Silver Reaper's Sentence",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Touch of Despair hit, has a(n) 80% chance to decrease all Healing Received by 99.99% and apply a Weaken effect that deals 200% of Base Damage whenever the target is healed for 3s. Cooldown: 10s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_124.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:silver-reaper-s-soul-harvest",
+      "name": "Silver Reaper's Soul Harvest",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When an enemy you attack dies within 10s or when you use Mana Exchange [Effect Boost], gains 25 stacks of Soul Harvest. Each projectile attack consumes 1 stack to fire an additional projectile that deals 35% of Base Damage. Does not apply additional effects from additional projectiles.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_121.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:greatsword:slash-wave",
+      "name": "Slash Wave",
+      "slot": "equipment",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Valiant Brawl, Cruel Smite to [Slash Wave] Attacks 3 times in a row, with each sword slash dealing damage proportional to Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_1.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:slaughtering-execution",
+      "name": "Slaughtering Execution",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Enforcer to Slaughtering Execution. When casting the skill, increases all CC Chance by 90 per target within a 8m radius for 6s (up to 5 targets). Increases Magic, Melee, and Ranged, Hit Chance by 410 for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_182.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:soul-reaper-s-tragedy",
+      "name": "Soul Reaper's Tragedy",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On skill hit, the Max Damage increases by 25 for 6s and recover 21 mana. Cooldown 30s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_65.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:southpaw",
+      "name": "Southpaw",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Off-hand Weapon Damage by 90.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_Southpaw.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:spineflower-warden-s-seduction",
+      "name": "Spineflower Warden's Seduction",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On skill hit, creates a(n) 80% chance of reducing all Endurance of the target by 12 for 3s. Increase user's Base Damage by 3. Stacks up to 10 times.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_63.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:spiral-assault",
+      "name": "Spiral Assault",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Culling Arc and Flaming Arc damage by 20% and grants 4 extra Spiral Slash uses.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_144.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:orb:star-of-rest",
+      "name": "Star of Rest",
+      "slot": "equipment",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "While within 4m during Healing Star or Purifying Star's duration, applies a buff that increases party members' damage against all species by 100",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_124.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:star-s-orbit",
+      "name": "Star's Orbit",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Milky Way damage by 10%, and grants 1 additional use",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_186.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:stealthy-arrowhead",
+      "name": "Stealthy Arrowhead",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Enchants additional projectiles from Roxie's Arrowhead and Roxie's Arrow Storm, increasing the Activation Rate by 12% and damage by 50% of Base Damage. Does not apply additional effects from additional projectiles.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_140.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:stellar-star-destroyer",
+      "name": "Stellar Star Destroyer",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Stellar Star Destroyer damage by 30%, and changes Star Destroyer to [Stellar Star Destroyer]. Summons 9 Stellar Star Destroyers on the target, each dealing 275% of Base Damage + 225 damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_190.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:strength-barrier",
+      "name": "Strength Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Critical Damage Resistance by 40% while Counter Barrier is active",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_146.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:crossbow:support-fire",
+      "name": "Support Fire",
+      "slot": "equipment",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Explosive Trap to [Support Fire] Installing an Arbalest at the designated location and using Quick Fire, Recoil Shot, Wave Shot, or Explosive Arrow triggers the Arbalest to use the same skill against the target. Explosive Trap's Duration ▲ specialization not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_29.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:swift-judgment",
+      "name": "Swift Judgment",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Removes the cast time of Judgment Lightning, instantly casting it 2 times upon the application of the [Consecutive Use] specialization. When the second Judgment Lightning hits a monster as a Heavy Attack, decreases the skill's cooldown by 50%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_142.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:talus-s-glacier",
+      "name": "Talus's Glacier",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Stunned, trigger Petrification: Freeze for 1s to protect the user. Cooldown: 24s",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_114.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:talus-s-transcendent-barrier",
+      "name": "Talus's Transcendent Barrier",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon using Distortion Veil, applies a Distortion Veil to the nearest ally without Distortion Veil within a 5m radius from the target.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_126.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:longbow:target-lock",
+      "name": "Target Lock",
+      "slot": "equipment",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Adds Strafing's Bullseye and Gale effects once",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_114.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:tectonic-shift",
+      "name": "Tectonic Shift",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Interstellar Explosion to [Tectonic Shift] and consumes only 1 orb at the designated location to trigger a tectonic shift after 1s. Deals 530% of Base Damage + 216 damage to up to 5 targets within a 5m radius and has a(n) 80% chance to apply Collision: Pull.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_189.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:tevent-s-bombardment",
+      "name": "Tevent's Bombardment",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Shoots a bonus projectile whenever using Strafing, dealing 54% of Base Damage",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_36.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:tevent-s-corruption",
+      "name": "Tevent's Corruption",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Applies a Consuming Aura for 10s to the enemy first hit by Star Destroyer or to the nearest enemy within 6m when a Supernova Collapse area is generated. Enemies within 3m of the Aura's range has a(n) 80% chance to receive damage equal to 60% of Base Damage every 0.5s. Damage increases by 300% against monsters. Applies a Weaken effect that increases Debuff Duration per stack by 8%. (Stacks up to 5 times)",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_99.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:tevent-s-despair-trap",
+      "name": "Tevent's Despair Trap",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Upon applying Collision, Shock, or Stun with Greatsword Skills, creates an area in a 1.5m radius around the target that explodes in 1.5s, dealing 325% of Base Damage. Damage increases by 50% against monsters.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_08.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:tevent-s-furious-rage",
+      "name": "Tevent's Furious Rage",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Resets Camouflage Cloak cooldown on target kills or kill assists within 5s of its expiration. Cooldown: 10s Camouflage Cloak deals 205% of Base Damage to all enemies in a 3m radius, with a 70% chance to apply Collision: Push.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_12.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:tevent-s-hunger",
+      "name": "Tevent's Hunger",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On applying Curse of the Wand, has a 15% chance to apply Weaken: Curse, dealing 35% of Base Damage per sec for 30s. Damage increases by 100% against monsters.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_26.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:thuban-s-verdict",
+      "name": "Thuban's Verdict",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On hit with Fatal Stigma, boosts Off-Hand Weapon Activation Chance by 25% for the duration of the mark, and accumulates damage dealt to the marked target up to 50000%. When the mark ends, it explodes to deal additional damage equal to 15% of the accumulated damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_159.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:thunder-bombardment",
+      "name": "Thunder Bombardment",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When using Thundering Bomb, if the target is Wet or affected by your Frost status, deals additional damage proportional to the target's Weaken: Thunderclouds stacks and the same damage to other enemies within a 3m radius.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_157.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:daggers:thunder-call",
+      "name": "Thunder Call",
+      "slot": "weapon",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Boosts Cleaving Moonlight Damage by 10%. On Cleaving Moonlight skill hit, if the target has Weaken: Thunderclouds, removes 3 stacks of the effect and calls down lightning to attack the target and deal 400% damage. Upon hitting monsters, removes 5 stacks of Weaken: Thunderclouds and deals 700% damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_156.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:thunder-of-hatred-and-disillusionment",
+      "name": "Thunder of Hatred and Disillusionment",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Staff Lightning Skill Damage increases by 5%, Lightning skill's Mana Cost decreases by 10%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_64.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:staff:thunder-s-shadow",
+      "name": "Thunder's Shadow",
+      "slot": "equipment",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Inner Peace Specialization 1 [Thunder's Blessing] to [Thunder's Shadow] which applies to enemy targets. Increases damage by WP_Item_Gear_ST_01_1_DD.tooltip1-WP_ST_S_ManaRengeUp_trait1_DD.tooltip1% and applies Weaken: Thunderclouds. If any two of Thunder's Shadow, Lightning Condensation, and Thunderclouds Explosion are applied simultaneously, only the highest damage boost effect is applied.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_88.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "unresolved-source-tokens",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:staff:thunderclouds-explosion",
+      "name": "Thunderclouds Explosion",
+      "slot": "equipment",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "The falling lightning strikes of Thunder's Blessing and Thunder's Shadow deal WP_Item_Gear_ST_01_3_DD_BOSS.tooltip1-WP_ST_S_ManaRengeUp_trait1_DD.tooltip1% increased AoE Damage to up to 3 targets within a 1m radius. If any two of Thunder's Shadow, Lightning Condensation, and Thunderclouds Explosion are applied simultaneously, only the highest damage boost effect is applied. Boosts Thunderclouds Explosion's Damage against monsters by 150% Decreases Thunderclouds Explosion's PvP Damage by 90%",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_90.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "unresolved-source-tokens",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:longbow:torrent",
+      "name": "Torrent",
+      "slot": "equipment",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "While in a Whirlpool area, Zephyr's Nock and Strafing transform into a multi-shot skill that deals damage to up to 6 targets within a 3m radius upon landing a hit. Boosts damage dealt with waves against monsters by 50%. Decreases PvP Damage dealt with waves by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_113.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:longbow:triple-snipe",
+      "name": "Triple Snipe",
+      "slot": "equipment",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Decisive Sniping to a movement skill called [Triple Snipe] that can be used 3 times. Reuse before firing an arrow to leap immediately and become immune to Bind, Collision, Fear, Sleep and Stun while leaping. The third leap has a farther distance. Decisive Sniping's Charging Time ▲, Charging Time ▼, and Directional Tempest specializations not applied",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_116.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:gauntlet:variation",
+      "name": "Variation",
+      "slot": "weapon",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases the effect of Unpredictable by 50%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_Variation.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:daggers:venomous-swamp",
+      "name": "Venomous Swamp",
+      "slot": "equipment",
+      "weapons": [
+        "Daggers"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Melee critical hits now activate Venomous Edge, and has a(n) 5% chance to create a 3m radius Poison Cloud that lingers at the activation location for 3s. If Creeping Death is equipped, changes activation chance to 12%. Boosts damage by 3% per Poison stack. Boosts damage dealt with Venomous Edge and Poison Cloud against monsters by 15%. Decreases PvP Damage dealt with Venomous Edge and Poison Cloud by 90%. Does not apply additional effects with Poison Cloud Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_16.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:sword-shield:victory-strike",
+      "name": "Victory Strike",
+      "slot": "equipment",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Earth Strike range by 3m. Boosts A Shot at Victory, Annihilation Blade, and Earth Strike Damage by 5%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_48.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:orb:void-echo",
+      "name": "Void Echo",
+      "slot": "weapon",
+      "weapons": [
+        "Orb"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Void Slash's Orb effect activates, re-activates Void Slash from all activated orbs to deal 420% of Base Damage.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_145.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:sword-shield:wall-of-bitter-cold",
+      "name": "Wall of Bitter Cold",
+      "slot": "weapon",
+      "weapons": [
+        "Sword & Shield"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Stalwart Bastion to [Wall of Bitter Cold], and decreases cooldown by 30%. While the effect lasts, deals damage equal to 150% of Base Damage when attacked from within 15m and has a(n) 30% chance to apply Weaken: Frost that decreases Movement Speed by 35% for 3s. Affected targets cannot receive Stalwart Bastion from another caster for 45s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_150.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:greatsword:wave",
+      "name": "Wave",
+      "slot": "equipment",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Slash Wave strikes once and can be used up to 3 times in a row. Deals damage proportional to Base Damage to all targets in its path. Decreases Movement Speed by 50% while casting. Decreases PvP Damage of Valiant Brawl, Cruel Smite, and Slash Wave by 90%. Boosts damage of Valiant Brawl, Cruel Smite, and Slash Wave against monsters by 30%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_2.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:spear:wave-of-punishment",
+      "name": "Wave of Punishment",
+      "slot": "equipment",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes the effect of Ascending Cleave. Ascending Cleave's Collision: Prone, Push, and Stun effects only apply to monsters. On applying Shock or dealing damage to a Shocked target with Ascending Cleave, creates 6 shock waves that deal 750% of Base Damage to enemies within a 2.5m radius. If the shock waves deal damage, decreases Ascending Cleave's remaining cooldown by 8%, up to 6 times. Decreases Ascending Cleave's PvP damage by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_64.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:gauntlet:wave-resonance",
+      "name": "Wave Resonance",
+      "slot": "equipment",
+      "weapons": [
+        "Gauntlet"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Decreases remaining cooldown of Earthquake and Blood Spiral by 2.5% proportional to the number of targets hit by Sweep. For each target hit by Earthquake or Blood Spiral, decreases remaining cooldown of Sweep by 2.5%. Increases PvP Damage Taken by 100% .Decreases PvP Damage Dealt by 90%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_WP_GT_TorrentCycle.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:whirlpool-awakening",
+      "name": "Whirlpool Awakening",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Whirlpool range by 2m, and increases duration by 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_166.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:wild-barrage",
+      "name": "Wild Barrage",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Merciless Barrage now attacks all enemies in a 30-degree cone. Damage increases by 15%. Movement Speed decreases by 20% while using the skill.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_45.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:greatsword:will-eruption",
+      "name": "Will Eruption",
+      "slot": "weapon",
+      "weapons": [
+        "Greatsword"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Changes Willbreaker into a support skill that increases Species Damage Boost by 120 and PvP Damage Dealt by 5% for all party members within 15m for 6s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_138.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "equipment:crossbow:will-of-fonsine",
+      "name": "Will of Fonsiné",
+      "slot": "equipment",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Quick Fire is cast, decreases the cooldown of Multi-Shot, Rapid Shot, Collision Shot, Blade Storm, and Frost Expansion by 1.5s. [Blade Storm] Increases the number of attacks by 2 and applies Gale for 6s. [Frost Expansion] Upon hitting a target, has a(n) 80% chance to change to Bind: Icebound for 1.5s and increases Bind duration by 1.5s when Icebound is applied to an already Icebound target. Decreases PvP Damage by 90%. Boosts the damage of Multi-Shot, Rapid Shot, Collision Shot, Blade Storm, and Frost Expansion against monsters by 50%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Gear_36.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:wind-blades",
+      "name": "Wind Blades",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When Spiral Slash lands as a heavy attack, Spiral Slash is used 1 additional time. (Max 1 time)",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_80.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:crossbow:wind-s-guidance",
+      "name": "Wind's Guidance",
+      "slot": "weapon",
+      "weapons": [
+        "Crossbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Increases Movement Speed of self and party members within 16m by 8% and increases Magic, Melee, and Ranged Evasion by 160",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_161.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:longbow:witch-worshipper-s-anathema",
+      "name": "Witch Worshipper's Anathema",
+      "slot": "weapon",
+      "weapons": [
+        "Longbow"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Ensnaring Arrow changes to a location/directional skill. On hit, deals damage equal to 130% of Base Damage. Explodes in 3s to bind enemies within 3m from the target and deals the same damage. If the target is killed before the explosion, it explodes immediately. Bosses immune to bind become oppressed instead.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_122.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:spear:witch-worshipper-s-corrosive-curse",
+      "name": "Witch Worshipper's Corrosive Curse",
+      "slot": "weapon",
+      "weapons": [
+        "Spear"
+      ],
+      "rarity": "Not specified by source",
+      "description": "On Bloodleech Aura skill hit, has a(n) 80% chance to Weaken the target, which applies Melee Defense -600 for 3s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_125.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:staff:witch-worshipper-s-temptation",
+      "name": "Witch Worshipper's Temptation",
+      "slot": "weapon",
+      "weapons": [
+        "Staff"
+      ],
+      "rarity": "Not specified by source",
+      "description": "Salvation Chain changes to Witch Worshipper's Temptation. On skill hit, has a(n) 80% chance to apply Fear: Seduction to a target, making the target follow the caster for 4s and increases PvP damage taken by 15%.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_123.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    },
+    {
+      "id": "weapon:wand-tome:wretched-sin-s-ambush",
+      "name": "Wretched Sin's Ambush",
+      "slot": "weapon",
+      "weapons": [
+        "Wand & Tome"
+      ],
+      "rarity": "Not specified by source",
+      "description": "When the user's Health falls below 20%, becomes Stealthed for 3s. Cooldown 120s.",
+      "icon": "https://cdn.questlog.gg/throne-and-liberty/assets/Game/Image/Skill/Active/S_SI_Weapon_27.webp",
+      "sourceUrl": "https://questlog.gg/throne-and-liberty/en/skill-cores",
+      "descriptionStatus": "as-published",
+      "availability": "as-listed"
+    }
+  ]
+}

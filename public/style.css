@@ -2572,3 +2572,34 @@ button.loot-proof-state:focus-visible { outline:2px solid #ba96d5; outline-offse
 
 /* 1.43.3 polish: the "Attend anyway" button was losing to .btn.sm and rendering oversized in the party board. */
 .board .loa-inline .btn.sm.loa-toggle { font-size:11px; padding:2px 8px; }
+
+/* V29 — Skill cores: active per build, ownership shared across builds. */
+.gear-core-collection h3 {display:flex;align-items:baseline;gap:8px;font:600 14px var(--body);margin:0}
+.gear-core-slot-label {font-size:11px;color:var(--muted);margin:12px 0 6px}
+.gear-core-tile {display:flex;align-items:center;gap:9px;text-align:left;width:100%;min-width:0;min-height:42px;padding:7px 9px;border:1px solid #463b50;border-radius:7px;background:#27202f;color:#ede5f4;font:600 13px/1.35 var(--body);cursor:pointer;margin-top:6px}
+.gear-core-tile img {flex:none;object-fit:contain}
+.gear-core-tile span {overflow-wrap:anywhere}
+.gear-core-tile:hover {border-color:var(--gold);background:#332939}
+.gear-core-empty {border:1px dashed #463b50;border-radius:6px;padding:9px;color:var(--muted);font-size:12px}
+.gear-core-owned-head {display:flex;align-items:center;justify-content:space-between;gap:10px;margin:20px 0 8px;padding-top:16px;border-top:1px solid #463b50}
+.gear-core-owned-list {max-height:360px;overflow:auto;scrollbar-gutter:stable}
+.gear-core-source {margin:12px 0 0;font-size:11px}
+.gear-core-filters {display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.gear-core-filters input[type=search] {flex-basis:100%;min-width:0}
+.gear-core-filters select {flex:1;min-width:130px}
+.gear-core-filters label {display:flex;align-items:center;gap:6px;flex-basis:100%}
+.gear-core-picker-list {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:8px;max-height:50vh;overflow-y:auto;scrollbar-gutter:stable;padding:4px}
+.gear-core-picker-list .gear-core-tile {margin:0}
+.gear-core-result-count {margin-bottom:8px}
+.gear-core-detail-head {display:flex;align-items:center;gap:14px}
+.gear-core-detail-head h2 {font-family:var(--body);font-weight:600}
+.gear-core-effect {white-space:pre-wrap;overflow-wrap:anywhere;padding:18px;background:#211b2a;border:1px solid #463b50;border-radius:8px;margin:16px 0;line-height:1.65}
+.gear-core-notice {font-size:13px;color:var(--gold);border-left:2px solid var(--gold);padding-left:12px}
+.gear-core-details .dlg-actions {flex-wrap:wrap}
+.gear-core-tile:focus-visible {outline:2px solid var(--gold);outline-offset:2px}
+@media(max-width:600px) {.gear-core-picker-list {grid-template-columns:1fr}.gear-core-details .dlg-actions>.btn {flex:1;min-width:120px}}
+
+.gear-core-tile img.icon-missing, .gear-core-detail-head img.icon-missing { visibility:hidden; }
+
+/* Gear thread: adjacent panels must not pick up the generic ".panel + .panel" gap (it staggered their tops by 16px). */
+.gear-workspace-grid > .panel + .panel, .gear-workspace-resources > .panel + .panel { margin-top:0; }
