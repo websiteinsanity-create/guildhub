@@ -2389,9 +2389,9 @@ button.loot-proof-state:focus-visible { outline:2px solid #ba96d5; outline-offse
 .gear-workspace .gear-slide {display:flex;gap:12px}
 .gear-workspace .gear-slide[hidden] {display:none}
 .gear-screenshot-preview {display:grid;place-items:center;min-height:250px;background:#100e14;border:1px solid var(--gear-border);border-radius:8px;overflow:hidden}
-.gear-screenshot-preview>a {display:block;width:100%;line-height:0}
+.gear-screenshot-preview>.gear-image-open {display:block;width:100%;line-height:0}
 .gear-workspace .gear-shot {display:block;width:100%;max-height:540px;border:0;border-radius:0;object-fit:contain}
-.gear-screenshot-preview a:focus-visible {outline:2px solid var(--gold);outline-offset:-3px}
+.gear-screenshot-preview .gear-image-open:focus-visible {outline:2px solid var(--gold);outline-offset:-3px}
 .gear-screenshot-note>label {display:block;color:var(--text);font-size:14px;margin-bottom:7px}
 .gear-note-controls {display:flex;align-items:flex-end;gap:12px}
 .gear-note-controls textarea {flex:1;min-width:0;margin:0;background:#141117;border-color:var(--gear-border)}
@@ -2603,3 +2603,17 @@ button.loot-proof-state:focus-visible { outline:2px solid #ba96d5; outline-offse
 
 /* Gear thread: adjacent panels must not pick up the generic ".panel + .panel" gap (it staggered their tops by 16px). */
 .gear-workspace-grid > .panel + .panel, .gear-workspace-resources > .panel + .panel { margin-top:0; }
+
+/* V30 — screenshots stay in the workspace; fit-to-screen and scrollable actual size. */
+.gear-image-open {appearance:none;display:block;max-width:100%;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:zoom-in}
+.gear-image-open:focus-visible,.gear-dropzone:focus-visible {outline:2px solid var(--gold);outline-offset:3px}
+dialog:has(.gear-image-viewer) {width:min(1440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:16px;overflow:auto}
+.gear-image-toolbar {display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.gear-image-toolbar h2 {flex:1;min-width:0;margin:0;overflow-wrap:anywhere;font:600 18px/1.4 var(--body)}
+.gear-image-toolbar button {flex:none}
+.gear-image-viewport {overflow:auto;max-height:calc(100dvh - 140px);background:#0c0a10;border:1px solid var(--line);border-radius:6px;overscroll-behavior:contain;text-align:center}
+.gear-image-viewport img {display:block;width:auto;height:auto;max-width:100%;max-height:calc(100dvh - 145px);object-fit:contain;margin:auto}
+.gear-image-viewport img.actual-size {max-width:none;max-height:none;margin:0}
+.gear-dropzone[aria-busy=true] {opacity:.65;cursor:progress}
+#gear-upload-status {margin-top:12px}
+@media(max-width:600px) {dialog:has(.gear-image-viewer) {padding:10px;width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}.gear-image-toolbar {flex-wrap:wrap}.gear-image-toolbar h2 {flex-basis:100%;font-size:16px}}

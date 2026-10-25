@@ -3,6 +3,12 @@
 A small, self-hosted guild manager for Throne and Liberty. No database, no build step,
 no dependencies: just Node 18+ and one JSON file of data.
 
+## Gear Thread screenshot fix (v30)
+
+Screenshots enlarge inside the page, with fit/actual-size controls. Paste an image
+with Ctrl+V into the current screenshot topic or its upload dialog; Coach folder
+pasting attaches an image draft.
+
 ## Skill-core update (v29)
 
 Gear Threads now include 271 source-attributed English Skill Core records, a shared
