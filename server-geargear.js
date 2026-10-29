@@ -3,11 +3,11 @@
 // same reasoning as VODs living separately from the member they're about (a thread can grow a lot of content
 // over a character's lifetime, and nothing else ever needs to load it along with the plain roster list):
 //   - gearChat: a shared running conversation on the thread (member + their coach + officers)
-//   - gearScreens: one ordered screenshot gallery+note per admin-defined topic (db.gearSectionTypes, officer-managed in
+//   - gearScreens: one screenshot+note slot per admin-defined topic (db.gearSectionTypes, officer-managed in
 //     Admin - see the routes near the bottom of this file) - a screen row is keyed by the topic's stable id,
 //     not its label, so renaming a topic in Admin never orphans the screenshot already sitting under it
-//   - gearSkills: active cores per build; gearSkillOwnership: shared ownership per player.
-//     A source-attributed bundled English catalog is installed locally; officers may import updates.
+//   - gearSkills: per-character "which skill cores do you own, which are active right now" - the catalog
+//     itself (what skill cores exist at all) is still to come from the user, so it's empty until then
 //   - questlogs: NOT owned here - it's the same field a character's own edit form already has
 //     (server-features.js's pickMember/cleanLinks); this module only adds a second, coach-reachable door to it
 //   - gearFolder: one-directional postings from admins/coaches that the player can see but not add to
@@ -82,25 +82,10 @@ module.exports = function install(ctx) {
   // renaming a topic carries its screenshot and note forward instead of orphaning them under the old name.
   const sectionTypes = () => db().gearSectionTypes;
 
-  // Source snapshot is bundled; no dependency on Questlog availability during normal use.
-  const {validateCatalog,validateActive} = require('./skillcore-catalog');
-  const bundledCatalog=validateCatalog(require('./catalog/skillcores.en.json'));
-  const catalog = () => db().skillCoreCatalog || bundledCatalog;
-  const catalogEntries = () => catalog().entries;
-  const potentials = require('./potential-catalog');
-  const potentialKey = (memberId,key) => `${memberId}:${key}`;
-  function potentialsFor(m,b) {
-    const build=b.key==='main'?m:(m.builds || []).find(x=>String(x.id)===b.key);
-    const row=(db().gearPotentials || {})[potentialKey(m.id,b.key)] || {assignments:{},revision:0};
-    const weapons=[build?.primaryWeapon || '',build?.secondaryWeapon || ''];
-    // Preserve earlier multi-selection records for review, without treating them as equipped.
-    const assignments={},legacyAssignments={};
-    for(const [slot,ids] of Object.entries(row.assignments || {})) {
-      if(Array.isArray(ids) && ids.length>1)legacyAssignments[slot]=ids;
-      else if(Array.isArray(ids) && ids.length===1)assignments[slot]=ids;
-    }
-    return {catalog:potentials.entries,slots:potentials.slots,weapons,assignments,legacyAssignments,revision:row.revision,updatedAt:row.updatedAt || null};
-  }
+  // Skill core catalog: intentionally empty. The user is supplying the real list of skill cores later -
+  // until then, every thread's "owned"/"active" picker has nothing to offer and says so plainly rather than
+  // silently doing nothing.
+  const SKILLCORE_CATALOG = [];
 
   // ---------------------------------------------------------------- images (screenshots, folder attachments)
   // Same sniff-by-magic-bytes + content-hash-filename approach as the branding upload in server-features.js,
@@ -113,21 +98,17 @@ module.exports = function install(ctx) {
     if (buf.length > 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'webp';
     return null;
   };
-  async function saveImage(prefix, dataUrl, maxBytes) {
+  function saveImage(prefix, dataUrl, maxBytes) {
     const buf = Buffer.from(String(dataUrl || '').replace(/^data:[^,]*,/, ''), 'base64');
     need(buf.length > 100, 400, 'That does not look like an image.');
     need(buf.length <= maxBytes, 413, `Images can be up to ${Math.round(maxBytes / 1e6)} MB.`);
     const ext = sniff(buf);
     need(ext, 400, 'Only PNG, JPEG, GIF or WebP pictures are allowed.');
     const name = `${prefix}-${crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12)}.${ext}`;
-    await fs.promises.writeFile(path.join(ctx.UPLOAD_DIR, name), buf);
+    fs.writeFileSync(path.join(ctx.UPLOAD_DIR, name), buf);
     return name;
   }
-  const screenImages = row => Array.isArray(row?.images) ? row.images : (row?.image ? [row.image] : []);
-  function dropImage(name) {
-    if (!name || db().gearScreens.some(r => screenImages(r).includes(name) || Object.values(r.previews || {}).includes(name)) || db().gearFolder.some(r => r.image === name)) return;
-    fs.rmSync(path.join(ctx.UPLOAD_DIR, name), { force: true });
-  }
+  function dropImage(name) { if (name) fs.rmSync(path.join(ctx.UPLOAD_DIR, name), { force: true }); }
 
   // ---------------------------------------------------------------- reading a whole thread
   function screensFor(memberId, key) {
@@ -135,28 +116,19 @@ module.exports = function install(ctx) {
     return sectionTypes().map((t) => {
       const row = D.gearScreens.find((s) => s.memberId === memberId && rowKey(s) === key && s.sectionId === t.id);
       return row
-        ? { sectionId: t.id, label: t.label, image: screenImages(row)[0] ? '/uploads/' + screenImages(row)[0] : '', images: screenImages(row).map(name => ({id:name,image:'/uploads/'+name,preview:'/uploads/'+(row.previews?.[name] || name)})), note: row.note, updatedAt: row.updatedAt, updatedByName: row.updatedByName }
-        : { sectionId: t.id, label: t.label, image: '', images: [], note: '', updatedAt: null, updatedByName: '' };
+        ? { sectionId: t.id, label: t.label, image: row.image ? '/uploads/' + row.image : '', note: row.note, updatedAt: row.updatedAt, updatedByName: row.updatedByName }
+        : { sectionId: t.id, label: t.label, image: '', note: '', updatedAt: null, updatedByName: '' };
     });
   }
-  // Active cores and build links are per build: main keeps the original keys (member id; m.questlogs),
+  // Skill cores and build links are per build too: main keeps the keys it always had (the member id; m.questlogs),
   // every other build gets "<memberId>:<buildId>" and its own entry in db.gearLinks.
   const skillKey = (memberId, key) => (key === 'main' ? memberId : `${memberId}:${key}`);
   const linksKey = (memberId, key) => `${memberId}:${key}`;
   const linksFor = (m, key) => (key === 'main' ? m.questlogs || [] : db().gearLinks[linksKey(m.id, key)] || []);
-  function ownedFor(m) {
-    const shared = (db().gearSkillOwnership || {})[m.owner];
-    if (Array.isArray(shared)) return shared;
-    // Migrate legacy per-build ownership by union, including every class on this player's character.
-    return [...new Set(Object.entries(db().gearSkills).filter(([k])=>k===String(m.id) || k.startsWith(m.id+':')).flatMap(([,row])=>row.owned || []))];
+  function skillsFor(memberId, key) {
+    const row = db().gearSkills[skillKey(memberId, key)] || { owned: [], active: [] };
+    return { catalog: SKILLCORE_CATALOG, owned: row.owned || [], active: row.active || [] };
   }
-  function skillsFor(m, b) {
-    const row = db().gearSkills[skillKey(m.id,b.key)] || {active:[]};
-    const build = b.key==='main'?m:(m.builds || []).find(x=>String(x.id)===b.key);
-    const owned=ownedFor(m), active=(row.active || []).filter(id=>owned.includes(id));
-    return {catalog:catalogEntries(),metadata:{source:catalog().source,gameVersion:catalog().gameVersion,verifiedAt:catalog().verifiedAt,count:catalogEntries().length},owned,active,weapons:[build?.primaryWeapon,build?.secondaryWeapon].filter(Boolean)};
-  }
-
   // threadFor() deliberately does NOT include chat any more - a coach's VOD review can run to several
   // thousand characters repeated many times over a long thread (real example: a single timestamped breakdown
   // of one VOD ran ~3000 characters on its own), so a thread's chat history needs to be paged, not shipped
@@ -171,8 +143,7 @@ module.exports = function install(ctx) {
       canPostFolder: canPostFolder(user, m, b),
       isOwner: m.owner === user.key,
       screens: screensFor(m.id, key),
-      skillcores: skillsFor(m, b),
-      potentials: potentialsFor(m, b),
+      skillcores: skillsFor(m.id, key),
       questlogs: linksFor(m, key),
       folder: D.gearFolder.filter((f) => f.memberId === m.id && rowKey(f) === key).map((f) => (f.image ? { ...f, image: '/uploads/' + f.image } : f))
         .sort((a, b) => b.at.localeCompare(a.at)),
@@ -234,49 +205,26 @@ module.exports = function install(ctx) {
   });
 
   // ---------------------------------------------------------------- screenshots
-  route('PUT', '/api/gearthreads/:id/screens/:section', async ({ body, user, params }) => {
+  route('PUT', '/api/gearthreads/:id/screens/:section', ({ body, user, params }) => {
     const m = member(params.id), b = buildFor(user, m, body.build);
     const sectionId = Number(params.section);
     const type = sectionTypes().find((t) => t.id === sectionId);
     need(type, 404, 'Not a real screenshot section.');
     const D = db();
-    const uploaded=body.image && !body.remove ? await saveImage('gearshot',body.image,6e6) : null;
-    const preview=uploaded && body.preview ? await saveImage('gearthumb',body.preview,300000) : null;
-    need(db()===D && D.members.includes(m),409,'Thread changed during upload. Please try again.');
-    buildFor(user,m,body.build);
-    need(sectionTypes().some(t=>t.id===sectionId),409,'Screenshot topic changed. Please refresh.');
     let row = D.gearScreens.find((s) => s.memberId === m.id && rowKey(s) === b.key && s.sectionId === sectionId);
     if (body.remove) {
-      const old = screenImages(row);
-      if (row) D.gearScreens = D.gearScreens.filter(s => s !== row);
-      old.forEach(dropImage);
-      Object.values(row?.previews || {}).forEach(dropImage);
-      audit(user, 'geargear.screen.remove', { type: 'member', id: m.id, name: m.name }, `${user.name} removed the "${type.label}" gallery from ${m.name}'s gear thread.`);
-      save(); return threadFor(user, m, b);
+      if (row) { dropImage(row.image); D.gearScreens = D.gearScreens.filter((s) => s !== row); }
+      audit(user, 'geargear.screen.remove', { type: 'member', id: m.id, name: m.name }, `${user.name} removed the "${type.label}" screenshot from ${m.name}'s gear thread.`);
+      save();
+      return threadFor(user, m, b);
     }
-    const old = screenImages(row), note = body.note !== undefined ? clean(body.note, 1000) : (row ? row.note : '');
-    let images = [...old];
-    if (body.removeId !== undefined) {
-      need(images.includes(body.removeId), 404, 'Screenshot not found.');
-      images = images.filter(id => id !== body.removeId);
-    }
-    if (body.order !== undefined) {
-      need(Array.isArray(body.order) && body.order.length === images.length && new Set(body.order).size === images.length && body.order.every(id => images.includes(id)), 409, 'The gallery changed. Refresh it before reordering.');
-      images = [...body.order];
-    }
+    const note = body.note !== undefined ? clean(body.note, 1000) : (row ? row.note : '');
+    if (!row) { row = { id: newId(), memberId: m.id, buildKey: b.key, sectionId, image: '', note: '' }; D.gearScreens.push(row); }
     if (body.image) {
-      const image = uploaded;
-      // Legacy clients may replace the cover; the gallery UI always appends.
-      if (body.append === true) { if (!images.includes(image)) images.push(image); }
-      else images = [image, ...images.slice(1).filter(id => id !== image)];
+      const oldImage = row.image;
+      row.image = saveImage('gearshot', body.image, 6e6);
+      if (oldImage && oldImage !== row.image) dropImage(oldImage);
     }
-    if (!row) { row = { id: newId(), memberId: m.id, buildKey: b.key, sectionId, note: '' }; D.gearScreens.push(row); }
-    const previousPreviews=Object.values(row.previews || {});
-    row.previews=Object.fromEntries(Object.entries(row.previews || {}).filter(([id])=>images.includes(id)));
-    if(uploaded && preview){row.previews=row.previews || {};row.previews[uploaded]=preview;}
-    row.images = images; row.image = images[0] || '';
-    old.filter(id => !images.includes(id)).forEach(dropImage);
-    previousPreviews.forEach(dropImage);
     row.note = note;
     row.updatedAt = now();
     row.updatedByName = user.name;
@@ -329,59 +277,22 @@ module.exports = function install(ctx) {
     need(i >= 0, 404, 'Topic not found.');
     const [gone] = D.gearSectionTypes.splice(i, 1);
     const orphaned = D.gearScreens.filter((s) => s.sectionId === id);
+    for (const row of orphaned) dropImage(row.image);
     D.gearScreens = D.gearScreens.filter((s) => s.sectionId !== id);
-    for (const row of orphaned) screenImages(row).forEach(dropImage);
     save();
     audit(user, 'geargear.section.remove', { type: 'guild' }, `${user.name} removed the "${gone.label}" screenshot topic from Gear Threads${orphaned.length ? ` (along with ${orphaned.length} existing screenshot${orphaned.length === 1 ? '' : 's'} under it)` : ''}.`);
     return sectionTypes();
   }, { officer: true });
 
-  // ---------------------------------------------------------------- skill cores
-  route('GET','/api/admin/skillcores/catalog',()=>catalog(),{officer:true});
-  route('PUT','/api/gearthreads/:id/potentials',({body,user,params})=>{
-    const m=member(params.id),b=buildFor(user,m,body.build),current=potentialsFor(m,b);
-    need(Number.isSafeInteger(body.revision) && body.revision===current.revision,409,'Potentials changed. Refresh this thread before saving.');
-    let selection;
-    try {selection=potentials.validateSelection(body.slot,body.ids,current.weapons);}catch(e){need(false,400,e.message);}
-    const assignments={...((db().gearPotentials || {})[potentialKey(m.id,b.key)]?.assignments || {})};
-    if(selection.length)assignments[body.slot]=selection;else delete assignments[body.slot];
-    db().gearPotentials ||= {};
-    db().gearPotentials[potentialKey(m.id,b.key)]={assignments,revision:current.revision+1,updatedAt:now()};
-    audit(user,'geargear.potentials.update',{type:'member',id:m.id,name:m.name},`${user.name} updated ${body.slot} potentials for ${m.name} (${b.name}).`);
-    save();return threadFor(user,m,b);
-  });
-  route('PUT','/api/admin/skillcores/catalog',({body,user})=>{
-    let next;try{next=validateCatalog(body);}catch(e){need(false,400,e.message);}
-    const lookup=new Map(next.entries.map(e=>[e.id,e]));
-    const referenced=new Set([...Object.values(db().gearSkillOwnership || {}).flat(),...Object.values(db().gearSkills).flatMap(row=>[...(row.owned || []),...(row.active || [])])]);
-    need([...referenced].every(id=>lookup.has(id)),409,'The new catalog would remove skill cores still referenced by players. Keep their stable IDs in the catalog.');
-    const previous=new Map(catalogEntries().map(e=>[e.id,e]));
-    need([...referenced].every(id=>!previous.has(id) || (lookup.get(id).slot===previous.get(id).slot && JSON.stringify(lookup.get(id).weapons)===JSON.stringify(previous.get(id).weapons))),409,'Referenced skill-core slot and weapon compatibility cannot be changed by an import.');
-    db().skillCoreCatalog=next;save();audit(user,'skillcores.catalog.import',{type:'guild'},`${user.name} imported ${next.entries.length} skill cores (${next.gameVersion}).`);
-    return {count:next.entries.length,source:next.source,gameVersion:next.gameVersion,verifiedAt:next.verifiedAt};
-  },{officer:true});
+  // ---------------------------------------------------------------- skill cores (no change history - "just an adding feature")
   route('PUT', '/api/gearthreads/:id/skillcores', ({ body, user, params }) => {
-    const m=member(params.id), b=buildFor(user,m,body.build), entries=catalogEntries(), ids=new Set(entries.map(e=>e.id));
-    const list=value=>{need(Array.isArray(value) && value.every(id=>typeof id==='string'),400,'Skill cores must be an array of IDs.');return [...new Set(value)];};
-    const oldOwned=ownedFor(m), current=db().gearSkills[skillKey(m.id,b.key)] || {active:[]};
-    // Delta updates prevent a coach editing one build from overwriting ownership added on another.
-    let owned=oldOwned.slice();
-    if(body.addOwned!==undefined){const add=list(body.addOwned);need(add.every(id=>ids.has(id)),400,'Unknown skill core.');owned=[...new Set([...owned,...add])];}
-    if(body.removeOwned!==undefined){const remove=list(body.removeOwned);owned=owned.filter(id=>!remove.includes(id));}
-    if(body.owned!==undefined){owned=list(body.owned);need(owned.every(id=>ids.has(id)),400,'Unknown skill core.');}
-    const removed=oldOwned.filter(id=>!owned.includes(id));
-    // Coaches may not remove ownership that affects an inaccessible build. Owners/officers can remove
-    // only after deactivating that core everywhere; no silent cross-build changes.
-    const affected=Object.entries(db().gearSkills).filter(([k])=>k===String(m.id) || k.startsWith(m.id+':')).some(([,row])=>(row.active || []).some(id=>removed.includes(id)));
-    need(!affected,409,'Deactivate this skill core in every build before removing it from Owned.');
-    const active=body.active===undefined?(current.active || []):list(body.active);
-    need(active.every(id=>owned.includes(id)),400,'Active skill cores must be owned.');
-    const build=b.key==='main'?m:(m.builds || []).find(x=>String(x.id)===b.key);
-    try{validateActive(active,entries,[build?.primaryWeapon,build?.secondaryWeapon].filter(Boolean));}catch(e){need(false,400,e.message);}
-    db().gearSkillOwnership ||= {};Object.defineProperty(db().gearSkillOwnership,m.owner,{value:owned,writable:true,enumerable:true,configurable:true});
-    for(const [k,row] of Object.entries(db().gearSkills))if(k===String(m.id)||k.startsWith(m.id+':'))delete row.owned;
-    db().gearSkills[skillKey(m.id,b.key)]={active};save();
-    return threadFor(user,m,b);
+    const m = member(params.id), b = buildFor(user, m, body.build);
+    const catalogIds = new Set(SKILLCORE_CATALOG.map((s) => s.id));
+    const owned = [...new Set((Array.isArray(body.owned) ? body.owned : []).map(String))].filter((id) => catalogIds.has(id));
+    const active = [...new Set((Array.isArray(body.active) ? body.active : []).map(String))].filter((id) => owned.includes(id));
+    db().gearSkills[skillKey(m.id, b.key)] = { owned, active };
+    save();
+    return threadFor(user, m, b);
   });
 
   // ---------------------------------------------------------------- questlog (same field as the character's own edit form - see pickMember/cleanLinks - just reachable from a coach here too)
@@ -395,7 +306,7 @@ module.exports = function install(ctx) {
   });
 
   // ---------------------------------------------------------------- folder (admins/coaches post, player views only)
-  route('POST', '/api/gearthreads/:id/folder', async ({ body, user, params }) => {
+  route('POST', '/api/gearthreads/:id/folder', ({ body, user, params }) => {
     const m = member(params.id), b = buildFor(user, m, body.build);
     need(canPostFolder(user, m, b), 403, 'Only a coach or officer can post into this folder.');
     const kind = ['text', 'link', 'image'].includes(body.kind) ? body.kind : 'text';
@@ -405,9 +316,7 @@ module.exports = function install(ctx) {
       item.url = clean(body.url, 300);
       need(/^https?:\/\/[^\s<>"']+$/i.test(item.url), 400, 'Links must start with http:// or https://');
     } else if (kind === 'image') {
-      item.image = await saveImage('gearfolder', body.image, 6e6);
-      need(db().members.includes(m),409,'Thread changed during upload. Please try again.');
-      buildFor(user,m,body.build);
+      item.image = saveImage('gearfolder', body.image, 6e6);
     } else {
       need(text, 400, 'Write something before posting.');
     }
@@ -423,8 +332,8 @@ module.exports = function install(ctx) {
     const item = D.gearFolder.find((f) => f.id === Number(params.itemId) && f.memberId === m.id && rowKey(f) === b.key);
     need(item, 404, 'Folder item not found.');
     need(isOfficer(user) || item.postedBy === user.key, 403, 'You can only remove your own folder posts.');
-    D.gearFolder = D.gearFolder.filter((f) => f !== item);
     dropImage(item.image);
+    D.gearFolder = D.gearFolder.filter((f) => f !== item);
     audit(user, 'geargear.folder.remove', { type: 'member', id: m.id, name: m.name }, `${user.name} removed a post from ${m.name}'s gear-thread folder.`);
     save();
     return threadFor(user, m, b);
@@ -435,21 +344,19 @@ module.exports = function install(ctx) {
   function dropBuildData(memberId, key) {
     const D = db();
     const mine = (r) => r.memberId === memberId && rowKey(r) === key;
-    const removedImages = [...D.gearScreens.filter(mine).flatMap(screenImages), ...D.gearFolder.filter(mine).map(r => r.image)];
+    for (const r of D.gearScreens.filter(mine)) dropImage(r.image);
+    for (const r of D.gearFolder.filter(mine)) dropImage(r.image);
     D.gearScreens = D.gearScreens.filter((r) => !mine(r));
     D.gearFolder = D.gearFolder.filter((r) => !mine(r));
-    removedImages.forEach(dropImage);
     D.gearChat = D.gearChat.filter((r) => !mine(r));
     delete D.gearSkills[skillKey(memberId, key)];
     delete D.gearLinks[linksKey(memberId, key)];
-    if(D.gearPotentials)delete D.gearPotentials[potentialKey(memberId,key)];
   }
   ctx.gearDropBuild = (memberId, buildId) => dropBuildData(memberId, String(buildId));
   hooks.memberDeleted.push((m) => {
     for (const b of buildsOf(m)) dropBuildData(m.id, b.key);
     const D = db();
     for (const k of Object.keys(D.gearSkills)) if (k.startsWith(m.id + ':')) delete D.gearSkills[k];
-    for (const k of Object.keys(D.gearPotentials || {})) if (k.startsWith(m.id + ':')) delete D.gearPotentials[k];
   });
 
   return { canAccessThread };
