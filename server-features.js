@@ -90,7 +90,7 @@ module.exports = function install(ctx) {
     });
   }
 
-  function stateFor(user) {
+  function stateFor(user, compact=false, selectedVod=undefined) {
     if (user.role === 'applicant') return community.applicantState(user);        // an applicant sees nothing but their own application
     const D = db(), off = isOfficer(user), hidden = new Set(D.settings.hiddenSections || []);
     const hide = (k) => !off && hidden.has(k);
@@ -103,6 +103,7 @@ module.exports = function install(ctx) {
     const P = compliance.players();
     const events = D.events.map((e) => {
       const out = eventFor(e, user);
+      if(compact && out.voiceTracking){const {seen,channels,partyChannels,...summary}=out.voiceTracking;out.voiceTracking={...summary,seenCount:Object.keys(seen || {}).length,detailsOmitted:true};}
       out.chart = compliance.eventChart(e, P);                // counts only: who is coming, who is not, who did not answer (per role)
       // attendanceTracked (from eventFor's own spread of the event) already tells a member whether the roll
       // was taken, with no need for a separate rollTaken field any more - it is never redacted, unlike attended
@@ -111,7 +112,7 @@ module.exports = function install(ctx) {
       return out;
     });
     return {
-      user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: user.role },
+      user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: user.role, support: !!user.support, readOnly: !!user.support },
       members: D.members.filter((m) => off || !m.pendingApproval || own.has(m.id)).map((m) => (off || ownOrCoached(m.id) ? m : { ...m, questlogs: [] })),     // Questlog links: the leadership, the owner, and their coach
       events,
       points: off ? D.points : hide('points') ? [] : D.points.filter((p) => ownOrCoached(p.memberId)),
@@ -130,7 +131,7 @@ module.exports = function install(ctx) {
       notices: noticesFor(user),
       ...compliance.extraState(user),
       ...community.extraState(user),
-      ...(() => { const c = coaching.coachingState(user); return (off || c.isCoach || !hide('vods')) ? c : { ...c, vods: [], screenshots: [] }; })(),
+      ...(() => { const c = coaching.coachingState(user,compact?(selectedVod || null):undefined); return (off || c.isCoach || !hide('vods')) ? c : { ...c, vods: [], screenshots: [] }; })(),
       tags: off ? D.tags : [],
       playerTags: off ? D.playerTags : {},
       prefs: D.prefs[user.key] || {},
@@ -148,12 +149,13 @@ module.exports = function install(ctx) {
       // does: straight from who owns an active character, with coach status read live off the setting
       // itself rather than off a user record that will never exist.
       users: discord.loginEnabled
-        ? Object.values(D.users).filter((u) => !u.applicant).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role, coach: !!u.coach }))
+        ? Object.values(D.users).filter((u) => !u.applicant && !u.support).map((u) => ({ id: u.id, name: u.name, avatar: u.avatar, role: u.role, coach: !!u.coach }))
         : [...new Set(D.members.filter((m) => m.active).map((m) => m.owner))].map((o) => ({ id: o, name: o, avatar: '', role: 'member', coach: D.settings.coachUserIds.includes(o) })),
       now: Date.now(),
     };
   }
-  route('GET', '/api/state', ({ user }) => stateFor(user), { applicant: true });
+  route('GET', '/api/state', ({ user,query }) => stateFor(user,query.compact==='1',query.vod), { applicant: true });
+  route('GET','/api/events/:id/tracking-state',({params,user})=>{const ev=findEvent(params.id);need(ev,404,'Event not found.');return eventFor(ev,user);},{officer:true});
 
   // ============================================================ approval of player changes
   const FIELD_GROUP = {
@@ -232,6 +234,7 @@ module.exports = function install(ctx) {
   // ============================================================ characters (create / edit, with approval)
   const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, int(v) || 0));
   route('POST', '/api/members', ({ body, user }) => {
+    need(!(user.support && (!body.owner || body.owner===user.key)) && body.owner!=='support:SupportAI',403,'Support accounts cannot own characters.');
     const D = db();
     const m = { id: newId(), owner: user.key, joinedAt: now(), builds: [], ...pickMember(body) };
     if (isOfficer(user)) {
@@ -583,18 +586,18 @@ module.exports = function install(ctx) {
   };
   const dropFile = (name) => { if (name) fs.rmSync(path.join(UPLOAD_DIR, name), { force: true }); };
   // Event artwork is stored separately from guild branding and attached when the event is saved.
-  route('POST', '/api/events/artwork', ({ body }) => {
+  route('POST', '/api/events/artwork', async ({ body }) => {
     const buf = Buffer.from(String(body.data || '').replace(/^data:[^,]*,/, ''), 'base64');
     need(buf.length > 100, 400, 'That does not look like an image.');
     need(buf.length <= 3e6, 413, 'Event images can be up to 3 MB.');
     const ext = sniff(buf);
     need(ext, 400, 'Only PNG, JPEG, GIF or WebP pictures are allowed.');
     const imageFile = 'event-' + crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12) + '.' + ext;
-    fs.writeFileSync(path.join(UPLOAD_DIR, imageFile), buf);
+    await fs.promises.writeFile(path.join(UPLOAD_DIR, imageFile), buf);
     return { imageFile, url: '/uploads/' + imageFile };
   }, { officer: true });
 
-  route('POST', '/api/admin/upload', ({ body }) => {
+  route('POST', '/api/admin/upload', async ({ body }) => {
     const D = db(), b = D.settings.branding;
     need(['icon', 'background'].includes(body.kind), 400, 'Icon or background.');
     const key = body.kind === 'icon' ? 'iconFile' : 'bgFile';
@@ -605,7 +608,8 @@ module.exports = function install(ctx) {
     const ext = sniff(buf);
     need(ext, 400, 'Only PNG, JPEG, GIF or WebP pictures are allowed.');
     const name = `${body.kind}-${crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12)}.${ext}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+    await fs.promises.writeFile(path.join(UPLOAD_DIR, name), buf);
+    need(db()===D && D.settings.branding===b,409,'Settings changed during upload. Please try again.');
     if (b[key] && b[key] !== name) dropFile(b[key]);
     b[key] = name;
     save();

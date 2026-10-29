@@ -2754,3 +2754,18 @@ dialog:has(.gear-image-viewer) {width:min(1440px,calc(100vw - 32px));max-height:
 
 /* System status: neighbouring panels must not pick up the generic ".panel + .panel" gap (it staggered the two bottom cards). */
 .sc-status-bottom > .panel + .panel, .sc-status-metrics > .panel + .panel, .sc-system-status .sc-status-panel + .sc-status-panel { margin-top:0; }
+
+/* Keep compact member cards readable in the narrower Available members panel. */
+.board .mtxt { container-type:inline-size; }
+.board .pool-list .mtxt { gap:0; }
+.board .midentity .mname { flex:1 1 0; max-width:none; }
+.board .midentity .mmeta { flex:0 1 auto; max-width:55%; }
+.board .mrow .menu { flex:0 0 auto; }
+.board .mname > .tag { flex:none; }
+@container (max-width:240px) {
+ .board .midentity { flex-wrap:wrap; gap:0; }
+ .board .midentity .mname { flex:1 0 100%; max-width:100%; line-height:16px; gap:5px; }
+ .board .midentity .mmeta { flex:1 0 100%; max-width:100%; min-height:18px; line-height:18px; gap:4px; }
+ .board .midentity .wicon { width:16px; height:16px; }
+ .board .mspec.specialization-scroll,.board .mrow.dim .mspec.specialization-scroll { line-height:14px; }
+}

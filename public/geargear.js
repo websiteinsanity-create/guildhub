@@ -149,7 +149,7 @@ function gearGalleryHtml(t,s) {
   return `<div class="gear-slide-head"><b>${esc(s.label)}</b><span class="muted small">${images.length} screenshot${images.length===1?'':'s'}</span></div>
     <div class="gear-screenshot-preview">${current?`<button type="button" class="gear-image-open" data-act="gear-image-open" data-section="${s.sectionId}" data-index="${index}" aria-label="Enlarge ${esc(s.label)} screenshot"><img class="gear-shot" src="${esc(current.image)}" alt="${esc(s.label)}"></button>`:'<div class="empty">No screenshots yet. Add images of your current setup.</div>'}</div>
     <div class="gear-gallery-thumbs" aria-label="Screenshots">${images.map((im,i)=>`<div class="gear-gallery-thumb ${i===index?'selected':''}" draggable="true" data-gear-drag="${esc(im.id)}" data-section="${s.sectionId}">
-      <button type="button" data-act="gear-gallery-select" data-section="${s.sectionId}" data-image="${esc(im.id)}" aria-label="Select screenshot ${i+1}" aria-pressed="${i===index}"><img src="${esc(im.image)}" alt="Screenshot ${i+1}" loading="lazy">${i===0?'<span class="gear-cover">Main</span>':''}</button>
+      <button type="button" data-act="gear-gallery-select" data-section="${s.sectionId}" data-image="${esc(im.id)}" aria-label="Select screenshot ${i+1}" aria-pressed="${i===index}"><img src="${esc(im.preview || im.image)}" alt="Screenshot ${i+1}" loading="lazy">${i===0?'<span class="gear-cover">Main</span>':''}</button>
       <div class="gear-thumb-actions"><button type="button" data-act="gear-gallery-move" data-section="${s.sectionId}" data-image="${esc(im.id)}" data-dir="-1" ${i===0?'disabled':''} aria-label="Move screenshot left">←</button><button type="button" data-act="gear-gallery-move" data-section="${s.sectionId}" data-image="${esc(im.id)}" data-dir="1" ${i===images.length-1?'disabled':''} aria-label="Move screenshot right">→</button><button type="button" data-act="gear-gallery-delete" data-section="${s.sectionId}" data-image="${esc(im.id)}" aria-label="Delete screenshot ${i+1}">×</button></div></div>`).join('')}</div>
       ${images.length>1?'<div class="muted small">Drag to reorder or use the arrows · First image is the cover</div>':''}`;
 }
@@ -204,7 +204,7 @@ ACTIONS['gear-image-open'] = (el,d) => {
 };
 function gearRenderViewer(){
  const v=gearViewer;if(!v||v.thread!==GEARTHREAD)return;
- openDialog(`<section class="gear-image-viewer" aria-label="${esc(v.label)}"><div class="gear-image-toolbar"><h2>${esc(v.label)}</h2><span aria-live="polite">${v.index+1} / ${v.images.length}</span><button type="button" class="btn sm" data-act="gear-image-zoom" aria-pressed="false">Actual size</button><button type="button" class="btn sm" data-act="dlg-close" autofocus>Close</button></div><div class="gear-viewer-stage">${v.images.length>1?'<button type="button" class="btn gear-viewer-prev" data-act="gear-image-step" data-dir="-1" aria-label="Previous screenshot">‹</button>':''}<div class="gear-image-viewport" tabindex="0" aria-label="Screenshot — scroll to inspect when zoomed"><img src="${esc(v.images[v.index].image)}" alt="${esc(v.label)} — ${v.index+1}"></div>${v.images.length>1?'<button type="button" class="btn gear-viewer-next" data-act="gear-image-step" data-dir="1" aria-label="Next screenshot">›</button>':''}</div><div class="gear-viewer-thumbs">${v.images.length>1?v.images.map((im,i)=>`<button type="button" data-act="gear-image-select" data-index="${i}" aria-label="Show screenshot ${i+1}" aria-pressed="${v.index===i}"><img src="${esc(im.image)}" alt="Screenshot ${i+1}"></button>`).join(''):''}</div></section>`,true);
+ openDialog(`<section class="gear-image-viewer" aria-label="${esc(v.label)}"><div class="gear-image-toolbar"><h2>${esc(v.label)}</h2><span aria-live="polite">${v.index+1} / ${v.images.length}</span><button type="button" class="btn sm" data-act="gear-image-zoom" aria-pressed="false">Actual size</button><button type="button" class="btn sm" data-act="dlg-close" autofocus>Close</button></div><div class="gear-viewer-stage">${v.images.length>1?'<button type="button" class="btn gear-viewer-prev" data-act="gear-image-step" data-dir="-1" aria-label="Previous screenshot">‹</button>':''}<div class="gear-image-viewport" tabindex="0" aria-label="Screenshot — scroll to inspect when zoomed"><img src="${esc(v.images[v.index].image)}" alt="${esc(v.label)} — ${v.index+1}"></div>${v.images.length>1?'<button type="button" class="btn gear-viewer-next" data-act="gear-image-step" data-dir="1" aria-label="Next screenshot">›</button>':''}</div><div class="gear-viewer-thumbs">${v.images.length>1?v.images.map((im,i)=>`<button type="button" data-act="gear-image-select" data-index="${i}" aria-label="Show screenshot ${i+1}" aria-pressed="${v.index===i}"><img src="${esc(im.preview || im.image)}" alt="Screenshot ${i+1}"></button>`).join(''):''}</div></section>`,true);
  $('#dlg .gear-image-viewport')?.focus();
 }
 ACTIONS['gear-image-step']=(el,d)=>{if(!gearViewer||gearViewer.thread!==GEARTHREAD)return;gearViewer.index=(gearViewer.index+Number(d.dir)+gearViewer.images.length)%gearViewer.images.length;gearRenderViewer();};
@@ -295,13 +295,17 @@ function gearValidImage(file) {
   if(file.size>6e6){toast('That picture is too large (limit 6 MB).',true);return false;}
   return true;
 }
+async function gearPreview(image){
+ try{const img=new Image();img.src=image;await img.decode();const scale=Math.min(1,480/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);const data=canvas.toDataURL('image/jpeg',.78);return data.length<400000?data:undefined;}catch{return undefined;}
+}
 async function gearUploadScreenFile(sectionId, file,context) {
   if(!gearValidImage(file))return false;
   const thread=GEARTHREAD,id=thread.id,build=gearBuildKey();
   try{
     const image=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Could not read this image. Please try again.'));r.onabort=()=>reject(Error('Image reading was cancelled.'));r.readAsDataURL(file);});
+    const preview=await gearPreview(image);
     if(!gearUploadIsCurrent(context))return false;
-    const ok=await gearAct(()=>api(`/api/gearthreads/${id}/screens/${sectionId}`,'PUT',{image,build,append:true}));
+    const ok=await gearAct(()=>api(`/api/gearthreads/${id}/screens/${sectionId}`,'PUT',{image,preview,build,append:true}));
     if(ok && GEARTHREAD===thread)toast('Screenshot uploaded');return ok;
   }catch(e){toast(e.message,true);return false;}
 }

@@ -76,6 +76,7 @@ const dayRef = (y, m, d) => Date.parse(tzToIso(`${y}-${pad(m)}-${pad(d)}T12:00`)
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: TZ() });
 
 async function apiRequest(path, method = 'GET', body) {
+  if(S.user?.readOnly && method!=='GET'){const error=new Error('Support access is read-only.');error.status=403;throw error;}
   const res = await fetch(path, {
     method,
     // Discord sign-in has no bearer token at all (readToken() falls back to the gh_session cookie set by
@@ -308,14 +309,22 @@ function showLogin() {
 }
 async function logout() {
   token = ''; localStorage.removeItem('gh_token'); S.user = null;
-  if (S.cfg && S.cfg.authMode === 'discord') { try { await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } }); } catch {} }
+  if (S.cfg && (S.cfg.authMode === 'discord' || S.user?.support || S.cfg.supportLogin)) { try { await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } }); } catch {} }
   closeMobileNav(); showLogin();
 }
 
 /* ================= data ================= */
-async function refresh(force) {
-  const st = await api('/api/state');
-  const snap = JSON.stringify([st.members, st.events, st.points, st.duties, st.presets, st.loot, st.requests, st.changes, st.profiles, st.series, st.tags, st.playerTags, st.prefs, st.notices, st.infoBoard, st.leaves, st.warnings, st.explanations, st.alert, st.applications, st.application, st.settings, st.user]);
+let refreshFlight=null,refreshAgain=false,refreshEpoch=0,refreshRoute=null;
+function refresh(force){
+ if(refreshFlight){if(force || location.hash!==refreshRoute)refreshAgain=true;return refreshFlight;}
+ refreshFlight=(async()=>{let forced=force;do{refreshAgain=false;await refreshOnce(forced);forced=true;}while(refreshAgain);})().finally(()=>{refreshFlight=null;});
+ return refreshFlight;
+}
+async function refreshOnce(force) {
+ refreshEpoch++;refreshRoute=location.hash;
+  const currentRoute=route();
+  const st = await api('/api/state?compact=1'+(currentRoute.page==='vods' && currentRoute.id?'&vod='+encodeURIComponent(currentRoute.id):''));
+  const snap = JSON.stringify([st.members, st.events, st.points, st.duties, st.presets, st.loot, st.requests, st.changes, st.profiles, st.series, st.tags, st.playerTags, st.prefs, st.notices, st.infoBoard, st.leaves, st.warnings, st.explanations, st.alert, st.applications, st.application, st.settings, st.user, st.vods, st.screenshots, st.isCoach, st.myStudents]);
   Object.assign(S, st);
   if (!force && snap === lastSnapshot) return;
   lastSnapshot = snap;
@@ -366,6 +375,7 @@ const NAV = [
   { key: 'shotcaller', label: () => 'Shotcaller', officer: true },
   { key: 'auditlog', label: () => 'Audit log', officer: true },
   { key: 'admin', label: () => 'Admin', officer: true },
+  { key: 'diagnostics', label: () => 'Diagnostics', officer: true },
   { key: 'profile', label: () => 'My profile', gap: true },
   { key: 'mygearthread', label: () => 'My Gear Thread' },
 ];
@@ -394,7 +404,7 @@ const NAV_GROUPS = [
   { key: 'overview', label: 'Overview', items: ['dashboard', 'member'] },
   { key: 'organization', label: 'Organization', items: ['events', 'parties', 'points', 'shotcaller'] },
   { key: 'guild', label: 'Guild', items: ['loot', 'vods', 'gearthreads', 'mygearthread', 'requests', 'leave'] },
-  { key: 'leadership', label: 'Leadership', items: ['approvals', 'warnings', 'auditlog', 'admin'] },
+  { key: 'leadership', label: 'Leadership', items: ['approvals', 'warnings', 'auditlog', 'diagnostics', 'admin'] },
   { key: 'account', label: 'Account', items: ['apply', 'merc', 'guest-coach'] },
 ];
 const NAV_PATHS = {
@@ -802,7 +812,7 @@ function viewRoster() {
    ${tab === 'members' ? `<label class="roster-inactive-toggle"><input type="checkbox" data-ui="rosterInactive" ${UI.rosterInactive?'checked':''}>Show inactive</label>` : `<select data-ui="rosterEvent" aria-label="Filter mercenary event"><option value="">All events</option>${[...new Set(mercs.map(m=>m.mercFor))].map(id=>{const ev=byId(S.events,id);return `<option value="${id}" ${Number(UI.rosterEvent)===id?'selected':''}>${esc(ev ? ev.title : 'Deleted event #' + id)}</option>`;}).join('')}</select>`}
   `}
   ${filtered ? '<button class="roster-text-button" data-act="roster-reset">Reset filters</button>' : ''}
-  ${tab === 'members' && !S.members.some(m=>m.owner===S.user.key && !m.mercenary) ? '<button class="btn primary" data-act="member-new">Add character</button>' : ''}
+  ${tab === 'members' && !S.user.support && !S.members.some(m=>m.owner===S.user.key && !m.mercenary) ? '<button class="btn primary" data-act="member-new">Add character</button>' : ''}
   </div>
   ${tab === 'coaches' ? rosterCoachContent() : `${eventList.length ? rosterTable(eventList,tab === 'mercenaries') : rosterEmpty(tab === 'mercenaries' ? 'No mercenaries match.' : 'No members match.')}<div class="roster-result-count">${eventList.length} of ${source.length} ${tab === 'mercenaries' ? 'mercenaries' : 'members'}</div>`}
  </section>`;
@@ -1178,7 +1188,7 @@ function eventSignupSummary(ev) {
 }
 function eventAttendanceOverview(ev) {
  const summary=ev.attendanceSummary;
- return `${pinSide(ev,false)}${isOfficer() ? `<div class="event-tracking-summary" aria-label="Recorded attendance summary">${summary?.tracked ? `<strong>${summary.present} recorded · ${summary.noShow} ${summary.inProgress?'not seen yet':'no-show'} · ${summary.notRecorded} not recorded</strong><span class="muted small">${summary.inProgress?'Tracking in progress — results are provisional.':'Saved attendance, including manual corrections.'}</span>` : '<span class="muted small">Attendance has not been recorded yet.</span>'}<div class="seg"><button class="btn sm" data-act="event-tab" data-tab="participants" data-id="${ev.id}">View attendance</button>${Object.keys(ev.voiceTracking?.seen || {}).length ? `<button class="btn sm" data-act="voicetrack-seen" data-id="${ev.id}">Who got tracked</button>` : ''}</div></div>` : ''}`;
+ return `${pinSide(ev,false)}${isOfficer() ? `<div class="event-tracking-summary" aria-label="Recorded attendance summary">${summary?.tracked ? `<strong>${summary.present} recorded · ${summary.noShow} ${summary.inProgress?'not seen yet':'no-show'} · ${summary.notRecorded} not recorded</strong><span class="muted small">${summary.inProgress?'Tracking in progress — results are provisional.':'Saved attendance, including manual corrections.'}</span>` : '<span class="muted small">Attendance has not been recorded yet.</span>'}<div class="seg"><button class="btn sm" data-act="event-tab" data-tab="participants" data-id="${ev.id}">View attendance</button>${(ev.voiceTracking?.seenCount ?? Object.keys(ev.voiceTracking?.seen || {}).length) ? `<button class="btn sm" data-act="voicetrack-seen" data-id="${ev.id}">Who got tracked</button>` : ''}</div></div>` : ''}`;
 }
 function eventOwnParty(ev) {
  const own = new Set(mine().map(m=>m.id));
@@ -1359,7 +1369,21 @@ function voiceTrackStatus(ev) {
 // themselves happen on the server's own clock, so the client needs to actually re-fetch (not just
 // re-render) to notice checksDone advancing or the track finishing, rather than waiting on the normal 30s
 // background refresh and feeling stuck for most of a track that's over in well under a minute.
-let voiceTrackClockTimer = null, voiceTrackClockFor = null;
+let voiceTrackClockTimer = null, voiceTrackClockFor = null, trackingFlight=false;
+async function pollEventTracking(id){
+ if(document.hidden || trackingFlight || refreshFlight || $('#dlg').open || DRAG)return;
+ const epoch=refreshEpoch;trackingFlight=true;
+ try{
+  const event=await api(`/api/events/${id}/tracking-state`),r=route();
+  if(r.page!=='events' || Number(r.id)!==id || refreshFlight || epoch!==refreshEpoch)return;
+  const old=byId(S.events,id);if(!old)return;
+  const finished=old.voiceTracking?.active && !event.voiceTracking?.active;
+  const changed=JSON.stringify([old.voiceTracking,old.attended])!==JSON.stringify([event.voiceTracking,event.attended]);
+  Object.assign(old,event);const a=document.activeElement;
+  if(changed && !$('#dlg').open && !DRAG && !(a && $('#main').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName)))render();
+  if(finished)await refresh();
+ }finally{trackingFlight=false;}
+}
 AFTER_RENDER.push(() => {
   const r = route();
   const evId = r.page === 'events' && r.id ? Number(r.id) : null;
@@ -1372,7 +1396,7 @@ AFTER_RENDER.push(() => {
   if (voiceTrackClockFor === evId && voiceTrackClockTimer) return;
   if (voiceTrackClockTimer) clearInterval(voiceTrackClockTimer);
   voiceTrackClockFor = evId;
-  voiceTrackClockTimer = setInterval(() => { if (route().page === 'events' && !$('#dlg').open) refresh(true).catch(() => {}); }, 2000);
+  voiceTrackClockTimer = setInterval(() => { if(route().page==='events')pollEventTracking(evId).catch(()=>{}); },2000);
 });
 ACTIONS['voicetrack-finish'] = (el, d) => act(() => api(`/api/events/${d.id}/voice-track/finish`, 'POST', {}), 'Tracking finished');
 
@@ -1384,7 +1408,7 @@ function voiceTrackPanel(ev) {
   const auto = ev.voiceTrackAuto !== false;
   const { running, finished, checksDone, checksTotal } = voiceTrackStatus(ev);
   const tracked = !!ev.attendanceTracked;
-  const seen = Object.values((ev.voiceTracking && ev.voiceTracking.seen) || {});
+  const seen = {length:ev.voiceTracking?.seenCount ?? Object.keys(ev.voiceTracking?.seen || {}).length};
   return `<div class="panel"><div class="ev-title"><h3>Voice channel tracking and Reminders</h3>
       <span class="seg">
         ${seen.length ? `<button class="btn sm" data-act="voicetrack-seen" data-id="${ev.id}">Who got tracked (${seen.length})</button>` : ''}
@@ -1558,7 +1582,7 @@ function memberRow(m, at, o) {
   const canToggleLoa = onLeave && (off || m.owner === S.user.key);
   return `<div class="mrow ${dimKind ? `dim dim-${dimKind}` : ''}" ${off ? 'draggable="true" data-drag="member"' : ''} data-m="${m.id}" data-from="${o.from}" style="--c:${roleColor(eff.role)}" title="${esc(m.name)}: ${esc([eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / '))}${eff.gearScore ? ', GS ' + eff.gearScore : ''}${dimTitle ? ' (' + dimTitle + ')' : ''}">
     ${off ? '<span class="grip" aria-hidden="true"></span>' : ''}
-    <div class="mtxt"><div class="midentity"><div class="mname"><span class="member-name-text">${esc(m.name)}</span>${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta">${meta || '&nbsp;'}</div></div>${spec}${attendanceBadge}
+    <div class="mtxt"><div class="midentity"><div class="mname"><span class="member-name-text">${esc(m.name)}</span>${!m.active && !m.mercenary ? '<span class="tag inactive-member" title="Inactive member retained in this line-up; not available in the active roster">Inactive</span>' : ''}${o.from === 'party' && o.leader === m.id ? CROWN : ''}${m.mercenary ? '<span class="tag merc" title="Not a guild member - helping for this event only">Merc</span>' : ''}${eff.isBuild ? `<span class="tag build">${esc(eff.label)}</span>` : ''}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="mmeta" title="${esc(cls || wpns.join(' / '))}">${meta || '&nbsp;'}</div></div>${spec}${attendanceBadge}
     ${canToggleLoa ? `<div class="loa-inline"><button class="btn sm loa-toggle" data-act="loa-override" data-ev="${o.ev.id}" data-owner="${esc(m.owner)}" data-ov="${overridden ? '' : '1'}">${overridden ? 'Remove override' : 'Attend anyway'}</button></div>` : ''}</div>
     ${off ? memberMenu(m, at, o) : ''}</div>`;
 }
@@ -2294,7 +2318,7 @@ document.addEventListener('click', async (e) => {
     if (!confirm('Reset this event\'s attendance all the way back to never-tracked (including any hand correction) and start a fresh track?')) return;
     act(() => api(`/api/events/${d.id}/voice-track/restart`, 'POST', {}), 'Tracking reset and restarted');
   }
-  else if (a === 'voicetrack-seen') { const evn = byId(S.events, Number(d.id)); if (evn) voiceSeenDialog(evn); }
+  else if (a === 'voicetrack-seen') { try { voiceSeenDialog(await api(`/api/events/${Number(d.id)}/tracking-state`)); } catch(err) { toast(err.message,true); } }
   // Used to be a client-only flag that just pretended this event was tracked, forcing the 6-state editor open
   // without actually saving anything - which vanished the moment the page refreshed (or anyone else's refresh
   // raced it). This is a real save instead: an empty roll call (everyone starts as a no-show) that genuinely
@@ -2314,7 +2338,9 @@ document.addEventListener('click', async (e) => {
     // through one at a time, and only for rows that actually differ from what the server already has, so
     // leaving 59 of 60 rows untouched doesn't fire 59 pointless requests.
     const rows = [...document.querySelectorAll(`select[data-act="roster-stage"][data-ev="${d.id}"]`)];
-    const attendedIds = [], rsvpChanges = [];
+    // Preserve credits outside the rendered rows (for example members hidden by leave).
+    const visibleIds=new Set(rows.map(sel=>Number(sel.dataset.m)));
+    const attendedIds = evn.attended.filter(id=>!visibleIds.has(id)), rsvpChanges = [];
     for (const sel of rows) {
       const mId = Number(sel.dataset.m), picked = ROSTER6[sel.value] || ROSTER6.noreply;
       if (picked.attended) attendedIds.push(mId);
@@ -2331,7 +2357,7 @@ document.addEventListener('click', async (e) => {
         // are then tried one at a time rather than stopping at the first failure, so one row's problem
         // (closed sign-ups refusing a non-officer, say) doesn't also cost every OTHER row's correction that
         // would have gone through fine on its own.
-        await api(`/api/events/${d.id}/attendance`, 'POST', { memberIds: attendedIds });
+        await api(`/api/events/${d.id}/attendance`, 'POST', { memberIds: attendedIds, scopeMemberIds:[...visibleIds] });
         const failed = [];
         for (const c of rsvpChanges) {
           try { await api(`/api/events/${d.id}/rsvp`, 'POST', c); }
@@ -2523,7 +2549,7 @@ async function start() {
 (async () => {
   S.cfg = await (await fetch('/api/config')).json();
   applyBranding();
-  if (token || S.cfg.authMode === 'discord') await start(); else showLogin();
+  if (token || S.cfg.authMode === 'discord' || S.cfg.supportLogin) await start(); else showLogin();
   setInterval(() => { if (S.user && !document.hidden) refresh().catch(() => {}); }, 30000);
 })();
 
@@ -2985,7 +3011,7 @@ function vodRow(v) {
       <a href="${esc(v.url)}" target="_blank" rel="noopener" class="muted small" style="margin-left:6px">Open on YouTube ↗</a>
       <div class="muted small">${esc(vodOwnerName(v))}${v.note ? ' · ' + esc(v.note) : ''}</div>
     </div>
-    <div class="vod-recording-meta"><span class="muted small">${esc(v.type || '')} · ${esc(v.recordedDate || '')} · ${(v.markers || []).length} coaching points</span>${visBadge}<span class="vod-state ${v.finished ? 'finished' : ''}">${v.finished ? 'Finished' : 'Not finished'}</span></div>
+    <div class="vod-recording-meta"><span class="muted small">${esc(v.type || '')} · ${esc(v.recordedDate || '')} · ${v.markerCount ?? (v.markers || []).length} coaching points</span>${visBadge}<span class="vod-state ${v.finished ? 'finished' : ''}">${v.finished ? 'Finished' : 'Not finished'}</span></div>
     <a class="btn sm" href="#/vods/${v.id}">Open review →</a></div>
     ${v.canPromote || v.canManage ? '<details class="vod-recording-options"><summary>Manage recording</summary><div class="link-row">' : ''}
     ${v.canPromote ? `<form data-form="vod-vis" data-id="${v.id}" class="seg" style="align-items:center">
@@ -3072,6 +3098,7 @@ VIEWS.points = () => viewPoints();
 /* ================= login notices: cover the whole screen until accepted ================= */
 const linkify = (text) => esc(text).replace(/(https?:\/\/[^\s<&"']+(?:&amp;[^\s<&"']+)*)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 function checkNotices() {
+  if(S.user?.readOnly)return; // Viewing support never acknowledges notices or blocks on acknowledgement dialogs.
   const box = $('#notice');
   if (!box || !S.user) return;
   const pending = (S.notices || []).filter((n) => n.active && !n.accepted).sort((a, b) => a.at.localeCompare(b.at));
