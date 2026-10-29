@@ -3,7 +3,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const sourcePath=path.join(__dirname,'../server-shotcaller.js');
 const raw=fs.readFileSync(sourcePath,'utf8');
-const source=raw.replace('return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession };','return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, _test:{runCheckSafe,pollVoiceTest,checkTimers,getVoiceTest:()=>voiceTest} };');
+const source=raw.replace('return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking };','return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, _test:{runCheckSafe,pollVoiceTest,checkTimers,getVoiceTest:()=>voiceTest} };');
 assert.notEqual(source,raw,'Only expose internals for observation; do not alter their logic.');
 const NOW=Date.parse('2026-10-28T12:00:00Z'),user={key:'officer',name:'Officer'};
 const status=(owner=null,channel='old-channel',sessionId='session-original')=>({active:true,sessionId,parties:[{index:1,channelId:channel,name:'Party 1',connectedStates:owner?[{id:owner,mute:false,deaf:false}]:[]}],dedicated:[],additionalCallers:[]});
@@ -84,4 +84,10 @@ test('configured extra-channel transport failure retries rather than consuming a
  h.api.beginVoiceTracking(ev,status(),[]);await flush();assert.equal(ev.voiceTracking.checksDone,0);assert.equal(ev.attendanceTracked,false);
  fail=false;for(let i=0;i<3;i++)await h.api._test.runCheckSafe(1,status());
  assert.equal(ev.voiceTracking.checksDone,3);assert.equal(ev.attendanceTracked,true);assert.deepEqual(ev.attended,[11]);
+});
+test('manual cancellation discards an already pending voice read without stopping the bot session',async()=>{
+ const ev=event();let release;const waiting=new Promise(r=>release=r),h=harness(dbFor(ev),async()=>waiting);
+ h.api.beginVoiceTracking(ev,status(),[]);await flush();const pending=h.api._test.runCheckSafe(1,null);await flush();
+ h.api.cancelVoiceTracking(ev);ev.attended=[];const writes=h.writes();release(status('alice'));await pending;
+ assert.equal(ev.voiceTracking.active,false);assert(ev.voiceTracking.finishedAt);assert.deepEqual(ev.attended,[]);assert.equal(h.writes(),writes);
 });

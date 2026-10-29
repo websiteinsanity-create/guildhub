@@ -113,19 +113,19 @@ module.exports = function install(ctx) {
     if (buf.length > 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'webp';
     return null;
   };
-  function saveImage(prefix, dataUrl, maxBytes) {
+  async function saveImage(prefix, dataUrl, maxBytes) {
     const buf = Buffer.from(String(dataUrl || '').replace(/^data:[^,]*,/, ''), 'base64');
     need(buf.length > 100, 400, 'That does not look like an image.');
     need(buf.length <= maxBytes, 413, `Images can be up to ${Math.round(maxBytes / 1e6)} MB.`);
     const ext = sniff(buf);
     need(ext, 400, 'Only PNG, JPEG, GIF or WebP pictures are allowed.');
     const name = `${prefix}-${crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12)}.${ext}`;
-    fs.writeFileSync(path.join(ctx.UPLOAD_DIR, name), buf);
+    await fs.promises.writeFile(path.join(ctx.UPLOAD_DIR, name), buf);
     return name;
   }
   const screenImages = row => Array.isArray(row?.images) ? row.images : (row?.image ? [row.image] : []);
   function dropImage(name) {
-    if (!name || db().gearScreens.some(r => screenImages(r).includes(name)) || db().gearFolder.some(r => r.image === name)) return;
+    if (!name || db().gearScreens.some(r => screenImages(r).includes(name) || Object.values(r.previews || {}).includes(name)) || db().gearFolder.some(r => r.image === name)) return;
     fs.rmSync(path.join(ctx.UPLOAD_DIR, name), { force: true });
   }
 
@@ -135,7 +135,7 @@ module.exports = function install(ctx) {
     return sectionTypes().map((t) => {
       const row = D.gearScreens.find((s) => s.memberId === memberId && rowKey(s) === key && s.sectionId === t.id);
       return row
-        ? { sectionId: t.id, label: t.label, image: screenImages(row)[0] ? '/uploads/' + screenImages(row)[0] : '', images: screenImages(row).map(name => ({id:name,image:'/uploads/'+name})), note: row.note, updatedAt: row.updatedAt, updatedByName: row.updatedByName }
+        ? { sectionId: t.id, label: t.label, image: screenImages(row)[0] ? '/uploads/' + screenImages(row)[0] : '', images: screenImages(row).map(name => ({id:name,image:'/uploads/'+name,preview:'/uploads/'+(row.previews?.[name] || name)})), note: row.note, updatedAt: row.updatedAt, updatedByName: row.updatedByName }
         : { sectionId: t.id, label: t.label, image: '', images: [], note: '', updatedAt: null, updatedByName: '' };
     });
   }
@@ -234,17 +234,23 @@ module.exports = function install(ctx) {
   });
 
   // ---------------------------------------------------------------- screenshots
-  route('PUT', '/api/gearthreads/:id/screens/:section', ({ body, user, params }) => {
+  route('PUT', '/api/gearthreads/:id/screens/:section', async ({ body, user, params }) => {
     const m = member(params.id), b = buildFor(user, m, body.build);
     const sectionId = Number(params.section);
     const type = sectionTypes().find((t) => t.id === sectionId);
     need(type, 404, 'Not a real screenshot section.');
     const D = db();
+    const uploaded=body.image && !body.remove ? await saveImage('gearshot',body.image,6e6) : null;
+    const preview=uploaded && body.preview ? await saveImage('gearthumb',body.preview,300000) : null;
+    need(db()===D && D.members.includes(m),409,'Thread changed during upload. Please try again.');
+    buildFor(user,m,body.build);
+    need(sectionTypes().some(t=>t.id===sectionId),409,'Screenshot topic changed. Please refresh.');
     let row = D.gearScreens.find((s) => s.memberId === m.id && rowKey(s) === b.key && s.sectionId === sectionId);
     if (body.remove) {
       const old = screenImages(row);
       if (row) D.gearScreens = D.gearScreens.filter(s => s !== row);
       old.forEach(dropImage);
+      Object.values(row?.previews || {}).forEach(dropImage);
       audit(user, 'geargear.screen.remove', { type: 'member', id: m.id, name: m.name }, `${user.name} removed the "${type.label}" gallery from ${m.name}'s gear thread.`);
       save(); return threadFor(user, m, b);
     }
@@ -259,14 +265,18 @@ module.exports = function install(ctx) {
       images = [...body.order];
     }
     if (body.image) {
-      const image = saveImage('gearshot', body.image, 6e6);
+      const image = uploaded;
       // Legacy clients may replace the cover; the gallery UI always appends.
       if (body.append === true) { if (!images.includes(image)) images.push(image); }
       else images = [image, ...images.slice(1).filter(id => id !== image)];
     }
     if (!row) { row = { id: newId(), memberId: m.id, buildKey: b.key, sectionId, note: '' }; D.gearScreens.push(row); }
+    const previousPreviews=Object.values(row.previews || {});
+    row.previews=Object.fromEntries(Object.entries(row.previews || {}).filter(([id])=>images.includes(id)));
+    if(uploaded && preview){row.previews=row.previews || {};row.previews[uploaded]=preview;}
     row.images = images; row.image = images[0] || '';
     old.filter(id => !images.includes(id)).forEach(dropImage);
+    previousPreviews.forEach(dropImage);
     row.note = note;
     row.updatedAt = now();
     row.updatedByName = user.name;
@@ -385,7 +395,7 @@ module.exports = function install(ctx) {
   });
 
   // ---------------------------------------------------------------- folder (admins/coaches post, player views only)
-  route('POST', '/api/gearthreads/:id/folder', ({ body, user, params }) => {
+  route('POST', '/api/gearthreads/:id/folder', async ({ body, user, params }) => {
     const m = member(params.id), b = buildFor(user, m, body.build);
     need(canPostFolder(user, m, b), 403, 'Only a coach or officer can post into this folder.');
     const kind = ['text', 'link', 'image'].includes(body.kind) ? body.kind : 'text';
@@ -395,7 +405,9 @@ module.exports = function install(ctx) {
       item.url = clean(body.url, 300);
       need(/^https?:\/\/[^\s<>"']+$/i.test(item.url), 400, 'Links must start with http:// or https://');
     } else if (kind === 'image') {
-      item.image = saveImage('gearfolder', body.image, 6e6);
+      item.image = await saveImage('gearfolder', body.image, 6e6);
+      need(db().members.includes(m),409,'Thread changed during upload. Please try again.');
+      buildFor(user,m,body.build);
     } else {
       need(text, 400, 'Write something before posting.');
     }

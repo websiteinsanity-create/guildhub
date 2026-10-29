@@ -103,19 +103,22 @@ module.exports = function install(ctx) {
 
   // What a signed-in person needs about coaching: their own coach status, who they coach (if anyone), who
   // coaches them (if anyone, just so their own profile can say so), and the VODs they can see.
-  function coachingState(user) {
+  function coachingState(user, selectedVod=undefined) {
     const D = db(), off = isOfficer(user), coach = isCoach(user);
     // A guest coach (an applicant, never a member) gets none of the usual member/user lists that the client
     // would otherwise use to turn an owner key into a name or a class - so each VOD carries its own owner's
     // name and class here, resolved server-side where the full member list is actually available, instead of
     // relying on the client to look it up from data it may not have been sent.
+    const markersByVod=new Map();
+    for(const marker of D.vodMarkers){if(!markersByVod.has(marker.vodId))markersByVod.set(marker.vodId,[]);markersByVod.get(marker.vodId).push(marker);}
     const vods = D.vods.filter((v) => canSeeVod(user, v)).map((v) => {
       const owner = D.members.find((m) => m.owner === v.owner && m.active);
       return {
         ...v,
         ownerName: owner ? owner.name : v.owner,
         ownerClass: owner ? classOf(owner) : '',
-        markers: D.vodMarkers.filter((m) => m.vodId === v.id).map(markerForClient).sort((a, b) => a.timestamp - b.timestamp || a.id - b.id),
+        markerCount:(markersByVod.get(v.id) || []).length,
+        markers:selectedVod===undefined || Number(selectedVod)===v.id ? (markersByVod.get(v.id) || []).map(markerForClient).sort((a,b)=>a.timestamp-b.timestamp || a.id-b.id) : [],
         // Each entry's canEdit/canResend is its own author only - even an officer cannot touch another coach's
         // review note, so the client never offers an Edit/Resend button it would just get a 403 from.
         reviews: (Array.isArray(v.reviews) ? v.reviews : []).map((r) => ({ ...r, byName: reviewerName(r.by), canEdit: r.by === user.key })),
