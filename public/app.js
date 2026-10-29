@@ -1398,9 +1398,11 @@ function voiceTrackPanel(ev) {
       ? 'Tracking starts on its own the moment Shotcaller is started for this event (posting its parties with "Also start Shotcaller" ticked).'
       : running ? 'Tracking is already running for this event.' : 'Automatic tracking is off for this event - Shotcaller can still be started as usual, but attendance is only tracked once you start it by hand below.'}</div>
     ${!auto && !running ? `<button class="btn sm" data-act="voicetrack-start" data-id="${ev.id}">Start tracking now</button>` : ''}
-    ${running ? `<div class="muted small" style="margin:0 0 10px">Running - quick check ${checksDone + 1} of ${checksTotal}. Anyone seen in any of these checks counts as attended.
+    ${running ? `<div class="muted small" style="margin:0 0 10px">${ev.voiceTracking?.gateAt>Date.now()?'Waiting for the configured tracking start time.':'Running - quick check '+(checksDone+1)+' of '+checksTotal+'.'} Anyone seen in any of these checks counts as attended.
         <button class="btn sm" data-act="voicetrack-finish" data-id="${ev.id}" style="margin-left:6px">Finish tracking now</button></div>` : ''}
-    ${finished && !running ? `<div class="muted small" style="margin:0 0 10px">✓ Finished tracking. Move on to the next event's own page and start tracking there whenever you're ready - this bot session never needs to be restarted for it.</div>` : ''}
+    ${ev.voiceTracking?.lastError && running?`<div class="muted small" role="status">${esc(ev.voiceTracking.lastError)}</div>`:''}
+    ${ev.voiceTracking?.incomplete?'<div class="muted small" role="status">Tracking incomplete. Collected sightings were preserved; missing players have not been finalized as no-shows. Review attendance or use Track again.</div>':''}
+    ${finished && !running && !ev.voiceTracking?.incomplete ? `<div class="muted small" style="margin:0 0 10px">✓ Finished tracking. Move on to the next event's own page and start tracking there whenever you're ready - this bot session never needs to be restarted for it.</div>` : ''}
     <div class="field" style="margin-top:14px"><label>Other channels tracked for this event (besides whatever Shotcaller creates)</label>
       <form data-form="voicetrack-extra" data-id="${ev.id}">
         ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(ev.voiceTrackExtraChannelIds || []) : ''}

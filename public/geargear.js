@@ -140,13 +140,43 @@ function gearSelectedTopic(t) {
    Topics themselves (add/rename/reorder/remove) are an Admin > Gear Threads screen - see gearSectionsAdmin()
    in features.js. Each slide here is keyed by the topic's stable sectionId, not its label, so a rename there
    never loses what's already uploaded under it. */
+const gearImages = s => Array.isArray(s?.images) ? s.images : (s?.image ? [{id:s.image,image:s.image}] : []);
+const gearGallerySelection = new Map();
+const gearGalleryKey = (t,section) => gearTopicKey(t)+':'+section;
+function gearGalleryIndex(t,s) { const i=gearImages(s).findIndex(x=>x.id===gearGallerySelection.get(gearGalleryKey(t,s.sectionId)));return Math.max(0,i); }
+function gearGalleryHtml(t,s) {
+  const images=gearImages(s), index=gearGalleryIndex(t,s), current=images[index];
+  return `<div class="gear-slide-head"><b>${esc(s.label)}</b><span class="muted small">${images.length} screenshot${images.length===1?'':'s'}</span></div>
+    <div class="gear-screenshot-preview">${current?`<button type="button" class="gear-image-open" data-act="gear-image-open" data-section="${s.sectionId}" data-index="${index}" aria-label="Enlarge ${esc(s.label)} screenshot"><img class="gear-shot" src="${esc(current.image)}" alt="${esc(s.label)}"></button>`:'<div class="empty">No screenshots yet. Add images of your current setup.</div>'}</div>
+    <div class="gear-gallery-thumbs" aria-label="Screenshots">${images.map((im,i)=>`<div class="gear-gallery-thumb ${i===index?'selected':''}" draggable="true" data-gear-drag="${esc(im.id)}" data-section="${s.sectionId}">
+      <button type="button" data-act="gear-gallery-select" data-section="${s.sectionId}" data-image="${esc(im.id)}" aria-label="Select screenshot ${i+1}" aria-pressed="${i===index}"><img src="${esc(im.image)}" alt="Screenshot ${i+1}" loading="lazy">${i===0?'<span class="gear-cover">Main</span>':''}</button>
+      <div class="gear-thumb-actions"><button type="button" data-act="gear-gallery-move" data-section="${s.sectionId}" data-image="${esc(im.id)}" data-dir="-1" ${i===0?'disabled':''} aria-label="Move screenshot left">←</button><button type="button" data-act="gear-gallery-move" data-section="${s.sectionId}" data-image="${esc(im.id)}" data-dir="1" ${i===images.length-1?'disabled':''} aria-label="Move screenshot right">→</button><button type="button" data-act="gear-gallery-delete" data-section="${s.sectionId}" data-image="${esc(im.id)}" aria-label="Delete screenshot ${i+1}">×</button></div></div>`).join('')}</div>
+      ${images.length>1?'<div class="muted small">Drag to reorder or use the arrows · First image is the cover</div>':''}`;
+}
+ACTIONS['gear-gallery-select']=(el,d)=>{gearGallerySelection.set(gearGalleryKey(GEARTHREAD.data,d.section),d.image);render();};
+async function gearGalleryWrite(section,body){const t=GEARTHREAD;return gearAct(()=>api(`/api/gearthreads/${t.id}/screens/${section}`,'PUT',{...body,build:gearBuildKey()}));}
+ACTIONS['gear-gallery-delete']=(el,d)=>{if(confirm('Delete this screenshot?'))return gearGalleryWrite(d.section,{removeId:d.image});};
+ACTIONS['gear-gallery-move']=(el,d)=>{
+ const s=GEARTHREAD.data.screens.find(s=>String(s.sectionId)===String(d.section)), ids=gearImages(s).map(x=>x.id), i=ids.indexOf(d.image),j=i+Number(d.dir);
+ if(i<0||j<0||j>=ids.length)return;[ids[i],ids[j]]=[ids[j],ids[i]];return gearGalleryWrite(d.section,{order:ids});
+};
+let gearGalleryDrag=null;
+document.addEventListener('dragstart',e=>{const el=e.target.closest?.('[data-gear-drag]');if(!el)return;gearGalleryDrag={thread:GEARTHREAD,section:el.dataset.section,id:el.dataset.gearDrag};e.dataTransfer.setData('text/plain',el.dataset.gearDrag);});
+document.addEventListener('dragend',()=>{gearGalleryDrag=null;});
+document.addEventListener('dragover',e=>{if(gearGalleryDrag&&e.target.closest?.('[data-gear-drag]'))e.preventDefault();});
+document.addEventListener('drop',e=>{
+ const dest=e.target.closest?.('[data-gear-drag]'),from=gearGalleryDrag;gearGalleryDrag=null;
+ if(!dest||!from||from.thread!==GEARTHREAD||from.section!==dest.dataset.section)return;
+ e.preventDefault();const s=GEARTHREAD.data.screens.find(x=>String(x.sectionId)===from.section),ids=gearImages(s).map(x=>x.id),i=ids.indexOf(from.id),j=ids.indexOf(dest.dataset.gearDrag);
+ if(i<0||j<0||i===j)return;ids.splice(i,1);ids.splice(j,0,from.id);gearGalleryWrite(from.section,{order:ids});
+});
 function gearScreensHtml(t) {
   if (!t.screens.length) return '<div class="empty">No screenshot topics yet. An officer can set them up in Admin → Gear Threads.</div>';
   const selected = gearSelectedTopic(t);
   const tabs = t.screens.map(s => `<button type="button" role="tab" id="gear-topic-${s.sectionId}" aria-controls="gslide-${s.sectionId}" aria-selected="${String(s.sectionId) === selected}" tabindex="${String(s.sectionId) === selected ? 0 : -1}" class="gear-tab ${String(s.sectionId) === selected ? 'active' : ''}" data-act="gear-slide" data-section="${s.sectionId}">${esc(s.label)}</button>`).join('');
   const slides = t.screens.map(s => `<div class="gear-slide" role="tabpanel" aria-labelledby="gear-topic-${s.sectionId}" id="gslide-${s.sectionId}" ${String(s.sectionId) === selected ? '' : 'hidden'}>
-      <div class="gear-screenshot-preview">${s.image ? `<button type="button" class="gear-image-open" data-act="gear-image-open" data-section="${s.sectionId}" aria-label="${esc('Enlarge ' + s.label + ' screenshot')}"><img class="gear-shot" src="${esc(s.image)}" alt="${esc(s.label)}"></button>` : '<div class="empty">No screenshot yet. Upload an image of your current setup.</div>'}</div>
-      <div class="gear-slide-head"><button type="button" class="btn sm" data-act="gear-screen-upload-open" data-section="${s.sectionId}" data-label="${esc(s.label)}">${s.image ? 'Replace image' : 'Upload image'}</button><span class="muted small">Images up to 6 MB · paste a screenshot with Ctrl+V</span></div>
+      ${gearGalleryHtml(t,s)}
+      <div class="gear-slide-head"><button type="button" class="btn sm primary" data-act="gear-screen-upload-open" data-section="${s.sectionId}">+ Add screenshots</button><span class="muted small">Images up to 6 MB each · paste with Ctrl+V</span></div>
       <form data-form="gear-note" data-id="${t.memberId}" data-section="${s.sectionId}" class="gear-screenshot-note">
         <label for="gear-note-${s.sectionId}">Screenshot note</label><div class="gear-note-controls"><textarea id="gear-note-${s.sectionId}" name="note" maxlength="1000" placeholder="Anything the screenshot does not show…" data-autogrow>${esc(gearDraftValue(t,'gear-note','note',s.note,s.sectionId))}</textarea><button class="btn sm primary">Save note</button></div>
       </form>
@@ -164,13 +194,25 @@ ACTIONS['gear-slide'] = (el, d) => {
     if (button) { button.classList.toggle('active',active); button.setAttribute('aria-selected',String(active)); button.tabIndex = active ? 0 : -1; }
   }
 };
+let gearViewer=null;
 ACTIONS['gear-image-open'] = (el,d) => {
-  const t=GEARTHREAD.data;
-  const image=d.section!==undefined ? t?.screens.find(s=>String(s.sectionId)===String(d.section)) : t?.folder.find(f=>f.kind==='image' && String(f.id)===String(d.item));
-  if(!image?.image)return;
-  const label=image.label || 'Coach folder image';
-  openDialog(`<section class="gear-image-viewer" aria-label="${esc(label)}"><div class="gear-image-toolbar"><h2>${esc(label)}</h2><button type="button" class="btn sm" data-act="gear-image-zoom" aria-pressed="false">Actual size</button><button type="button" class="btn sm" data-act="dlg-close" autofocus>Close</button></div><div class="gear-image-viewport" tabindex="0" aria-label="Screenshot — scroll to inspect when zoomed"><img src="${esc(image.image)}" alt="${esc(label)}"></div></section>`,true);
+ const t=GEARTHREAD.data, section=d.section!==undefined?t?.screens.find(s=>String(s.sectionId)===String(d.section)):null;
+ const folder=d.item!==undefined?t?.folder.find(f=>f.kind==='image'&&String(f.id)===String(d.item)):null;
+ const images=section?gearImages(section):(folder?[folder]:[]);if(!images.length)return;
+ gearViewer={thread:GEARTHREAD,images,index:Math.min(images.length-1,Math.max(0,Number(d.index)||0)),label:section?.label||'Coach folder image'};
+ gearRenderViewer();
 };
+function gearRenderViewer(){
+ const v=gearViewer;if(!v||v.thread!==GEARTHREAD)return;
+ openDialog(`<section class="gear-image-viewer" aria-label="${esc(v.label)}"><div class="gear-image-toolbar"><h2>${esc(v.label)}</h2><span aria-live="polite">${v.index+1} / ${v.images.length}</span><button type="button" class="btn sm" data-act="gear-image-zoom" aria-pressed="false">Actual size</button><button type="button" class="btn sm" data-act="dlg-close" autofocus>Close</button></div><div class="gear-viewer-stage">${v.images.length>1?'<button type="button" class="btn gear-viewer-prev" data-act="gear-image-step" data-dir="-1" aria-label="Previous screenshot">‹</button>':''}<div class="gear-image-viewport" tabindex="0" aria-label="Screenshot — scroll to inspect when zoomed"><img src="${esc(v.images[v.index].image)}" alt="${esc(v.label)} — ${v.index+1}"></div>${v.images.length>1?'<button type="button" class="btn gear-viewer-next" data-act="gear-image-step" data-dir="1" aria-label="Next screenshot">›</button>':''}</div><div class="gear-viewer-thumbs">${v.images.length>1?v.images.map((im,i)=>`<button type="button" data-act="gear-image-select" data-index="${i}" aria-label="Show screenshot ${i+1}" aria-pressed="${v.index===i}"><img src="${esc(im.image)}" alt="Screenshot ${i+1}"></button>`).join(''):''}</div></section>`,true);
+ $('#dlg .gear-image-viewport')?.focus();
+}
+ACTIONS['gear-image-step']=(el,d)=>{if(!gearViewer||gearViewer.thread!==GEARTHREAD)return;gearViewer.index=(gearViewer.index+Number(d.dir)+gearViewer.images.length)%gearViewer.images.length;gearRenderViewer();};
+ACTIONS['gear-image-select']=(el,d)=>{if(!gearViewer||gearViewer.thread!==GEARTHREAD)return;const i=Number(d.index);if(!Number.isInteger(i)||i<0||i>=gearViewer.images.length)return;gearViewer.index=i;gearRenderViewer();};
+document.addEventListener('keydown',e=>{if(!$('#dlg')?.open||!e.target?.closest?.('.gear-image-viewer')||!['ArrowLeft','ArrowRight'].includes(e.key))return;if($('#dlg .gear-image-viewport img')?.classList.contains('actual-size'))return;e.preventDefault();ACTIONS['gear-image-step'](null,{dir:e.key==='ArrowLeft'?-1:1});});
+let gearSwipe=null;
+document.addEventListener('touchstart',e=>{gearSwipe=null;if(e.touches.length!==1||!e.target.closest?.('.gear-image-viewport')||$('#dlg .gear-image-viewport img')?.classList.contains('actual-size'))return;gearSwipe={x:e.touches[0].clientX,y:e.touches[0].clientY,viewer:gearViewer};},{passive:true});
+document.addEventListener('touchend',e=>{const start=gearSwipe;gearSwipe=null;if(!start||start.viewer!==gearViewer||!$('#dlg')?.open)return;const touch=e.changedTouches[0],dx=touch.clientX-start.x,dy=touch.clientY-start.y;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.5)ACTIONS['gear-image-step'](null,{dir:dx<0?1:-1});},{passive:true});
 ACTIONS['gear-image-zoom'] = el => {
   const image=$('#dlg .gear-image-viewport img');if(!image)return;
   const zoomed=el.getAttribute('aria-pressed')!=='true';
@@ -193,22 +235,24 @@ function gearUploadDialog({ title, section, onFile }) {
   openDialog(`<h2>${esc(title)}</h2>
     <div class="gear-dropzone" id="gear-dropzone" tabindex="0" aria-label="Image upload: drop, choose a file or paste with Ctrl+V" data-section="${section == null ? '' : section}">
       <div class="gear-dropzone-inner">
-        <div>Drag and drop an image here</div>
+        <div>Drag and drop images here</div>
         <div class="muted small" style="margin-top:8px">or paste a screenshot with Ctrl+V (⌘+V on Mac)</div>
         <div class="muted small" style="margin:8px 0">or</div>
-        <button type="button" class="btn primary" data-act="gear-dropzone-pick">Choose a file</button>
-        <input type="file" id="gear-dropzone-input" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" data-act="gear-dropzone-file">
+        <button type="button" class="btn primary" data-act="gear-dropzone-pick">Choose images</button>
+        <input type="file" id="gear-dropzone-input" multiple accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" data-act="gear-dropzone-file">
       </div>
     </div>
     <p id="gear-upload-status" class="muted small" role="status" aria-live="polite">PNG, JPEG, GIF or WebP · up to 6 MB</p>
     <div class="row" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn" data-act="dlg-close">Cancel</button></div>`);
   const context=gearUploadContext={thread:GEARTHREAD,zone:document.getElementById('gear-dropzone'),busy:false};
-  gearDropHandler=async file=>{
+  gearDropHandler=async input=>{
+    const files=Array.isArray(input)?input:[input];
+    if(!files.length||!files.every(gearValidImage))return;
     if(!gearUploadIsCurrent(context) || context.busy)return;
     context.busy=true;context.zone.setAttribute('aria-busy','true');
     const status=$('#gear-upload-status'),pick=document.getElementById('gear-dropzone-input');
     if(status)status.textContent='Uploading screenshot…';if(pick)pick.disabled=true;
-    try{const ok=await onFile(file,context);if(ok && gearUploadIsCurrent(context))closeDialog();}
+    try{let uploaded=0;for(const file of files){if(!gearUploadIsCurrent(context))break;if(status)status.textContent=`Uploading ${uploaded+1} / ${files.length}…`;const ok=await onFile(file,context);if(!ok)break;uploaded++;}if(uploaded===files.length && gearUploadIsCurrent(context))closeDialog();else if(uploaded)toast(`${uploaded} of ${files.length} screenshots uploaded. Remaining images were not uploaded.`,true);}
     finally{context.busy=false;context.zone.removeAttribute('aria-busy');if(pick)pick.disabled=false;if(gearUploadIsCurrent(context) && status)status.textContent='PNG, JPEG, GIF or WebP · up to 6 MB';}
   };
   context.zone?.focus();
@@ -220,7 +264,7 @@ ACTIONS['gear-screen-upload-open'] = (el, d) => {
   gearUploadDialog({ title: `Upload ${screen.label} screenshot`, section: screen.sectionId, onFile: (file,context) => gearUploadScreenFile(screen.sectionId, file,context) });
 };
 ACTIONS['gear-dropzone-pick'] = () => { const i = document.getElementById('gear-dropzone-input'); if (i) i.click(); };
-CHANGES['gear-dropzone-file'] = (el) => { const file = el.files[0]; el.value=''; if (file && gearDropHandler) gearDropHandler(file); };
+CHANGES['gear-dropzone-file'] = (el) => { const files = [...el.files]; el.value=''; if (files.length && gearDropHandler) gearDropHandler(files); };
 // Delegated so it survives every re-render of the dialog's contents, same reasoning as the chat list's
 // scroll listener above - the actual .gear-dropzone element is destroyed and recreated each time openDialog runs.
 document.addEventListener('dragover', (e) => { const z = e.target.closest && e.target.closest('.gear-dropzone'); if (z) { e.preventDefault(); z.classList.add('over'); } });
@@ -228,8 +272,8 @@ document.addEventListener('dragleave', (e) => { const z = e.target.closest && e.
 document.addEventListener('drop', (e) => {
   const z = e.target.closest && e.target.closest('.gear-dropzone'); if (!z) return;
   e.preventDefault(); z.classList.remove('over');
-  const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (file && gearDropHandler) gearDropHandler(file);
+  const files = [...(e.dataTransfer.files || [])];
+  if (files.length && gearDropHandler) gearDropHandler(files);
 });
 function gearClipboardImage(data) {
   return [...(data?.files || [])].find(f=>f.type.startsWith('image/')) || [...(data?.items || [])].find(i=>i.kind==='file' && i.type.startsWith('image/'))?.getAsFile();
@@ -257,7 +301,7 @@ async function gearUploadScreenFile(sectionId, file,context) {
   try{
     const image=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Could not read this image. Please try again.'));r.onabort=()=>reject(Error('Image reading was cancelled.'));r.readAsDataURL(file);});
     if(!gearUploadIsCurrent(context))return false;
-    const ok=await gearAct(()=>api(`/api/gearthreads/${id}/screens/${sectionId}`,'PUT',{image,build}));
+    const ok=await gearAct(()=>api(`/api/gearthreads/${id}/screens/${sectionId}`,'PUT',{image,build,append:true}));
     if(ok && GEARTHREAD===thread)toast('Screenshot uploaded');return ok;
   }catch(e){toast(e.message,true);return false;}
 }
@@ -430,12 +474,12 @@ ACTIONS['gear-build'] = (el, d) => {
 };
 function renderGearThread(t, chat, chatHasMore, chatLoadingOlder) {
   return `<div class="geargear-grid gear-workspace-grid">
+    ${gearPotentialsHtml(t)}
     <div class="panel geargear-screens"><div class="gear-panel-heading"><h2>Screenshots</h2><span class="muted small">Your current setup</span></div>${gearScreensHtml(t)}</div>
     <div class="panel geargear-chat"><div class="gear-panel-heading"><h2>Discussion</h2><span class="muted small">Talk through your build</span></div>${gearChatHtml(t, chat, chatHasMore, chatLoadingOlder)}</div>
     <div class="geargear-side gear-workspace-resources">
       <div class="panel"><div class="gear-panel-heading"><h2>Questlog</h2><span class="muted small">Build links</span></div>${gearQuestlogHtml(t)}</div>
       <div class="panel"><div class="gear-panel-heading"><h2>Coach folder</h2><span class="muted small">Notes and resources</span></div>${gearFolderHtml(t)}</div>
-      <div class="panel"><div class="gear-panel-heading"><h2>Skill cores</h2></div>${gearSkillcoresHtml(t)}</div>
     </div>
   </div>`;
 }
@@ -446,3 +490,74 @@ document.addEventListener('error', (e) => {
   const t = e.target;
   if (t && t.tagName === 'IMG' && t.closest && t.closest('.gear-core-tile, .gear-core-detail-head')) t.classList.add('icon-missing');
 }, true);
+
+/* Potentials stay on the main thread; the accordion changes visibility, never pages. */
+function gearCombinedSkillcoresHtml(t) {
+ const skills={catalog:[],active:[],owned:[],...t.skillcores},lookup=new Map(skills.catalog.map(c=>[c.id,c]));
+ const active=skills.active.map(id=>lookup.get(id)).filter(Boolean),unused=skills.owned.filter(id=>!skills.active.includes(id)).map(id=>lookup.get(id)).filter(Boolean);
+ const ownedKey='gear-owned-cores:'+gearTopicKey(t);let ownedOpen=false;try{ownedOpen=localStorage.getItem(ownedKey)==='open';}catch{}
+ const position=(slot,index)=>{const core=active.filter(c=>c.slot===slot)[index];return `<div class="gear-core-position"><span class="muted small">${slot==='weapon'?'Weapon core · 1 slot':'Armor / accessory core · slot '+(index+1)}</span>${core?gearCoreTile(core):`<button type="button" class="gear-core-tile" data-act="gear-core-picker">+ Choose a skill core</button>`}</div>`;};
+ return `<section class="gear-combined-cores"><div class="gear-panel-heading"><h2>Active skill cores</h2><span class="muted small">${active.length}/3 active · 1 weapon + 2 armor / accessories</span></div><div class="gear-combined-core-grid">${position('weapon',0)}${position('equipment',0)}${position('equipment',1)}</div><details class="gear-core-owned-dropdown" data-potential-key="${esc(ownedKey)}" ${ownedOpen?'open':''}><summary>Other owned skill cores (${unused.length})</summary><div class="gear-combined-owned-list">${unused.map(gearCoreTile).join('') || '<span class="muted small">No additional cores in your collection.</span>'}</div></details><div class="gear-combined-core-footer"><span class="muted small">${skills.owned.length} owned · shared across builds</span><button type="button" class="btn sm" data-act="gear-core-picker">+ Add skill cores</button></div></section>`;
+}
+const gearPotentialIcons = {
+ head:'<path d="M8 31V15l12-9 12 9v16l-8 4h-8Z M20 7v28 M9 19l8 4m14-4-8 4"/>',
+ cloak:'<path d="m14 7 6-3 6 3 3 10 7 18H4l7-18Z M14 7l6 8 6-8 M20 15v20"/>',
+ chest:'<path d="m13 5-9 8 5 9 4-3-2 16h18l-2-16 4 3 5-9-9-8-7 5Z M20 10v22"/>',
+ hands:'<path d="m10 7 13-2 3 13 8 9-6 9-17-7-4-12Z M10 13l15-2m-16 9 17-2m-14 8 17-2"/>',
+ legs:'<path d="M10 5h20l-1 14 4 17H22l-2-16-2 16H7l4-17Z M10 11h20"/>',
+ feet:'<path d="M13 5h15l-1 19 7 7v5H7v-8l6-8Z M12 17h15M9 30h22"/>',
+ necklace:'<path d="M8 6c-1 13 2 20 12 22C30 26 33 19 32 6 M20 23l6 8-6 7-6-7Z"/>',
+ bracelet:'<ellipse cx="20" cy="20" rx="15" ry="10"/><path d="M5 20v7c8 9 22 9 30 0v-7 M16 11l4-5 4 5-4 6Z"/>',
+ ring1:'<circle cx="20" cy="23" r="12"/><path d="m14 9 6-6 6 6-6 7Z"/>',
+ ring2:'<circle cx="20" cy="23" r="12"/><path d="m14 9 6-6 6 6-6 7Z"/>',
+ belt:'<path d="M3 14h34v14H3Z M15 11h10v20H15Z M19 20h11"/>',
+ weapon1:'<path d="m12 5 4 9-1 18-4 4-4-4-1-18Z M3 21h16 M23 14l7-5 7 5v12l-7 9-7-9Z"/>',
+ weapon2:'<path d="m31 4 5 5-18 21-6-6Z M8 22l12 12 M11 29l-6 7 M3 33l5 5"/>'
+};
+function gearPotentialIcon(slot) {
+ return `<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${gearPotentialIcons[slot] || gearPotentialIcons.chest}</svg>`;
+}
+function gearPotentialCompatible(e,slot,p) {
+ const ws=p.weapons;
+ return (e.mainCategory==='universal' || e.mainCategory===slot.category) && (!e.weapons.length || e.weapons.some(w=>ws.includes(w)));
+}
+function gearPotentialsHtml(t) {
+ const p=t.potentials;if(!p)return '';
+ const lookup=new Map(p.catalog.map(e=>[e.id,e]));
+ const count=p.slots.filter(s=>(p.assignments[s.id] || []).length).length;
+ const key='gear-potentials:'+gearTopicKey(t);
+ let open=true;try{open=localStorage.getItem(key)!=='closed';}catch{}
+ const button=s=>{const ids=p.assignments[s.id] || [],w=s.id==='weapon1'?p.weapons[0]:s.id==='weapon2'?p.weapons[1]:'';return `<button type="button" class="gear-potential-slot slot-${s.id} ${ids.length?'is-assigned':''}" data-act="gear-potential-open" data-slot="${s.id}" aria-label="${esc(s.label+(w?' · '+w:'')+' · '+ids.length+' assigned potentials')}"><span>${esc(s.label)}</span>${s.category==='weapon' && w?weaponIcon(w):gearPotentialIcon(s.id)}${w?`<small>${esc(w)}</small>`:''}<small class="gear-potential-slot-count">${p.legacyAssignments?.[s.id]?.length?'Review':ids.length?'Assigned':'Assign'}</small></button>`;};
+ return `<details class="panel gear-potentials" data-potential-key="${esc(key)}" ${open?'open':''}><summary><span class="gear-potential-title">Potentials</span><span class="muted small">${count} / ${p.slots.length} slots assigned</span><span class="gear-potential-chevron" aria-hidden="true">›</span></summary>${gearCombinedSkillcoresHtml(t)}<div class="gear-potentials-body"><section class="gear-equipment"><h2>Equipment</h2><p class="muted small">Select a slot to edit its potentials.</p><div class="gear-equipment-map"><img class="gear-potential-body" src="/assets/potential-body.svg" alt="Armored equipment mannequin">${p.slots.filter(s=>s.category!=='accessory').map(button).join('')}</div><div class="gear-potential-accessories">${p.slots.filter(s=>s.category==='accessory').map(button).join('')}</div></section><section class="gear-potential-overview"><h2>Assigned potentials</h2><p class="muted small">Every slot in this build, at a glance.</p><div class="gear-potential-summary-grid">${p.slots.map(s=>{const ids=p.assignments[s.id] || [];return `<button type="button" class="gear-potential-summary" data-act="gear-potential-open" data-slot="${s.id}" aria-label="${esc('Edit '+s.label+' potentials')}"><span class="gear-potential-summary-icon">${gearPotentialIcon(s.id)}</span><span class="gear-potential-summary-content"><span class="muted small">${esc(s.label)}</span>${p.legacyAssignments?.[s.id]?.length?'<span class="small gear-potential-warning">Previous selections need review. Choose one potential.</span>':ids.length?ids.map(id=>{const e=lookup.get(id);return `<span class="gear-potential-assignment"><strong>${esc(e?.name || 'Unavailable potential')}</strong><span class="small muted">${esc(e?.description || 'Remove this assignment and select an available potential.')}</span>${e && !gearPotentialCompatible(e,s,p)?'<span class="small gear-potential-warning">Review: build weapons changed</span>':''}</span>`;}).join(''):'<span class="muted small">Unassigned</span>'}</span><span class="gear-potential-edit" aria-hidden="true">✎</span></button>`;}).join('')}</div></section></div></details>`;
+}
+document.addEventListener('toggle',event=>{
+ const key=event.target?.dataset?.potentialKey;if(!key)return;
+ try{localStorage.setItem(key,event.target.open?'open':'closed');}catch{}
+},true);
+let gearPotentialDialog=null,gearPotentialSaving=false;
+ACTIONS['gear-potential-open']=(el,d)=>{
+ const thread=GEARTHREAD,t=thread.data,p=t?.potentials,slot=p?.slots.find(s=>s.id===d.slot);if(!slot)return;
+ gearPotentialDialog={thread,t,slot:slot.id,revision:p.revision};
+ const selected=new Set(p.assignments[slot.id] || []),legacy=p.legacyAssignments?.[slot.id] || [];
+ const available=p.catalog.filter(e=>gearPotentialCompatible(e,slot,p) || selected.has(e.id) || legacy.includes(e.id));
+ const emptyWeapon=slot.category==='weapon' && !p.weapons[slot.id==='weapon1'?0:1];
+ openDialog(`<form data-form="gear-potentials-save" class="gear-potential-picker"><h2>${esc(slot.label)} potentials</h2><p class="muted small">Choose one potential for this item, or leave it unassigned. Changes apply to this build only.</p>${emptyWeapon?'<p class="gear-potential-warning">Set this build weapon before assigning potentials.</p>':''}<label class="gear-potential-search">Search potentials<input type="search" data-potential-search placeholder="Search name or effect…" aria-label="Search potentials"></label><p class="muted small">Potentials from both build weapons are available on either weapon slot. Check your item for exact roll eligibility.</p>${legacy.length?'<p class="gear-potential-warning">Previous multiple selections are saved for review. Choose one potential to equip.</p>':''}<label class="gear-potential-option"><input type="radio" name="potential" value="" ${!selected.size?'checked':''}><span><strong>No potential</strong><span class="muted small">Leave this item unassigned.</span></span></label><div class="gear-potential-options">${available.map(e=>{const compatible=gearPotentialCompatible(e,slot,p);return `<label class="gear-potential-option" data-potential-text="${esc((e.name+' '+e.description).toLowerCase())}"><input type="radio" name="potential" value="${esc(e.id)}" ${selected.has(e.id)?'checked':''} ${emptyWeapon && !selected.has(e.id)?'disabled':''}><span class="gear-potential-option-icon">${gearPotentialIcon(slot.id)}${e.iconUrl?`<img src="${esc(e.iconUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">`:''}</span><span><strong>${esc(e.name)}</strong><span class="muted small">${esc(e.description)}</span>${!compatible?'<span class="gear-potential-warning small">No longer matches this build; deselect to remove.</span>':''}</span></label>`;}).join('')}</div><p class="muted small" data-potential-empty hidden>No matching potentials.</p><div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save potentials</button></div></form>`,true);
+};
+document.addEventListener('input',event=>{
+ if(!event.target?.matches?.('[data-potential-search]'))return;
+ const form=event.target.closest('form'),q=event.target.value.trim().toLowerCase();let visible=0;
+ form.querySelectorAll('[data-potential-text]').forEach(row=>{row.hidden=!row.dataset.potentialText.includes(q);if(!row.hidden)visible++;});
+ form.querySelector('[data-potential-empty]').hidden=visible>0;
+});
+FORMS['gear-potentials-save']=async f=>{
+ const c=gearPotentialDialog;if(gearPotentialSaving || !c)return;
+ if(GEARTHREAD!==c.thread || GEARTHREAD.data!==c.t){toast('This build changed. Reopen the slot to edit it.',true);return;}
+ const ids=[...f.querySelectorAll('input[name="potential"]:checked')].map(el=>el.value).filter(Boolean);
+ if(ids.length>1){toast('Each equipment item can have at most one potential.',true);return;}
+ const submit=f.querySelector('button[type="submit"],button:not([type])');if(submit)submit.disabled=true;
+ gearPotentialSaving=true;
+ try {
+  const ok=await gearAct(()=>api(`/api/gearthreads/${c.t.memberId}/potentials`,'PUT',{build:c.t.buildKey || 'main',slot:c.slot,ids,revision:c.revision}));
+  if(ok && GEARTHREAD===c.thread && gearPotentialDialog===c && $('#dlg')?.contains(f)){closeDialog();toast('Potentials saved');}
+ }finally{gearPotentialSaving=false;if(submit)submit.disabled=false;}
+};

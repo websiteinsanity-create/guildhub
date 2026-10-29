@@ -70,3 +70,22 @@ test('inline screenshot viewer and clipboard uploads respect dialog, build, size
  assert.equal(paste({files:[file]},folderTarget),true);await finish();assert.equal(run('gearFolderImage'),'data:image/png;base64,UE5H');assert.equal(requests.length,2);assert.equal(paste({files:[],items:[]},folderTarget),false);
  run("route=()=>({page:'members'})");assert.equal(paste({files:[file]}),false);
 });
+
+test('gallery thumbnails, viewer navigation and multiple uploads append safely',async()=>{
+ let html='',requests=[],pending=[];
+ ctx.show=h=>{html=h;node('#dlg').open=true;nodes.delete('#gear-dropzone');};
+ ctx.document.getElementById=id=>['gear-dropzone','gear-dropzone-input','gear-upload-status'].includes(id)?(html.includes('id="'+id+'"')?node('#'+id):null):node('#'+id);
+ ctx.FileReader=class{readAsDataURL(file){this.file=file;pending.push(this);}};
+ ctx.bridge=async(url,method,body)=>{requests.push({url,body});return {...ctx.thread};};
+ ctx.thread.screens[0].images=[{id:'one',image:'/uploads/one.png'},{id:'two',image:'/uploads/two.png'}];
+ run("GEARTHREAD={id:'41',data:thread};route=()=>({page:'gearthreads',id:'41'});api=(...args)=>bridge(...args);openDialog=show;closeDialog=()=>{document.querySelector('#dlg').open=false}");
+ assert(run('gearScreensHtml(thread)').includes('2 screenshots'));assert(run('gearScreensHtml(thread)').includes('gear-gallery-move'));
+ run("ACTIONS['gear-image-open'](null,{section:1,index:1})");assert(html.includes('2 / 2'));assert(html.includes('/uploads/two.png'));
+ run("ACTIONS['gear-image-step'](null,{dir:1})");assert(html.includes('1 / 2'));
+ run("ACTIONS['gear-screen-upload-open'](null,{section:1})");assert(html.includes('multiple'));
+ ctx.files=[{type:'image/png',size:100,name:'one.png'},{type:'image/png',size:200,name:'two.png'}];
+ const work=run('gearDropHandler(files)');assert.equal(pending.length,1);
+ pending[0].result='data:image/png;base64,b25l';pending[0].onload();await new Promise(r=>setImmediate(r));assert.equal(pending.length,2);
+ pending[1].result='data:image/png;base64,dHdv';pending[1].onload();await work;
+ assert.equal(requests.length,2);assert(requests.every(r=>r.body.append===true&&r.body.build==='main'));assert.equal(node('#dlg').open,false);
+});
