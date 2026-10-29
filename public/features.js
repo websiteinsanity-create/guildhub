@@ -1042,10 +1042,19 @@ function attDefaultEvent() {
   AT.eventId = pick ? pick.id : null;
 }
 function attStopPoll() { if (atTimer) { clearInterval(atTimer); atTimer = null; atTimerFor = null; } }
-async function attPollOnce() {
-  if (!AT.eventId) return;
-  try { AT.live = await api(`/api/events/${AT.eventId}/voice-track/live`); } catch { AT.live = null; }
-  if (route().page === 'dashboard' && !$('#dlg').open) render();
+let attPollFlight=false;
+async function attPollOnce(){
+ if(!AT.eventId || document.hidden || attPollFlight)return;
+ const id=AT.eventId,epoch=refreshEpoch;attPollFlight=true;
+ try{
+  const [live,event]=await Promise.all([api(`/api/events/${id}/voice-track/live`),api(`/api/events/${id}/tracking-state`)]);
+  if(AT.eventId!==id || route().page!=='dashboard' || refreshFlight || epoch!==refreshEpoch)return;
+  AT.live=live;const old=byId(S.events,id),finished=old?.voiceTracking?.active && !event.voiceTracking?.active;
+  if(old)Object.assign(old,event);
+  const a=document.activeElement;
+  if(!$('#dlg').open && !(a && $('#main').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName))){const panel=document.querySelector('.att-wrap');if(panel)panel.outerHTML=attendanceTrackPanel();}
+  if(finished){attStopPoll();await refresh();}
+ }catch{}finally{attPollFlight=false;}
 }
 // Polls every 5s while this event's track is either running or finished-but-not-yet-saved (the two states
 // that actually change on their own without an officer doing anything) - stops the moment neither is true, or
@@ -1062,17 +1071,6 @@ AFTER_RENDER.push((page) => {
   atTimerFor = AT.eventId;
   attPollOnce();
   atTimer = setInterval(attPollOnce, 5000);
-});
-// A separate, client-only 1s clock (no API call) just for the "Xm:Ys left" readout on the dashboard panel -
-// same approach as the event page's own countdown (app.js) - so the countdown ticks every second without
-// polling the live-data endpoint any more often than the 5s poll above already does.
-let atClockTimer = null;
-AFTER_RENDER.push(() => {
-  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
-  const running = !!(ev && ev.voiceTracking && ev.voiceTracking.active);
-  if (!running) { if (atClockTimer) { clearInterval(atClockTimer); atClockTimer = null; } return; }
-  if (atClockTimer) return;
-  atClockTimer = setInterval(() => { if (route().page === 'dashboard' && !$('#dlg').open) render(); }, 1000);
 });
 function attendanceTrackPanel() {
   if (!isOfficer()) return '';

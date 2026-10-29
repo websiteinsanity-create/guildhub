@@ -30,6 +30,7 @@ let scStarting = false;
 
 let scPollSerial=0;
 async function pollShotcaller() {
+ if(document.hidden)return;
   const serial=++scPollSerial;
   const previous=SC,start=Date.now();
   try { const data=await api('/api/shotcaller/status');if(serial!==scPollSerial)return;SC={loading:false,data,error:'',receivedAt:new Date().toISOString(),requestMs:Date.now()-start}; }
@@ -370,6 +371,7 @@ function dmTestDialogHtml(t) {
 }
 let DMT_TIMER = null;
 async function pollDmTest() {
+ if(document.hidden)return;
   let t;
   try { t = await api('/api/admin/dm-test'); } catch { return; }
   if (!$('#dlg').open) { clearInterval(DMT_TIMER); DMT_TIMER = null; return; }
@@ -423,6 +425,7 @@ function voiceTestDialogHtml(t) {
     <div class="dlg-actions" style="margin-top:14px"><button type="button" class="btn danger" data-act="voicetest-stop">Stop test</button></div>`;
 }
 async function pollVoiceTest() {
+ if(document.hidden)return;
   let t;
   try { t = await api('/api/admin/voice-test'); } catch { return; }
   if (!$('#dlg').open) { clearInterval(VT_TIMER); VT_TIMER = null; return; }

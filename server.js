@@ -207,7 +207,10 @@ function flush() {
   flushInFlight = (async () => {
   try {
     const tmp = DB_FILE + '.tmp';
-    await fs.promises.writeFile(tmp, dbJson());
+    const revision=dataRevision,source=db;
+    const snapshot=(db.events?.length || 0)>=100 ? await require('./json-snapshot')(source) : dbJson();
+    if(revision!==dataRevision || source!==db){dirty=true;return;}
+    await fs.promises.writeFile(tmp,snapshot);
     await fs.promises.rename(tmp, DB_FILE);
   } catch (e) {
     console.error('save failed, will retry:', e);
@@ -219,7 +222,8 @@ function flush() {
   })();
   return flushInFlight;
 }
-function save() { dirty = true; scheduleFlush(); }
+let dataRevision = 0;
+function save() { dataRevision++; dirty = true; scheduleFlush(); }
 // Only used right before the process actually exits (see shutdown() below), where "a moment later" is too late -
 // this finishes the write before Node is given the chance to quit, so a deploy/restart never drops the last
 // few changes that were still waiting out their debounce window.
@@ -256,6 +260,9 @@ if (!SECRET) {
 }
 const sign = (s) => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
 
+const supportAccess=require('./support-grants')(path.join(DATA_DIR,'support-grants.json'));
+// Retired support password hashes have no role in one-time-code authentication.
+fs.rmSync(path.join(DATA_DIR,'support-access.json'),{force:true});
 function makeToken(user, days = 30) {
   const body = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + days * 864e5 })).toString('base64url');
   return `${body}.${sign(body)}`;
@@ -272,8 +279,10 @@ function readToken(token) {
   try {
     const u = JSON.parse(Buffer.from(body, 'base64url').toString());
     if (!(u.exp > Date.now())) return null;
-    if (discord.loginEnabled && !u.discord) return null;      // old passcode sessions stop working once Discord is switched on
+    if (discord.loginEnabled && !u.discord && !u.supportGrant) return null;      // old passcode sessions stop working once Discord is switched on
+    if(u.support && !supportAccess.valid(u))return null;
     if (!u.key) u.key = u.name;                                // sessions from before Discord sign-in existed
+    u.readOnly=!!u.support;
     return u;
   } catch { return null; }
 }
@@ -518,7 +527,8 @@ function syncAttendancePoints(ev) {
   const existing = new Set();                   // memberIds that already have a point entry for this event
   db.points = db.points.filter((p) => {
     if (p.eventId !== ev.id) return true;
-    if (!attended.has(p.memberId)) return false;
+    if (!attended.has(p.memberId) || ev.points<=0 || existing.has(p.memberId)) return false;
+    if(db.settings.pointsEnabled){p.delta=ev.points;p.reason=`Attended: ${ev.title}`;}
     existing.add(p.memberId);
     return true;
   });
@@ -559,6 +569,7 @@ function syncAttendancePoints(ev) {
 // than one per member - keeping those at the call site keeps this function a pure, easily-testable mutation
 // of ev with no side effects beyond that.
 function setAttended(ev, characterIds, { mode, by, skipReevaluate = false }) {
+  if(mode==='replace')shotcallerApi.cancelVoiceTracking(ev);
   const next = [...new Set(characterIds)];
   const before = ev.attended || [];
   const changed = before.length !== next.length || !before.every((id) => next.includes(id)) || !next.every((id) => before.includes(id));
@@ -607,6 +618,20 @@ const route = (method, pattern, handler, { auth = true, officer = false, applica
 // ---------- audit log: records who changed what, across this file and the feature modules ----------
 const audit = require('./server-audit')({ route, need, clean, newId, save, isOfficer, get db() { return db; } });
 
+route('GET','/api/admin/support-access',({user})=>{need(!user.support,403,'A regular administrator must manage support access.');return supportAccess.status();},{officer:true});
+route('POST','/api/admin/support-access/generate',async({user})=>{
+ need(!user.support,403,'A regular administrator must manage support access.');
+ const result=await supportAccess.generate();audit.log(user,'support.code.generate',{type:'system'},'Generated a one-time support code; previous support access revoked.');return result;
+},{officer:true});
+route('POST','/api/admin/support-access/revoke',async({user})=>{
+ need(!user.support,403,'A regular administrator must manage support access.');
+ const result=await supportAccess.revoke();audit.log(user,'support.access.revoke',{type:'system'},'Revoked the pending support code and active support session.');return result;
+},{officer:true});
+route('POST','/api/support/login',async({body,ip})=>{
+ const user=await supportAccess.login(body.username,body.code,ip);
+ audit.log(user,'support.login',{type:'system'},'SupportAI signed in.');
+ return {supportLoginUser:user};
+},{auth:false});
 route('POST', '/api/login', ({ body, ip }) => {
   need(!discord.loginEnabled, 400, 'This server uses Discord sign-in.');
   need(!tooManyFailures(ip), 429, 'Too many failed attempts. Try again in a few minutes.');
@@ -631,7 +656,7 @@ const publicBranding = () => {
   const b = db.settings.branding;
   return { name: b.name, tagline: b.tagline, accent: b.accent, bgDim: b.bgDim, icon: b.iconFile ? '/uploads/' + b.iconFile : '', bg: b.bgFile ? '/uploads/' + b.bgFile : '' };
 };
-route('GET', '/api/config', () => ({ ...config, version: pkg.version, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, shotcallerOn: !!(SHOTCALLER_URL && SHOTCALLER_API_KEY && discord.cfg.guildId), applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
+route('GET', '/api/config', () => ({ ...config, version: pkg.version, supportLogin: true, authMode: discord.loginEnabled ? 'discord' : 'passcode', botOn: discord.botEnabled, shotcallerOn: !!(SHOTCALLER_URL && SHOTCALLER_API_KEY && discord.cfg.guildId), applicationsOpen: discord.loginEnabled && !!db.settings.applications.enabled, branding: publicBranding() }), { auth: false });
 
 const closeAt = (ev) => Date.parse(ev.start) - (ev.signupCloseMinutes ?? db.settings.signupCloseDefault) * 60000;
 function pinInfo(ev) {
@@ -907,7 +932,11 @@ route('POST', '/api/events/:id/loa-override', ({ body, user, params }) => {
 route('POST', '/api/events/:id/attendance', ({ body, params, user }) => {
   const ev = findEvent(params.id);
   need(ev, 404, 'Event not found.');
-  const ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
+  let ids = (Array.isArray(body.memberIds) ? body.memberIds : []).map(Number).filter((id) => findMember(id));
+  if(Array.isArray(body.scopeMemberIds)){
+    const scope=new Set(body.scopeMemberIds.map(Number));
+    ids=[...ev.attended.filter(id=>!scope.has(id)),...ids.filter(id=>scope.has(id))];
+  }
   setAttended(ev, ids, { mode: 'replace', by: user.name });
   audit.log(user, 'attendance.record', { type: 'event', id: ev.id, name: ev.title }, `${user.name} recorded attendance for "${ev.title}": ${ev.attended.length} ${ev.attended.length === 1 ? 'character' : 'characters'}.`);
   save();
@@ -924,6 +953,7 @@ route('POST', '/api/events/:id/attendance/undo', ({ params, user }) => {
   need(ev, 404, 'Event not found.');
   const undo = ev.attendanceUndo;
   need(undo, 400, 'Nothing to undo - this event\'s attendance has not been saved since it was last opened, or was already undone.');
+  shotcallerApi.cancelVoiceTracking(ev,'attendance-undone');
   const before = ev.attended;
   ev.attended = [...undo.attended];
   ev.autoAttended = undo.autoAttended;
@@ -1262,7 +1292,8 @@ const nameOfOwner = (id) => (db.users[id] && db.users[id].name) || id;
 // server's local one) - the exact same rule the client's Daily Schedule panel already uses (guildDate/gameDay
 // in public/app.js): the "day" flips at 4am, not local midnight, matching the game's own daily reset, so
 // everyone sees the same "today" for the shared Discord schedule post regardless of time zone.
-const guildDate = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: config.defaultTimezone || 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+const dateFormatter = new Intl.DateTimeFormat('en-CA',{timeZone:config.defaultTimezone || 'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'});
+const guildDate = ms => dateFormatter.format(new Date(ms));
 const gameDay = (ms) => guildDate(ms - 4 * 3600000);
 const guildHour = (ms) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: config.defaultTimezone || 'Europe/Berlin', hour: '2-digit', hourCycle: 'h23' }).format(new Date(ms)));
 
@@ -1679,6 +1710,7 @@ const shotcallerApi = require('./server-shotcaller')({
 // server-compliance.js is up, the same late-binding trick it already uses for ctx.coaching, and setAttended
 // (defined above, long before this runs) needs that reference at call time, not at parse time.
 const featuresCtx = {
+ get revision() { return dataRevision; },
   route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, setAttended, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
   LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi, partyIsPlaceholder,
@@ -1709,14 +1741,33 @@ function readBody(req, limit = 2e6) {
   });
 }
 
+const diagnostics=require('./server-diagnostics')();
+route('GET','/api/admin/diagnostics',()=>diagnostics.snapshot(db,pkg.version),{officer:true});
+const supportRedact=require('./support-redaction')(SECRET,Object.entries(process.env).filter(([key])=>/password|passcode|token|secret|api.?key/i.test(key)).map(([,value])=>value));
+const zlib=require('node:zlib');
 const send = (res, status, data, headers = {}) => {
+  if(res.supportRead){
+    const safe=supportRedact(data);
+    // Public protocol constants are not credential text. Project them only for the
+    // authenticated support account's state; route authorization remains server-side.
+    if(res.supportState && data?.user?.support && safe?.user){
+      safe.user.role='officer';safe.user.support=true;safe.user.readOnly=true;safe.user.canViewLeadership=true;
+    }
+    data=safe;
+  }
   const body = typeof data === 'string' ? data : JSON.stringify(data);
-  res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
-  res.end(body);
+  const h={'Content-Type':'application/json','Cache-Control':'private, no-store',...headers};
+  if(res.guildGzip && Buffer.byteLength(body)>2048){zlib.gzip(body,{level:4},(err,bytes)=>{if(res.destroyed)return;res.writeHead(status,err?h:{...h,'Content-Encoding':'gzip',Vary:'Accept-Encoding'});res.end(err?body:bytes);});}
+  else{res.writeHead(status,h);res.end(body);}
 };
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  res.supportState=url.pathname==='/api/state';
+  const requestStart=performance.now();let diagnosticRoute=null;
+  res.once('finish',()=>{if(diagnosticRoute)diagnostics.record(req.method,diagnosticRoute,res.statusCode,performance.now()-requestStart);});
+  res.supportRead=!!readToken((req.headers.authorization || '').replace(/^Bearer /,'') || cookieOf(req,SESSION_COOKIE))?.support;
+  res.guildGzip=(req.headers['accept-encoding'] || '').split(',').some(s=>{const [name,...opts]=s.trim().split(';');return name==='gzip' && !opts.some(o=>/^\s*q=0(?:\.0*)?\s*$/.test(o));});
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
 
   // Health check for Docker / a load balancer: no auth, no DB access, just "the process is alive and serving".
@@ -1865,6 +1916,7 @@ http.createServer(async (req, res) => {
     try {
       const r = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
       need(r, 404, 'Not found.');
+      diagnosticRoute=String(r.re); // route pattern only: no query strings, IDs, tokens or request bodies
       const m = url.pathname.match(r.re);
       const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
       let user = null;
@@ -1872,6 +1924,8 @@ http.createServer(async (req, res) => {
         const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
         user = readToken(bearer || cookieOf(req, SESSION_COOKIE));
         need(user, 401, 'Please sign in.');
+        if(user.support){need(supportAccess.valid(user),403,'Support access is disabled.');user.role='officer';}
+        if(user.support)need(require('./support-read-policy')(req.method,url.pathname),403,'Support access is read-only. This operation is not permitted.');
         // Keep session flags in sync with the persisted user record. Admin coach assignments can
         // change while someone is already signed in, so the signed session must not retain a stale
         // `coach` value until the next Discord login.
@@ -1891,12 +1945,14 @@ http.createServer(async (req, res) => {
         need(!r.officer || isOfficer(user), 403, 'Officers only.');
         need(user.role !== 'applicant' || r.applicant, 403, 'Your application has to be accepted first.');       // applicants can reach nothing but the application
       }
+      if(url.pathname==='/api/support/login'){need(/application\/json/i.test(req.headers['content-type'] || ''),415,'Send JSON.');need(!req.headers.origin || (()=>{try{return new URL(req.headers.origin).host===req.headers.host;}catch{return false;}})(),403,'Cross-site request blocked.');}
       const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || url.pathname === '/api/events/artwork' || /\/post-parties$/.test(url.pathname) || /^\/api\/gearthreads\/[^/]+\/(screens\/[^/]+|folder)$/.test(url.pathname) ? 9e6 : 2e6);
       const out = await r.handler({ body, user, params, ip, query: Object.fromEntries(url.searchParams) });
+      if(url.pathname==='/api/support/login')return send(res,200,{ok:true},{'Set-Cookie':cookieHeader(SESSION_COOKIE,makeToken(out.supportLoginUser,2/24),7200)});
       return send(res, 200, out, url.pathname === '/api/export'
         ? { 'Content-Disposition': 'attachment; filename="guild-backup.json"' } : {});
     } catch (e) {
-      if (!(e instanceof HttpError)) console.error(e);
+      if (!(e instanceof HttpError) && !(['/api/support/login','/api/admin/support-access'].includes(url.pathname) && e.status>=400 && e.status<500)) console.error(e);
       return send(res, e.status || 500, { error: e.status ? e.message : 'Server error.' });
     }
   }
@@ -1910,6 +1966,11 @@ http.createServer(async (req, res) => {
     return fs.createReadStream(f).pipe(res);
   }
 
+  // Dedicated support login page; existing SPA routes remain unchanged.
+  if(url.pathname==='/support' || url.pathname==='/support/') {
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"});
+    fs.createReadStream(path.join(PUBLIC_DIR,'support.html')).pipe(res);return;
+  }
   // static files
   let file = path.normalize(path.join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname));
   if (file.startsWith(PUBLIC_DIR) && !fs.existsSync(file) && /\.png$/i.test(file)) {
@@ -1921,8 +1982,13 @@ http.createServer(async (req, res) => {
     if (fs.existsSync(jpgAlt) && !fs.statSync(jpgAlt).isDirectory()) file = jpgAlt;
   }
   if (!file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC_DIR, 'index.html');
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
-  fs.createReadStream(file).pipe(res);
+  const stat=await fs.promises.stat(file),etag=`W/"${stat.size}-${Math.trunc(stat.mtimeMs)}"`;
+  const headers={'Content-Type':MIME[path.extname(file)] || 'application/octet-stream','Cache-Control':'no-cache',ETag:etag,Vary:'Accept-Encoding','X-Content-Type-Options':'nosniff'};
+  if((req.headers['if-none-match'] || '').split(/,\s*/).includes(etag)){res.writeHead(304,headers);return res.end();}
+  const compress=res.guildGzip && /\.(js|css|html|json|svg)$/.test(file) && stat.size>1024;
+  res.writeHead(200,compress?{...headers,'Content-Encoding':'gzip'}:headers);
+  const stream=fs.createReadStream(file);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());
+  if(compress){const zip=zlib.createGzip({level:4});zip.on('error',()=>res.destroy());res.on('close',()=>zip.destroy());stream.pipe(zip).pipe(res);}else stream.pipe(res);
 }).listen(...(HOST ? [PORT, HOST] : [PORT]), () => {
   console.log(`Guild Hall running on http://${HOST || 'localhost'}:${PORT}`);
   console.log(discord.loginEnabled ? `Sign-in: Discord (redirect URI ${discord.redirectUri()})` : 'Sign-in: shared passcodes (demo mode)');

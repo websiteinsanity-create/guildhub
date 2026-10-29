@@ -164,6 +164,13 @@ module.exports = function install(ctx) {
     const t = checkTimers.get(evId);
     if (t) { clearTimeout(t); checkTimers.delete(evId); }
   }
+  function cancelVoiceTracking(ev,reason='manual-correction'){
+    clearCheckTimer(ev.id);
+    const vt=ev.voiceTracking;
+    if(!vt?.active)return;
+    vt.active=false;vt.finishedAt=Date.now();vt.incomplete=false;vt.finishReason=reason;
+    // Pending checks see the inactive run and cannot write over the manual result.
+  }
   function finishVoiceTracking(ev, user) {
     if (!ev.voiceTracking || ev.voiceTracking.finishedAt) return;
     ev.voiceTracking.finishedAt = Date.now();
@@ -661,5 +668,5 @@ module.exports = function install(ctx) {
 
   // Exposed to server.js, which passes it on to server-features.js/server-community.js (as ctx.shotcallerApi) -
   // see server-community.js's post-parties route, the only other caller of startSession and of beginVoiceTracking.
-  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession };
+  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking };
 };
