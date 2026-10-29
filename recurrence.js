@@ -2,14 +2,6 @@
 // (21:00 in Berlin is 19:00 UTC in summer and 20:00 UTC in winter). No dependencies, uses the built-in Intl.
 
 const DAY = 864e5;
-const formatters = new Map();
-function offsetFormatter(tz) {
- if (!formatters.has(tz)) {
-  if (formatters.size >= 64) formatters.clear();
-  formatters.set(tz,new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}));
- }
- return formatters.get(tz);
-}
 
 function validTimeZone(tz) {
   try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return typeof tz === 'string' && tz.length > 0; } catch { return false; }
@@ -17,7 +9,9 @@ function validTimeZone(tz) {
 
 // Minutes the zone is ahead of UTC at a given moment (Berlin: +120 in summer, +60 in winter).
 function tzOffsetMinutes(ms, tz) {
-  const parts = Object.fromEntries(offsetFormatter(tz).formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
   const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
   return Math.round((asUtc - Math.floor(ms / 1000) * 1000) / 60000);
 }
