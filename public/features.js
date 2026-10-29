@@ -1042,19 +1042,10 @@ function attDefaultEvent() {
   AT.eventId = pick ? pick.id : null;
 }
 function attStopPoll() { if (atTimer) { clearInterval(atTimer); atTimer = null; atTimerFor = null; } }
-let attPollFlight=false;
-async function attPollOnce(){
- if(!AT.eventId || document.hidden || attPollFlight)return;
- const id=AT.eventId,epoch=refreshEpoch;attPollFlight=true;
- try{
-  const [live,event]=await Promise.all([api(`/api/events/${id}/voice-track/live`),api(`/api/events/${id}/tracking-state`)]);
-  if(AT.eventId!==id || route().page!=='dashboard' || refreshFlight || epoch!==refreshEpoch)return;
-  AT.live=live;const old=byId(S.events,id),finished=old?.voiceTracking?.active && !event.voiceTracking?.active;
-  if(old)Object.assign(old,event);
-  const a=document.activeElement;
-  if(!$('#dlg').open && !(a && $('#main').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName))){const panel=document.querySelector('.att-wrap');if(panel)panel.outerHTML=attendanceTrackPanel();}
-  if(finished){attStopPoll();await refresh();}
- }catch{}finally{attPollFlight=false;}
+async function attPollOnce() {
+  if (!AT.eventId) return;
+  try { AT.live = await api(`/api/events/${AT.eventId}/voice-track/live`); } catch { AT.live = null; }
+  if (route().page === 'dashboard' && !$('#dlg').open) render();
 }
 // Polls every 5s while this event's track is either running or finished-but-not-yet-saved (the two states
 // that actually change on their own without an officer doing anything) - stops the moment neither is true, or
@@ -1071,6 +1062,17 @@ AFTER_RENDER.push((page) => {
   atTimerFor = AT.eventId;
   attPollOnce();
   atTimer = setInterval(attPollOnce, 5000);
+});
+// A separate, client-only 1s clock (no API call) just for the "Xm:Ys left" readout on the dashboard panel -
+// same approach as the event page's own countdown (app.js) - so the countdown ticks every second without
+// polling the live-data endpoint any more often than the 5s poll above already does.
+let atClockTimer = null;
+AFTER_RENDER.push(() => {
+  const ev = AT.eventId ? byId(S.events, AT.eventId) : null;
+  const running = !!(ev && ev.voiceTracking && ev.voiceTracking.active);
+  if (!running) { if (atClockTimer) { clearInterval(atClockTimer); atClockTimer = null; } return; }
+  if (atClockTimer) return;
+  atClockTimer = setInterval(() => { if (route().page === 'dashboard' && !$('#dlg').open) render(); }, 1000);
 });
 function attendanceTrackPanel() {
   if (!isOfficer()) return '';
@@ -1142,19 +1144,17 @@ function attVoiceControls(ev) {
       </div>
     </div>
     ${running && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
-    ${vt?.incomplete?'<div class="att-sect att-warn">Tracking incomplete. Review attendance or run Track again; missing players are not finalized as no-shows.</div>':''}
-    ${vt?.lastError && running?`<div class="att-sect att-warn">${esc(vt.lastError)}</div>`:''}
     <div class="att-sect att-action">
       ${running
         ? `<button class="btn att-running-btn${settled}" disabled><span class="sc-spinner"></span> Running - check ${checksDone + 1} of ${checksTotal}</button>
            <button class="btn sm" data-act="voicetrack-finish" data-id="${ev.id}" style="margin-left:6px">Finish tracking now</button>`
         : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>
-             ${finished && !vt?.incomplete ? '<div class="muted small att-save-hint">✓ Finished tracking. Open the next event above and repeat the cycle whenever you\'re ready - no need to restart the bot.</div>' : ''}`}
+             ${finished ? '<div class="muted small att-save-hint">✓ Finished tracking. Open the next event above and repeat the cycle whenever you\'re ready - no need to restart the bot.</div>' : ''}`}
     </div>
     ${running ? `<div class="att-sect"><div class="sc-data-grid">
         ${dataItem(0, 'Players tracked', live.trackedCount)}
-        ${dataItem(1, 'Deafened', live.deafenedCount ?? 'Unknown')}
-        ${dataItem(2, 'Not yet seen', live.noShowCount)}
+        ${dataItem(1, 'Deafened', live.deafenedCount)}
+        ${dataItem(2, 'Did not show up', live.noShowCount)}
       </div></div>` : ''}`;
 }
 // PIN mode's counterpart to attVoiceControls above - used to be a dead end here ("the PIN lives on the
@@ -1976,20 +1976,18 @@ async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {})
   const accent = css.getPropertyValue('--accent').trim() || '#ac2d4c';
   const sans = '"Source Sans 3", system-ui, "Segoe UI", Arial, sans-serif', serif = 'Marcellus, Georgia, serif';
   const parties = ev.parties;
-  const wIcons = {};
-  await Promise.all(Object.keys(WEAPON_ICONS).map((n) => new Promise((res) => { const im = new Image(); im.onload = () => { wIcons[n] = im; res(); }; im.onerror = () => res(); im.src = WEAPON_ICONS[n]; })));
   // A member only counts as locked in for THIS event once they've confirmed (mercenaries are always treated as
   // confirmed, same rule the live board's partyCard() uses) - everyone else in the preset's member list is still
   // just a placeholder slot, not a real attendee, so the picture posted to Discord shows ONLY attending players:
   // no row, no footer, nothing naming them at all - a clean view of who is actually locked in. Precomputed per
   // party so both the card body and its "X/Y" header count agree.
   const attendingOf = (p) => p.members.filter((id) => { const m = byId(S.members, id); return m && (m.mercenary || ev.rsvps[m.id] === 'yes'); });
-  const cols = Math.min(maxCols, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 54, slotH = 36, headH = 42, titleH = 108;
+  const cols = Math.min(maxCols, Math.max(1, parties.length)), cardW = 300, gap = 16, pad = 28, rowH = 46, headH = 42, titleH = 108;
   const W = pad * 2 + cols * cardW + (cols - 1) * gap;
   const gridRows = Math.ceil(parties.length / cols);
   const measure = document.createElement('canvas').getContext('2d');
   const wrap = (g, text, max) => { const out = []; let line = ''; for (const w of text.split(' ')) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; } if (line) out.push(line); return out; };
-  const cardH = (p) => { const a = attendingOf(p).length; return headH + 4 + a * rowH + Math.max(0, (S.cfg.partySize || 6) - a) * slotH + 6; };
+  const cardH = (p) => headH + Math.max(attendingOf(p).length, 1) * rowH + 10;
   const rowHeights = Array.from({ length: gridRows }, (_, r) => Math.max(...parties.slice(r * cols, r * cols + cols).map(cardH)));
   // going, but not in a party
   const placed = new Set(parties.flatMap((p) => p.members));
@@ -2002,7 +2000,7 @@ async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {})
   const g = c.getContext('2d'); g.scale(scale, scale); g.textBaseline = 'alphabetic';
   const fit = (text, max) => { if (g.measureText(text).width <= max) return text; let t = text; while (t.length > 1 && g.measureText(t + '…').width > max) t = t.slice(0, -1); return t + '…'; };
   const rr = (x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
-  g.fillStyle = '#101015'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#130e11'; g.fillRect(0, 0, W, H);
   // title. A single narrow column (the mobile "View parties" popup) has no room to also reserve space for the
   // guild name on the same line without crushing the title down to a couple of letters - so a narrow canvas
   // drops the guild name (the app already makes it obvious whose parties these are) and uses a smaller title
@@ -2018,41 +2016,30 @@ async function renderPartiesImage(ev, { maxCols = 4, showUnplaced = true } = {})
   let y0 = pad + titleH;
   const rowTop = []; rowHeights.forEach((h, i) => { rowTop[i] = y0; y0 += h + gap; });
   parties.forEach((p, i) => {
-    const attending = attendingOf(p), size = S.cfg.partySize || 6, open = Math.max(0, size - attending.length);
+    const attending = attendingOf(p);
     const x = pad + (i % cols) * (cardW + gap), y = rowTop[Math.floor(i / cols)], h = cardH(p);
-    g.fillStyle = '#14141b'; rr(x, y, cardW, h, 12); g.fill(); g.strokeStyle = '#35323f'; g.lineWidth = 1; rr(x + .5, y + .5, cardW - 1, h - 1, 12); g.stroke();
-    g.fillStyle = '#ece5f4'; g.font = `650 18px ${sans}`; g.fillText(fit(p.name, cardW - 120), x + 14, y + 27);
-    const full = attending.length === size;
-    g.textAlign = 'right'; g.font = `400 15px ${sans}`; g.fillStyle = full ? '#e4cf91' : '#a39cad'; g.fillText(`${full ? 'Full  ·  ' : ''}${attending.length}/${size}`, x + cardW - 14, y + 27); g.textAlign = 'left';
-    g.fillStyle = '#35323f'; g.fillRect(x + 1, y + headH - 1, cardW - 2, 1);
+    g.fillStyle = '#1b1418'; rr(x, y, cardW, h, 10); g.fill(); g.strokeStyle = '#3a2a31'; g.lineWidth = 1; rr(x + .5, y + .5, cardW - 1, h - 1, 10); g.stroke();
+    g.fillStyle = '#ebe5e3'; g.font = `600 18px ${sans}`; g.fillText(fit(p.name, cardW - 90), x + 14, y + 27);
+    g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; g.textAlign = 'right'; g.fillText(`${attending.length}/${S.cfg.partySize || 6}`, x + cardW - 14, y + 27); g.textAlign = 'left';
+    g.fillStyle = '#3a2a31'; g.fillRect(x + 1, y + headH - 1, cardW - 2, 1);
+    if (!attending.length) { g.fillStyle = '#6f6268'; g.font = `italic 400 15px ${sans}`; g.fillText(p.members.length ? 'No one confirmed yet' : 'Empty', x + 14, y + headH + 28); }
     attending.forEach((id, j) => {
       const m = byId(S.members, id); if (!m) return;
-      const eff = effectiveBuild(m, p), ry = y + headH + 4 + j * rowH, col = roleCol(eff.role), rx = x + 8, rw = cardW - 16, rh = rowH - 6;
-      g.fillStyle = '#252631'; rr(rx, ry, rw, rh, 8); g.fill();
-      g.globalAlpha = 0.11; g.fillStyle = col; rr(rx, ry, rw, rh, 8); g.fill(); g.globalAlpha = 1;
-      g.strokeStyle = '#4a4356'; g.lineWidth = 1; rr(rx + .5, ry + .5, rw - 1, rh - 1, 8); g.stroke();
-      g.fillStyle = col; rr(rx, ry + 1, 4, rh - 2, 2); g.fill();
-      let nx = rx + 14;
+      const eff = effectiveBuild(m, p), ry = y + headH + j * rowH, col = roleCol(eff.role);
+      g.globalAlpha = 0.24; g.fillStyle = col; g.fillRect(x + 1, ry, cardW - 2, rowH - 2); g.globalAlpha = 1;
+      g.fillStyle = col; g.fillRect(x + 1, ry, 4, rowH - 2);
+      let nx = x + 16;
       if (p.leader === id) {                                                       // crown
-        g.fillStyle = '#e6d08a'; g.beginPath(); g.moveTo(nx, ry + 24); g.lineTo(nx, ry + 14); g.lineTo(nx + 5, ry + 19); g.lineTo(nx + 9, ry + 12); g.lineTo(nx + 13, ry + 19); g.lineTo(nx + 18, ry + 14); g.lineTo(nx + 18, ry + 24); g.closePath(); g.fill(); nx += 24;
+        g.fillStyle = '#e6d08a'; g.beginPath(); g.moveTo(nx, ry + 27); g.lineTo(nx, ry + 15); g.lineTo(nx + 5, ry + 21); g.lineTo(nx + 9, ry + 13); g.lineTo(nx + 13, ry + 21); g.lineTo(nx + 18, ry + 15); g.lineTo(nx + 18, ry + 27); g.closePath(); g.fill(); nx += 25;
       }
+      g.fillStyle = '#ebe5e3'; g.font = `600 17px ${sans}`;
       const tag = eff.isBuild ? eff.label : '';
-      g.font = `600 12px ${sans}`; const tagW = tag ? g.measureText(tag).width + 14 : 0;
-      const icons = [eff.primaryWeapon, eff.secondaryWeapon].filter((n) => wIcons[n]);
-      const iconsW = icons.length ? icons.length * 22 + 4 : 0;
-      g.font = `650 16px ${sans}`; g.fillStyle = '#f3eff7';
-      const nm = fit(m.name, rx + rw - 10 - nx - tagW - iconsW); g.fillText(nm, nx, ry + 21);
-      let ix = nx + g.measureText(nm).width + 8;
-      icons.forEach((n) => { g.save(); rr(ix, ry + 7, 18, 18, 4); g.clip(); g.drawImage(wIcons[n], ix, ry + 7, 18, 18); g.restore(); ix += 22; });
-      if (tag) { g.font = `600 12px ${sans}`; const tw = g.measureText(tag).width; g.strokeStyle = '#ece5f4'; g.globalAlpha = .6; rr(rx + rw - 10 - tw - 10, ry + 8, tw + 10, 17, 8); g.stroke(); g.globalAlpha = 1; g.fillStyle = '#ece5f4'; g.fillText(tag, rx + rw - 10 - tw - 5, ry + 21); }
+      const tagW = tag ? (g.font = `600 12px ${sans}`, g.measureText(tag).width + 14) : 0;
+      g.font = `600 17px ${sans}`; g.fillText(fit(m.name, cardW - (nx - x) - 14 - tagW), nx, ry + 20);
+      if (tag) { g.font = `600 12px ${sans}`; const tw = g.measureText(tag).width; g.strokeStyle = '#ebe5e3'; g.globalAlpha = .6; rr(x + cardW - 14 - tw - 10, ry + 8, tw + 10, 17, 8); g.stroke(); g.globalAlpha = 1; g.fillStyle = '#ebe5e3'; g.fillText(tag, x + cardW - 14 - tw - 5, ry + 21); }
       const cls = classFor(eff.primaryWeapon, eff.secondaryWeapon), meta = [cls, eff.specialization].filter(Boolean).join(' | ') || [eff.primaryWeapon, eff.secondaryWeapon].filter(Boolean).join(' / ');
-      g.fillStyle = '#ddd5e6'; g.font = `400 13px ${sans}`; g.fillText(fit(meta, rx + rw - 10 - nx), nx, ry + 39);
+      g.fillStyle = '#c9bfc2'; g.font = `400 13px ${sans}`; g.fillText(fit(meta, cardW - (nx - x) - 14), nx, ry + 37);
     });
-    for (let k = 0; k < open; k++) {
-      const sy = y + headH + 4 + attending.length * rowH + k * slotH, rx = x + 8, rw = cardW - 16;
-      g.save(); g.setLineDash([4, 4]); g.strokeStyle = '#38313f'; rr(rx + .5, sy + .5, rw - 1, slotH - 7, 7); g.stroke(); g.restore();
-      g.fillStyle = '#888092'; g.font = `400 12px ${sans}`; g.textAlign = 'center'; g.fillText(attending.length || p.members.length ? '+  Open slot' : (k === 0 ? 'Empty' : '+  Open slot'), x + cardW / 2, sy + 22); g.textAlign = 'left';
-    }
   });
   let yy = y0 - gap + 16;
   if (unLines.length) { g.fillStyle = '#a39499'; g.font = `400 15px ${sans}`; unLines.forEach((l, i) => g.fillText(l, pad, yy + 14 + i * 21)); yy += unLines.length * 21 + 14; }
@@ -2413,7 +2400,7 @@ const ADMIN_CATEGORIES = [
   ['appearance','Appearance',[appearanceAdmin,quotesAdmin]],
   ['discord','Discord',[discordAdmin,dailyScheduleAdmin,mercenariesAdmin]],
   ['people','People & access',[officersAdmin,coachesAdmin,adminPlayersList,approvalRulesAdmin,accessAdmin,adminSignIn]],
-  ['gear','Gear threads',[gearSectionsAdmin,()=>typeof gearSkillCatalogAdmin==='function'?gearSkillCatalogAdmin():'']],
+  ['gear','Gear threads',[gearSectionsAdmin]],
   ['shotcaller','Shotcaller',[()=>shotcallerAdmin()]],
   ['events','Events & attendance',[complianceAdmin,adminEventRules,adminPointsToggle]],
   ['experience','Notices & tags',[noticesAdmin,tagsAdmin]],
