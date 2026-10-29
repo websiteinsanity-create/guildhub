@@ -102,6 +102,11 @@ test('each person sees only the builds they may open; the coach of a class only 
   assert.equal((await call(`/api/gearthreads/${charId}`, 'GET', null, 'other')).status, 403, 'a stranger gets nothing');
   assert.equal((await call(`/api/gearthreads/${charId}?build=999`, 'GET', null, 'student')).status, 404);
   assert.deepEqual((await state('coach')).myCoachClasses, ['Scorpion']);
+  const potentialUrl=`/api/gearthreads/${charId}/potentials`;
+  assert.equal((await call(potentialUrl,'PUT',{build:'main',slot:'weapon1',ids:['SkillSet_WP_Item_Gear_DA_09'],revision:0},'coach')).status,200);
+  assert.equal((await call(potentialUrl,'PUT',{build:buildId,slot:'head',ids:[],revision:0},'coach')).status,403);
+  assert.equal((await call(potentialUrl,'PUT',{build:'main',slot:'head',ids:[],revision:1},'coach2')).status,403);
+  assert.equal((await call(potentialUrl,'PUT',{build:buildId,slot:'weapon1',ids:['SkillSet_WP_Item_Gear_ORB_12'],revision:0},'coach2')).status,200);
 });
 
 test('chat, screenshots, folder and links are separate per build', async () => {
@@ -128,6 +133,24 @@ test('chat, screenshots, folder and links are separate per build', async () => {
   await call(`/api/gearthreads/${charId}/questlogs`, 'PUT', { links: [{ label: 'o', url: 'https://example.com/o' }], build: buildId }, 'coach2');
   assert.equal((await call(`/api/gearthreads/${charId}?build=${buildId}`, 'GET', null, 'officer')).body.questlogs.length, 1);
   assert.equal((await call(`/api/gearthreads/${charId}?build=main`, 'GET', null, 'officer')).body.questlogs.length, 0, 'main links untouched');
+});
+
+test('gallery append, ordering, individual deletion and shared files stay build-scoped', async () => {
+ const sec=(await call(`/api/gearthreads/${charId}`, 'GET', null, 'student')).body.screens[0].sectionId;
+ const url=`/api/gearthreads/${charId}/screens/${sec}`;
+ const png2='data:image/png;base64,'+Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),Buffer.alloc(200,2)]).toString('base64');
+ const shot=r=>r.body.screens.find(x=>x.sectionId===sec);
+ let r=await call(url,'PUT',{image:PNG,append:true},'student');assert.equal(r.status,200);const first=shot(r).images[0];
+ r=await call(url,'PUT',{image:png2,append:true},'student');assert.equal(shot(r).images.length,2);const second=shot(r).images[1];
+ r=await call(url,'PUT',{image:png2,append:true},'student');assert.equal(shot(r).images.length,2,'same file not duplicated');
+ r=await call(url,'PUT',{order:[second.id,first.id]},'student');assert.equal(shot(r).image,second.image);
+ assert.equal((await call(url,'PUT',{order:[second.id]},'student')).status,409);
+ assert.equal((await call(url,'PUT',{removeId:second.id},'other')).status,403);
+ r=await call(url,'PUT',{removeId:first.id},'student');assert.deepEqual(shot(r).images.map(x=>x.id),[second.id]);
+ assert.equal((await fetch(base+first.image)).status,200,'alternate build still references same image');
+ assert.equal((await call(url,'PUT',{image:'bad',append:true},'student')).status,400);
+ r=await call(`/api/gearthreads/${charId}`, 'GET', null, 'student');assert.equal(shot(r).images.length,1);
+ r=await call(url,'PUT',{removeId:second.id},'student');assert.equal(shot(r).images.length,0);assert.equal((await fetch(base+second.image)).status,404);
 });
 
 test('old data without a build tag counts as the main build, and deleting a build removes its thread', async () => {

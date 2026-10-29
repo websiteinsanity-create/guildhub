@@ -381,7 +381,7 @@ function migrate() {
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
   for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers', 'guestCoaches', 'gearChat', 'gearScreens', 'gearFolder']) db[k] = db[k] || [];
-  for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks', 'gearSkills', 'gearLinks']) db[k] = db[k] || {};
+  for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks', 'gearSkills', 'gearLinks', 'gearPotentials']) db[k] = db[k] || {};
   // Gear Threads' screenshot topics: officer-managed from here on (Admin > Gear Threads), but seeded once
   // with these four so a freshly-installed guild starts with something sensible already in place.
   if (!db.gearSectionTypes) db.gearSectionTypes = ['Gear', 'Damage & Defense', 'Main Stats', 'CC Stats'].map((label) => ({ id: newId(), label }));

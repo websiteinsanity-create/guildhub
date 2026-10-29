@@ -701,3 +701,11 @@ officer-only routes protect everything destructive. Attendance PINs never reach 
 sees whether the PIN window is open. To sign everybody out, delete `data/secret.txt` and restart.
 
 Demo mode (no Discord settings) uses two shared passcodes (`guild` / `officer`) and is meant for your own PC only.
+
+
+## Screenshot galleries (v31)
+
+Each Gear Thread topic holds several screenshots per build. Existing single screenshots become the first image
+automatically. Add several images (file picker, drag and drop or Ctrl+V), drag thumbnails or use the arrow buttons to
+reorder (the first is the cover), delete single images, and page through them in the viewer with buttons, arrow keys or
+a swipe. Each image is limited to 6 MB; identical images in a topic are stored once.

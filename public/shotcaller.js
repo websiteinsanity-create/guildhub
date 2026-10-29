@@ -9,7 +9,16 @@
    which hits the bot's /voice-channels and /session/start routes) or with /shotcaller start in Discord - both
    land on the same bot-side Session, so either one shows up here the moment it's running. */
 
-let SC = { loading: true, data: null, error: '' };
+let SC = { loading: true, data: null, error: '', receivedAt:null, requestMs:null };
+let scStatusEvents=[];
+function scObserve(previous,next) {
+ const add=message=>scStatusEvents.unshift({at:new Date().toISOString(),message});
+ if(next.error && next.error!==previous.error)add('Control API request failed.');
+ if(!next.error && (previous.error || !previous.receivedAt))add('Control API responded.');
+ if(next.data && !next.error && previous.data){if(!!next.data.active!==!!previous.data.active)add(next.data.active?'Session became active.':'Session ended.');if(next.data.active && next.data.muted!==previous.data.muted)add(next.data.muted?'Session audio muted.':'Session audio unmuted.');
+ const old=previous.data.diagnostics?.relays || [];for(const r of next.data.diagnostics?.relays || []){const before=old.find(x=>x.index===r.index);if(before && before.voiceState!==r.voiceState)add('Relay '+r.index+' voice state: '+(r.voiceState || 'not reported')+'.');}}
+ scStatusEvents=scStatusEvents.slice(0,12);
+}
 let scTimer = null, scActive = false;
 // Set true the instant the Start form submits (before the request even goes out) and cleared once the bot
 // answers - starting can legitimately take a while (relay bots log in and join one party at a time; see the
@@ -19,9 +28,13 @@ let scTimer = null, scActive = false;
 // through starting.
 let scStarting = false;
 
+let scPollSerial=0;
 async function pollShotcaller() {
-  try { SC = { loading: false, data: await api('/api/shotcaller/status'), error: '' }; }
-  catch (e) { SC = { loading: false, data: null, error: e.message }; }
+  const serial=++scPollSerial;
+  const previous=SC,start=Date.now();
+  try { const data=await api('/api/shotcaller/status');if(serial!==scPollSerial)return;SC={loading:false,data,error:'',receivedAt:new Date().toISOString(),requestMs:Date.now()-start}; }
+  catch (e) { if(serial!==scPollSerial)return;SC={...SC,loading:false,error:e.message}; }
+  scObserve(previous,SC);
   const editingSetup=UI.scTab==='setup' && document.querySelector('.sc-setup-panel .sc-start-form');
   if (route().page === 'shotcaller' && !$('#dlg').open && !editingSetup) render();
 }
@@ -61,8 +74,8 @@ function scPageHeader() {
  return `<header class="page-head"><div><div class="sc-eyebrow">GUILD VOICE · FOCUSED CONSOLE</div><h1>Shotcaller</h1><p>Live voice control for your guild.</p></div></header>`;
 }
 function scTabs() {
- const setup=UI.scTab==='setup';
- return `<nav class="sc-console-tabs" aria-label="Shotcaller sections"><button data-act="sc-tab" data-tab="session" class="${setup?'':'active'}" aria-pressed="${!setup}">${navIcon('shotcaller')} Session</button><button data-act="sc-tab" data-tab="setup" class="${setup?'active':''}" aria-pressed="${setup}">${navIcon('admin')} Session setup</button><span>Setup applies to the next session</span></nav>`;
+ const selected=UI.scTab || 'session';
+ return `<nav class="sc-console-tabs" aria-label="Shotcaller sections">${[['session','Session','shotcaller'],['setup','Session setup','admin'],['status','System status','audit']].map(([id,label,icon])=>`<button type="button" data-act="sc-tab" data-tab="${id}" class="${selected===id?'active':''}" aria-pressed="${selected===id}">${navIcon(icon)} ${label}</button>`).join('')}<span>${selected==='status'?'Read-only diagnostics':'Setup applies to the next session'}</span></nav>`;
 }
 function scCallerList(ids,removeAct) {
  return ids.length?`<div class="sc-caller-list">${ids.map(id=>`<div class="sc-caller-person"><span class="sc-initials" aria-hidden="true">${esc(scName(id).slice(0,2).toUpperCase())}</span><strong>${esc(scName(id))}</strong><button class="btn sm sc-remove" data-act="${removeAct}" data-id="${esc(id)}" aria-label="Remove ${esc(scName(id))}">×</button></div>`).join('')}</div>`:'<p class="sc-secondary">No callers selected</p>';
@@ -80,10 +93,14 @@ function scSessionConsole(d={},state='inactive') {
 function viewShotcaller() {
  if(!isOfficer())return '<div class="empty">Officers only.</div>';
  const header=scPageHeader();
- if(!S.cfg.shotcallerOn)return `<section class="sc-workspace">${header}<div class="panel sc-message"><h2>Shotcaller is not connected</h2><p>Configure the Shotcaller connection in the server settings to enable voice controls.</p></div></section>`;
+ if(UI.scTab==='status')return `<section class="sc-workspace">${header}${scTabs()}${scSystemStatus()}</section>`;
+ if(!S.cfg.shotcallerOn)return `<section class="sc-workspace">${header}${scTabs()}<div class="panel sc-message"><h2>Shotcaller is not connected</h2><p>Configure the Shotcaller connection in the server settings to enable voice controls.</p></div></section>`;
  if(scStarting)return `<section class="sc-workspace">${header}${scTabs()}${scSessionConsole({},'starting')}</section>`;
- if(SC.loading)return `<section class="sc-workspace">${header}<div class="sc-message" role="status">Loading voice session…</div></section>`;
- if(SC.error)return `<section class="sc-workspace">${header}<div class="panel sc-message"><h2>Unable to load voice session</h2><p>${esc(SC.error)}</p><button class="btn" data-act="sc-retry">Try again</button></div></section>`;
+ if(SC.loading)return `<section class="sc-workspace">${header}${scTabs()}<div class="sc-message" role="status">Loading voice session…</div></section>`;
+ if(SC.error)return `<section class="sc-workspace">${header}${scTabs()}<div class="panel sc-message"><h2>Unable to load voice session</h2><p>${esc(SC.error)}</p><button class="btn" data-act="sc-retry">Try again</button></div></section>`;
+ const phase=SC.data?.sessionState || SC.data?.diagnostics?.sessionState;
+ if(phase==='starting')return scStartingPage();
+ if(['stopping','stop-failed'].includes(phase))return `<section class="sc-workspace">${header}${scTabs()}<div class="panel sc-message"><h2>${phase==='stopping'?'Stopping session…':'Session cleanup needs attention'}</h2><p>New sessions stay locked until voice connections and cleanup are finished.</p>${phase==='stop-failed'?'<button class="btn" data-act="sc-stop">Retry stop</button>':''}</div></section>`;
  if(UI.scTab==='setup')return `<section class="sc-workspace">${header}${scTabs()}<section class="sc-setup-panel"><h2>Next session setup</h2><p>These settings apply to the next session you start here. The current session stays unchanged.</p>${scSetupChannels?scStartForm(scSetupChannels,true):`<div class="sc-message" role="status">${scSetupLoading?'Loading voice channels…':'<button class="btn" data-act="sc-load-setup">Load voice channels</button>'}</div>`}</section></section>`;
  return SC.data?.active?scActivePage(SC.data):scInactivePage();
 }
@@ -91,11 +108,33 @@ function scActivePage(d) { return `<section class="sc-workspace">${scPageHeader(
 function scStartingPage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole({},'starting')}</section>`; }
 function scInactivePage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole({},'inactive')}</section>`; }
 VIEWS.shotcaller=()=>viewShotcaller();
-ACTIONS['sc-retry']=()=>pollShotcaller();
+let scStatusRefreshing=false;
+ACTIONS['sc-retry']=async el=>{if(scStatusRefreshing)return;scStatusRefreshing=true;if(el)el.disabled=true;try{await pollShotcaller();}finally{scStatusRefreshing=false;if(el)el.disabled=false;}};
 ACTIONS['sc-tab']=async(el,d)=>{
- UI.scTab=d.tab==='setup'?'setup':'session';render();
+ UI.scTab=['setup','status'].includes(d.tab)?d.tab:'session';render();
  if(UI.scTab==='setup'&&!scSetupChannels)await ACTIONS['sc-load-setup']();
 };
+
+/* Read-only operational view. A reported channel member count never implies a healthy relay. */
+function scSystemStatus() {
+ const configured=!!S.cfg.shotcallerOn,stale=!!SC.error,d=SC.data || {},diag=d.diagnostics?.schemaVersion===1?d.diagnostics:null;
+ const number=value=>typeof value==='number' && Number.isFinite(value) && value>=0?value:null;
+ const n=value=>number(value)===null?'Not reported':esc(String(Math.round(value)));
+ const ms=value=>number(value)===null?'Not reported':n(value)+' ms';
+ const date=value=>{const x=new Date(value);return value && Number.isFinite(x.getTime())?esc(x.toLocaleString('en-GB')):'No successful update yet';};
+ const uptime=value=>number(value)===null?'Not reported':`${Math.floor(value/3600)}h ${Math.floor(value%3600/60)}m`;
+ const badge=(text,kind='unknown')=>`<span class="sc-status-badge is-${kind}">${esc(text)}</span>`;
+ const gateway=value=>value===true?badge('Online','ok'):value===false?badge('Offline','bad'):badge('Not reported');
+ const voice=value=>value?badge(value,value==='ready'?'ok':['destroyed','disconnected'].includes(value)?'bad':'warn'):badge(diag && !d.active?'No session':'Not reported');
+ const parties=Array.isArray(d.parties)?d.parties:[],relays=Array.isArray(diag?.relays)?diag.relays:[];
+ const ready=relays.filter(r=>r.voiceState==='ready' && r.gatewayReady===true).length;
+ const humans=parties.reduce((sum,p)=>sum+Math.max(0,Number(p.connected)||0),0);
+ const apiState=!configured?'Not configured':SC.loading?'Checking':stale?'Unreachable':SC.receivedAt?'Responding':'Not checked';
+ const metric=(label,value,detail)=>`<article class="sc-status-metric"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></article>`;
+ const row=(name,bot,channel,rejoins,player)=>`<tr><th scope="row"><strong>${esc(name)}</strong>${bot?.name?`<small>${esc(bot.name)}</small>`:''}</th><td>${esc(channel || '—')}</td><td>${gateway(bot?.gatewayReady)}</td><td>${voice(bot?.voiceState)}</td><td>${ms(bot?.gatewayPingMs)}</td><td>${rejoins===null?'—':n(rejoins)}</td><td>${esc(player || 'Not reported')}</td></tr>`;
+ const relayRows=diag?relays.map(r=>row('Relay '+r.index,r,parties.find(p=>p.channelId===r.channelId)?.name || r.channelId,r.rejoinAttempts,r.playerState)).join(''):parties.map((p,i)=>row('Relay '+(i+1),null,p.name,null,null)).join('');
+ return `<section class="sc-system-status"><div class="sc-section-heading"><div><h2>System status</h2><p class="sc-secondary">Read-only health and connection information.</p></div><button type="button" class="btn" data-act="sc-retry" ${!configured || scStatusRefreshing?'disabled':''}>Refresh status</button></div>${!configured?'<div class="sc-status-notice">Configure the existing Shotcaller integration to receive status updates.</div>':''}${stale && configured?`<div class="sc-status-notice is-error" role="status"><strong>Control API unavailable.</strong> ${esc(SC.error)}${SC.data?' Values below are from the last successful response; they are not live.':''}</div>`:''}${!diag?'<div class="sc-status-notice">This bot does not report detailed telemetry yet. Session and channel data remain available; individual bot connections, gateway ping and process metrics are not inferred. Install the optional status addon to report them.</div>':''}<div class="sc-status-metrics">${metric('Control API',apiState,'GuildHub → Shotcaller control API')}${metric('Session',!SC.data?'Not reported':['starting','stopping','stop-failed'].includes(d.sessionState || diag?.sessionState)?(d.sessionState || diag.sessionState):d.active?(d.muted?'Active · muted':'Active'):'Inactive',stale?'Last known state':'Reported session state')}${metric('Relay voice connections',diag&&d.active?ready+' / '+(number(diag.expectedRelays)??relays.length)+' ready':'Not reported','Requires gateway online and voice ready')}${metric('People in party channels',SC.data?String(humans):'Not reported','Human members; excludes bots')}</div><section class="panel sc-status-panel"><div class="sc-section-heading"><h2>Bots & voice connections</h2>${badge(stale?'Last known snapshot':diag?'Reported telemetry':'Limited telemetry',stale?'warn':'unknown')}</div><div class="sc-status-table-wrap"><table class="sc-status-table"><thead><tr><th>Bot</th><th>Voice channel</th><th>Discord gateway</th><th>Voice connection</th><th>Gateway ping</th><th>Rejoin attempts</th><th>Audio player</th></tr></thead><tbody>${row('Main bot',diag?.mainBot,d.active?parties[0]?.name:null,null,null)}${relayRows}</tbody></table></div>${!d.active?'<p class="sc-secondary">No active session relay connections are reported. Idle bots are not assumed to be offline.</p>':''}<p class="sc-secondary">Gateway ping is a Discord connection metric, not end-to-end speech delay. An idle audio player is normal when nobody is speaking.</p></section><div class="sc-status-bottom"><section class="panel sc-status-panel"><h2>Process & updates</h2><dl class="sc-status-facts"><div><dt>Bot process uptime</dt><dd>${uptime(diag?.uptimeSeconds)}</dd></div><div><dt>Bot memory (RSS)</dt><dd>${number(diag?.memoryRssMiB)===null?'Not reported':n(diag.memoryRssMiB)+' MiB'}</dd></div><div><dt>Configured relay tokens</dt><dd>${n(diag?.configuredRelays)}</dd></div><div><dt>Last successful update</dt><dd>${date(SC.receivedAt)}</dd></div><div><dt>Bot snapshot time</dt><dd>${diag?date(diag.sampledAt):'Not reported'}</dd></div><div><dt>Status request (HTTP)</dt><dd>${ms(SC.requestMs)}</dd></div><div><dt>Voice transmission delay</dt><dd>Not measured</dd></div></dl><p class="sc-secondary">Refreshes every 5 seconds while this page is open. The server may briefly reuse a cached response. HTTP request time includes the proxy/cache and does not measure voice latency.</p></section><section class="panel sc-status-panel"><h2>Recent observations</h2><p class="sc-secondary">Status changes observed in this browser, not bot logs.</p><ol class="sc-status-observations">${scStatusEvents.map(event=>`<li><time>${date(event.at)}</time><span>${esc(event.message)}</span></li>`).join('') || '<li>No status changes observed yet.</li>'}</ol></section></div></section>`;
+}
 ACTIONS['sc-load-setup']=async()=>{
  if(scSetupLoading)return;scSetupLoading=true;render();
  try{scSetupChannels=(await api('/api/shotcaller/voice-channels')).channels||[];}
@@ -112,10 +151,10 @@ ACTIONS['sc-mute']=async()=>{
  finally{scMutePending=null;await pollShotcaller();}
 };
 ACTIONS['sc-stop']=async()=>{
- if(!SC.data?.active||scStopping)return;
+ if((!SC.data?.active && !['stopping','stop-failed'].includes(SC.data?.sessionState))||scStopping)return;
  if(!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.'))return;
- scStopping=true;render();
- try{await scAct(()=>api('/api/shotcaller/stop','POST'),'Shotcaller session stopped');}
+ scStopping=true;scPollSerial++;render();
+ try{await scAct(()=>api('/api/shotcaller/stop','POST',{sessionId:SC.data?.sessionId}),'Shotcaller session stopped');}
  finally{scStopping=false;render();}
 };
 // Start dialog: ported from the approved mockup (voice channel / mode / voice-channel-setup / dedicated caller).

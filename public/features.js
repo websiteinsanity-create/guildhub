@@ -1144,17 +1144,19 @@ function attVoiceControls(ev) {
       </div>
     </div>
     ${running && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
+    ${vt?.incomplete?'<div class="att-sect att-warn">Tracking incomplete. Review attendance or run Track again; missing players are not finalized as no-shows.</div>':''}
+    ${vt?.lastError && running?`<div class="att-sect att-warn">${esc(vt.lastError)}</div>`:''}
     <div class="att-sect att-action">
       ${running
         ? `<button class="btn att-running-btn${settled}" disabled><span class="sc-spinner"></span> Running - check ${checksDone + 1} of ${checksTotal}</button>
            <button class="btn sm" data-act="voicetrack-finish" data-id="${ev.id}" style="margin-left:6px">Finish tracking now</button>`
         : `<button class="btn sc-start-btn" data-act="att-start" data-id="${ev.id}">▶ Start tracking</button>
-             ${finished ? '<div class="muted small att-save-hint">✓ Finished tracking. Open the next event above and repeat the cycle whenever you\'re ready - no need to restart the bot.</div>' : ''}`}
+             ${finished && !vt?.incomplete ? '<div class="muted small att-save-hint">✓ Finished tracking. Open the next event above and repeat the cycle whenever you\'re ready - no need to restart the bot.</div>' : ''}`}
     </div>
     ${running ? `<div class="att-sect"><div class="sc-data-grid">
         ${dataItem(0, 'Players tracked', live.trackedCount)}
-        ${dataItem(1, 'Deafened', live.deafenedCount)}
-        ${dataItem(2, 'Did not show up', live.noShowCount)}
+        ${dataItem(1, 'Deafened', live.deafenedCount ?? 'Unknown')}
+        ${dataItem(2, 'Not yet seen', live.noShowCount)}
       </div></div>` : ''}`;
 }
 // PIN mode's counterpart to attVoiceControls above - used to be a dead end here ("the PIN lives on the
