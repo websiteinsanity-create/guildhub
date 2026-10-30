@@ -7,6 +7,8 @@
 // and SHOTCALLER_API_KEY are both set - DISCORD_GUILD_ID is reused from the existing Discord config, since
 // Guild Hall already knows its own Discord server and there is no reason to ask for that twice.
 
+const {randomUUID}=require("node:crypto");
+const {identity:sessionIdentity,sessionState}=require("./voice-session-identity");
 module.exports = function install(ctx) {
   const { route, need, HttpError, save, audit, shotcaller, findMember, findEvent, eventFor, setAttended, partyIsPlaceholder, tickHooks } = ctx;
   const db = () => ctx.db;
@@ -73,13 +75,38 @@ module.exports = function install(ctx) {
   // overlapping ones into a single outbound call. A failed call is never cached - the next caller (or the next
   // tick) tries again fresh rather than being stuck repeating a stale error.
   const SESSION_CACHE_MS = Number(process.env.SHOTCALLER_SESSION_CACHE_MS || 3000);   // overridable for tests only, same pattern as VOICE_POLL_INTERVAL_MS
-  let sessionCache = null;        // { at, promise } | null
-  function cachedSession() {
-    const now = Date.now();
-    if (sessionCache && now - sessionCache.at < SESSION_CACHE_MS) return sessionCache.promise;
-    const promise = callSession('').catch((e) => { sessionCache = null; throw e; });
-    sessionCache = { at: now, promise };
-    return promise;
+  let sessionCache=null,cacheGeneration=0;
+  function invalidateSession(){cacheGeneration++;sessionCache=null;}
+  function cachedSession(){
+    const now=Date.now();
+    if(sessionCache && (sessionCache.pending || now-sessionCache.at<SESSION_CACHE_MS))return sessionCache.promise;
+    const entry={at:now,pending:true,generation:cacheGeneration};
+    entry.promise=callSession('').then(data=>{
+      entry.pending=false;entry.at=Date.now();
+      if(entry.generation!==cacheGeneration)return cachedSession();
+      return data;
+    },error=>{if(sessionCache===entry)sessionCache=null;throw error;});
+    sessionCache=entry;return entry.promise;
+  }
+  async function waitForIdle(){
+    const deadline=Date.now()+60000;
+    while(true){const status=await callSession('');if(sessionState(status)==='inactive')return status;
+      need(sessionState(status)!=='stop-failed',502,'Shotcaller cleanup failed. Retry stopping the session.');
+      need(Date.now()<deadline,504,'Shotcaller is still stopping. Check System status before retrying.');
+      await new Promise(resolve=>setTimeout(resolve,200));
+    }
+  }
+  function closeSessionTracks(binding,reason){
+    for(const ev of db().events){const vt=ev.voiceTracking;if(vt?.active && (!binding || vt.sessionBinding===binding))finalizeTrack(ev,null,{reason,incomplete:vt.checksDone<VOICE_CHECKS_TOTAL});}
+  }
+  async function stopOwnedSession(binding){
+    const current=await callSession('');
+    if(!current.active && sessionState(current)==='inactive')return false;
+    if(binding && sessionIdentity(current)!==binding)return false;
+    invalidateSession();
+    await callSession('/stop','POST',current.sessionId?{sessionId:current.sessionId}:{},60000);
+    await waitForIdle();invalidateSession();
+    closeSessionTracks(binding,'session-stopped');return true;
   }
 
   // Starting a session creates channels and logs in relay bots ONE AT A TIME, not in parallel (see the bot's
@@ -112,41 +139,37 @@ module.exports = function install(ctx) {
     const callerId = dedicatedCallerId ? String(dedicatedCallerId) : null;
     if (callerId) checkCandidates([callerId]);
     const names = Array.isArray(partyNames) ? partyNames.map((x) => (x == null ? null : String(x).slice(0, 80))) : [];
-    if (autoReplace) {
-      let current = null;
-      try { current = await callSession(''); } catch { /* couldn't read status - try to start anyway, same as a fresh guild */ }
-      if (current && current.active) { try { await callSession('/stop', 'POST'); } catch { /* best effort - /start below still reports a real problem */ } }
+    if(autoReplace){
+      const current=await callSession('');
+      need(!['starting','stopping','stop-failed'].includes(sessionState(current)),409,'Shotcaller is starting or stopping. Wait before replacing it.');
+      if(current.active)await stopOwnedSession(sessionIdentity(current));
     }
-    return callSession('/start', 'POST', { count, channelId: chId, dedicatedCallerId: callerId, partyNames: names }, START_TIMEOUT_MS(count));
+    invalidateSession();
+    try{
+      const result=await callSession('/start','POST',{count,channelId:chId,dedicatedCallerId:callerId,partyNames:names},START_TIMEOUT_MS(count));
+      for(const ev of db().events)if(ev.voiceTracking?.active && ev.voiceTracking.sessionBinding!==sessionIdentity(result))finalizeTrack(ev,null,{reason:'session-replaced',incomplete:true});
+      return result;
+    }finally{invalidateSession();}
   }
 
   // ---------------------------------------------------------------- voice-presence attendance
-  // Started only from server-community.js's post-parties route, right after a Shotcaller session starts
-  // successfully for a specific event - never from the standalone Start panel (server-shotcaller's own
-  // /api/shotcaller/start), which isn't tied to any one event or its party line-up, so it has nothing to match
-  // voice presence against. `started` is the bot's own /session/start response (its `parties[]`, in the same
-  // order the bot created them); `realRest` is the exact same filtered, ordered list of ev.parties the caller
-  // already built to name those channels in the first place - reusing it here instead of recomputing it is what
-  // keeps this lined up with the real channel ids even when some of ev.parties are placeholders skipped
-  // entirely from the session.
-  // The dashboard's "Attendance Tracking" card (public/features.js attendanceTrackPanel) shows a track as
-  // "running" while voiceTracking.active is true, and as "finished, not yet saved" for the 15 minutes after -
-  // the window in which an officer can hit "Save track" by hand before it saves itself. One in-memory timer
-  // per event is all that needs tracking (an event can only ever be mid-track once at a time) - lost on a
-  // server restart, same as any other setTimeout, but that only ever widens the window to "whenever the
-  // server next notices it's overdue", never loses the attendance itself (ev.attended already persisted the
-  // moment each sighting was confirmed - "saving" a track is a bookkeeping close-out, not where the data lives).
-  // A track is now a short, bounded thing: exactly VOICE_CHECKS_TOTAL checks, VOICE_POLL_MS apart, starting
-  // the moment tracking begins (by hand or automatically) - no open-ended watch, no "awaiting save" window.
-  // Anyone seen in ANY one of those checks counts as attended (a plain union across the checks, not a
-  // repeat-sighting requirement) - a deliberate trade: fast and simple, at the cost of the old rolling-window
-  // protection against a momentary connection blip being credited. checkTimers holds, per event, the timer for
-  // whichever check hasn't fired yet (either the next of the 3, or - before the very first one - the wait for
-  // voiceTrackStartOffsetMinutes to open, if tracking began before that gate was due to open).
+  // Each event run is independent of party assignments and owns a unique runId. Several
+  // consecutive events can reuse one unchanged Shotcaller session: finishing a track never
+  // stops audio or the bot. Session identity only prevents a different session leaking in.
+  // Three successful checks, 10 seconds apart, collect a persisted union of sightings.
+  // Transport failures retry without consuming checks; interrupted runs stay incomplete.
+  // The persisted gate/run identity lets the watchdog resume safely after a GuildHub restart.
   const checkTimers = new Map();
   function clearCheckTimer(evId) {
     const t = checkTimers.get(evId);
     if (t) { clearTimeout(t); checkTimers.delete(evId); }
+  }
+  function cancelVoiceTracking(ev,reason='manual-correction'){
+    clearCheckTimer(ev.id);
+    const vt=ev.voiceTracking;
+    if(!vt?.active)return;
+    vt.active=false;vt.finishedAt=Date.now();vt.incomplete=false;vt.finishReason=reason;
+    // Pending checks see the inactive run and cannot write over the manual result.
   }
   function finishVoiceTracking(ev, user) {
     if (!ev.voiceTracking || ev.voiceTracking.finishedAt) return;
@@ -161,14 +184,16 @@ module.exports = function install(ctx) {
   // Shotcaller session itself ended early, because an officer hit "Finish tracking now" by hand, or because a
   // new track elsewhere just preempted this one. Safe to call more than once (finishVoiceTracking itself is a
   // no-op once finishedAt is set) and safe to call on an event with no voiceTracking at all.
-  function finalizeTrack(ev, user) {
-    const vt = ev.voiceTracking;
-    if (vt && !vt.finishedAt) {
-      const newlyCredited = (vt.sessionSeen || []).filter((id) => !ev.attended.includes(id));
-      if (newlyCredited.length) setAttended(ev, [...ev.attended, ...newlyCredited], { mode: 'add', by: 'Voice tracking (automatic)' });
-      vt.active = false;
+  function finalizeTrack(ev,user,{reason='completed',incomplete=false}={}){
+    const vt=ev.voiceTracking;if(!vt || vt.finishedAt)return;
+    const wasTracked=!!ev.attendanceTracked;
+    if((vt.checksDone || 0)>0){
+      const combined=[...new Set([...(ev.attended || []),...(vt.sessionSeen || [])])];
+      setAttended(ev,combined,{mode:'add',by:'Voice tracking (automatic)',skipReevaluate:incomplete});
+      if(incomplete && !wasTracked)ev.attendanceTracked=false;
     }
-    finishVoiceTracking(ev, user);
+    vt.active=false;vt.incomplete=incomplete;vt.finishReason=reason;
+    finishVoiceTracking(ev,user);
   }
   // Some Shotcaller bot builds only report a per-party headcount (parties[].connected), not who specifically
   // is in each channel (no connectedStates or connectedUserIds at all) - enough for party management, but
@@ -179,91 +204,39 @@ module.exports = function install(ctx) {
     const parties = (status && status.parties) || [];
     return parties.length > 0 && parties.every((p) => !Array.isArray(p.connectedStates) && !Array.isArray(p.connectedUserIds));
   }
-  // channelId is all pollVoiceAttendance itself needs any more (it now credits anyone present in ANY of
-  // these channels, not specifically this party's own members - see pollVoiceAttendance below); members is
-  // kept purely for the dashboard's live deafened-count readout (/voice-track/live), which still only cares
-  // about the players who were actually part of the original line-up when tracking began.
-  //
-  // realRest is recomputed fresh from ev.parties at call time - for the combined post-parties flow that's the
-  // exact same array that was just used to start the session, so it lines up with started.parties by position
-  // with no room for drift. But a party's channel is still worked out this positional way whenever there is
-  // no frozen snapshot to fall back on (see snapshotVoiceSession and its use in beginVoiceTracking below) - if
-  // a party has a leader, matching the bot's own echoed-back "<leader>'s Party" name first (falling back to
-  // position only for whatever's left) still helps in that case, but is no help at all for a guild that
-  // never assigns leaders when using voice tracking - which is exactly when the snapshot matters most.
+  // Retain the legacy metadata field for stored events/API compatibility. Attendance and
+  // live counters use every reported session channel, without party/leader/name matching.
   function computePartyChannels(ev, started, realRest) {
-    const expectedNames = realRest.map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
-    const botRest = started.parties.slice(1);
-    const usedBot = new Set(), usedReal = new Set();
-    const matched = new Array(realRest.length).fill(null);
-    for (let i = 0; i < expectedNames.length; i++) {
-      if (!expectedNames[i]) continue;
-      const j = botRest.findIndex((bp, jj) => !usedBot.has(jj) && bp && bp.name === expectedNames[i]);
-      if (j >= 0) { matched[i] = botRest[j]; usedBot.add(j); usedReal.add(i); }
-    }
-    let nextFree = 0;
-    for (let i = 0; i < realRest.length; i++) {
-      if (usedReal.has(i)) continue;
-      while (nextFree < botRest.length && usedBot.has(nextFree)) nextFree++;
-      if (nextFree < botRest.length) { matched[i] = botRest[nextFree]; usedBot.add(nextFree); nextFree++; }
-    }
-    return [{ channelId: started.parties[0] && started.parties[0].channelId, members: [...ev.parties[0].members] }]
-      .concat(realRest.map((p, i) => ({ channelId: matched[i] && matched[i].channelId, members: [...p.members] })))
-      .filter((pc) => pc.channelId);
+    return (started.parties || []).filter(p=>p?.channelId).map(p=>({channelId:p.channelId,members:[]}));
   }
-  const liveChannelKey = (started) => started.parties.map((p) => p && p.channelId).filter(Boolean).join(',');
-  // Freezes this event's current party-to-channel layout the moment Shotcaller is actually told to start for
-  // it - from the manual "Start Shotcaller session" dialog (when it was set up "from an event") and from the
-  // combined post-parties flow, whether or not tracking begins immediately. Without this, "Start tracking
-  // now" (clicked separately, maybe much later) and "Track again" would only ever have ev.parties AS IT IS
-  // AT THAT LATER MOMENT to work from - fine if nothing changed, wrong if a party was reassigned by voice or
-  // chat instead of re-posting the lineup, since a party's position no longer means what it meant when the
-  // channels were actually created. Keyed by the live channel set itself (channelIds are freshly created by
-  // the bot every session, so a genuinely new session can never collide with an old snapshot by accident).
+  const liveChannelKey = (started) => started.parties.map(p=>p?.channelId).filter(Boolean).join(',');
   function snapshotVoiceSession(ev, started, realRest) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice' || !started || !Array.isArray(started.parties)) return;
-    ev.voiceSessionSnapshot = { channelKey: liveChannelKey(started), partyChannels: computePartyChannels(ev, started, realRest) };
+    ev.voiceSessionSnapshot = {sessionBinding:sessionIdentity(started),channelKey:liveChannelKey(started),partyChannels:computePartyChannels(ev,started,realRest)};
   }
   function beginVoiceTracking(ev, started, realRest) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
     if (!started || !Array.isArray(started.parties)) return;
-    // Only one Shotcaller session can ever be active for this guild at a time (starting a new one stops
-    // anything old first - see startSession's autoReplace) - so any OTHER event still flagged as "being
-    // tracked" right now is stale the moment this one starts. Close it out (crediting whatever it already
-    // collected) rather than leave it dangling or risk crediting the wrong event later from a channel id the
-    // new session happens to reuse (the anchor channel, especially, is very often the same one every time).
-    for (const other of db().events) {
-      if (other.id !== ev.id && other.voiceTracking && other.voiceTracking.active) finalizeTrack(other, null);
-    }
-    // The frozen snapshot (above) wins whenever it's for THIS exact live session (same channel set) - it's
-    // the authoritative record of what this event's parties looked like the moment the session actually
-    // started, immune to anything done to ev.parties since. Recompute fresh only when there is no snapshot
-    // for this session (an officer started Shotcaller some other way - the generic dialog with no event
-    // chosen, say - so there was never anything to freeze).
-    const snap = ev.voiceSessionSnapshot;
-    const partyChannels = (snap && snap.channelKey === liveChannelKey(started)) ? snap.partyChannels : computePartyChannels(ev, started, realRest);
-    ev.voiceTracking = { active: true, partyChannels, seen: {}, sessionSeen: [], channels: [], checksDone: 0, startedAt: Date.now(), finishedAt: null };
+    need(started.active,409,'Shotcaller must be active before tracking begins.');
+    const snap=ev.voiceSessionSnapshot;
+    const partyChannels=(snap && snap.sessionBinding===sessionIdentity(started))?snap.partyChannels:computePartyChannels(ev,started,realRest);
+    // Validate the new run fully before touching another event's active tracking.
+    need(sessionIdentity(started),409,'Shotcaller did not report a session identity or voice channels.');
+    for(const other of db().events)if(other.id!==ev.id && other.voiceTracking?.active)finalizeTrack(other,null,{reason:'another-event',incomplete:other.voiceTracking.checksDone<VOICE_CHECKS_TOTAL});
+    clearCheckTimer(ev.id);
+    const offsetMs=(Number(ev.voiceTrackStartOffsetMinutes ?? db().settings.voiceTrackStartOffsetMinutes)||0)*60000;
+    const gateAt=Date.parse(ev.start)+offsetMs;
+    ev.voiceTracking={runId:randomUUID(),sessionBinding:sessionIdentity(started),legacyIdentity:!started.sessionId,gateAt,active:true,partyChannels,seen:{},sessionSeen:[],channels:[],checksDone:0,startedAt:Date.now(),finishedAt:null};
+
     if (presenceUnsupported(started)) {
       ev.voiceTracking.presenceUnsupported = true;
       audit({ name: 'Guild Hall' }, 'event.voicetrack.unsupported', { type: 'event', id: ev.id, name: ev.title },
         `Voice-attendance tracking started for "${ev.title}", but the Shotcaller bot in use only reports a headcount per channel, not who is in it - nobody will be credited until the bot reports per-user voice presence.`);
     }
-    clearCheckTimer(ev.id);
     save();
-    // voiceTrackStartOffsetMinutes still gates WHEN the 3 checks are allowed to begin (unchanged idea from
-    // before - "don't credit people milling around before the event's own start/lead-time"), it just now
-    // delays the whole short check-run rather than delaying crediting within an otherwise-endless poll. The
-    // very first check reuses the session status we already have in hand (started) instead of asking the bot
-    // again for something we were just told.
-    const settings = db().settings;
-    const offsetMs = (Number(ev.voiceTrackStartOffsetMinutes ?? settings.voiceTrackStartOffsetMinutes) || 0) * 60000;
-    const gateAt = Date.parse(ev.start) + offsetMs;
-    const now = Date.now();
-    if (now >= gateAt) {
-      runCheckSafe(ev.id, started);
-    } else {
-      checkTimers.set(ev.id, setTimeout(() => { runCheckSafe(ev.id, null); }, gateAt - now));
-    }
+    if(Date.now()>=gateAt)runCheckSafe(ev.id,started,ev.voiceTracking.runId);
+    else scheduleCheck(ev,gateAt-Date.now());
+
   }
 
   // The manual counterpart to the automatic start above - for when an officer switched "automatic tracking"
@@ -278,9 +251,10 @@ module.exports = function install(ctx) {
     const ev = findEvent(params.id);
     need(ev, 404, 'Event not found.');
     need(ctx.effectiveAttendanceMode(ev) === 'voice', 400, 'This event is not using voice tracking.');
+    need(!ev.voiceTracking?.active,409,'Tracking is already running. Use Track again to restart it.');
     const status = await callSession('');
     need(status && status.active, 409, 'Shotcaller is not running right now - start it first, then come back and start tracking.');
-    const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+    const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
     beginVoiceTracking(ev, status, realRest);
     audit(user, 'event.voicetrack.start', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually started voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
@@ -305,7 +279,7 @@ module.exports = function install(ctx) {
     ev.autoAttended = undo ? undo.autoAttended : false;
     ev.attendanceTracked = undo ? (undo.attendanceTracked === undefined ? false : undo.attendanceTracked) : false;
     ev.attendanceUndo = null;
-    const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+    const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
     beginVoiceTracking(ev, status, realRest);
     audit(user, 'event.voicetrack.restart', { type: 'event', id: ev.id, name: ev.title }, `${user.name} reset and restarted voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
@@ -334,9 +308,11 @@ module.exports = function install(ctx) {
     const ev = findEvent(params.id);
     need(ev, 404, 'Event not found.');
     const vt = ev.voiceTracking;
-    const trackedCount = (ev.attended || []).length;
-    const expectedIds = new Set(ev.parties.filter((p) => !partyIsPlaceholder(p)).flatMap((p) => p.members));
-    const noShowCount = [...expectedIds].filter((mid) => (ev.rsvps[mid] === 'yes') && !ev.attended.includes(mid)).length;
+    const confirmedIds=new Set([...(ev.attended || []),...(vt?.sessionSeen || [])]);
+    const trackedCount=confirmedIds.size;
+    const eligibleMembers=db().members.filter(m=>m.active || (m.mercenary && m.mercFor===ev.id));
+    const expectedIds=new Set(eligibleMembers.map(m=>m.id));
+    const noShowCount = [...expectedIds].filter((mid) => (ev.rsvps[mid] === 'yes') && !confirmedIds.has(mid)).length;
     let deafenedCount = 0;
     if (vt && vt.active) {
       try {
@@ -351,15 +327,15 @@ module.exports = function install(ctx) {
             try {
               const r = await callBot(`/voice-presence?channels=${[...evExtraIds].map(encodeURIComponent).join(',')}`);
               extraStates = (r.channels || []).filter((c) => c.found).flatMap((c) => c.connectedStates || []);
-            } catch { /* extra channels are a bonus for this readout too */ }
+            } catch (error) { throw error; /* unavailable extra-channel presence makes the count unknown */ }
           }
-          const memberIds = new Set(vt.partyChannels.flatMap((p) => p.members));
+          const memberIds = new Set(eligibleMembers.map(m=>m.id));
           const ownerIsDeaf = new Map();
-          for (const pc of vt.partyChannels) for (const s of byChannel.get(pc.channelId) || []) if (s.deaf) ownerIsDeaf.set(s.id, true);
+          for (const states of byChannel.values()) for(const s of states)if(s.deaf)ownerIsDeaf.set(s.id,true);
           for (const s of extraStates) if (s.deaf) ownerIsDeaf.set(s.id, true);
           for (const mid of memberIds) { const m = findMember(mid); if (m && ownerIsDeaf.get(m.owner)) deafenedCount++; }
         }
-      } catch { /* bot unreachable right now just reads back as 0 - not worth failing the whole panel over */ }
+      } catch { deafenedCount=null; /* unknown is not zero */ }
     }
     return { active: !!(vt && vt.active), startedAt: (vt && vt.startedAt) || null, finishedAt: (vt && vt.finishedAt) || null, trackedCount, deafenedCount, noShowCount, presenceUnsupported: !!(vt && vt.presenceUnsupported) };
   }, { officer: true });
@@ -378,15 +354,24 @@ module.exports = function install(ctx) {
   // its own fresh (cached) read. Re-fetches the event fresh after each await, the same defensive pattern used
   // throughout this file, in case "Track again" or another event's track replaced this one's voiceTracking
   // object entirely while this check was waiting on the bot.
-  async function runCheck(evId, knownStatus) {
+  async function runCheck(evId,knownStatus,run) {
     let ev = findEvent(evId);
-    if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt) return;
+    if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt || (run && ev.voiceTracking!==run)) return;
+    if(ev.voiceTracking!==run)return;
+    const gateAt=run.gateAt ?? (Date.parse(ev.start)+(Number(ev.voiceTrackStartOffsetMinutes ?? db().settings.voiceTrackStartOffsetMinutes)||0)*60000);
+    if(Date.now()<gateAt){scheduleCheck(ev,gateAt-Date.now());return;}
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') { finalizeTrack(ev, null); return; }
     let status = knownStatus;
-    if (!status) { try { status = await cachedSession(); } catch { status = null; } }
+    if(!status)status=await cachedSession();
     ev = findEvent(evId);
-    if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt) return;
-    if (!status || !status.active) { finalizeTrack(ev, null); return; } // session ended - nothing more to ever learn, close out now with whatever was collected
+    if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt || (run && ev.voiceTracking!==run)) return;
+    if(ev.voiceTracking!==run)return;
+    if(!status || typeof status.active!=='boolean')throw Error('Invalid Shotcaller status response.');
+    if(['starting','stopping'].includes(sessionState(status)))throw Error('Shotcaller is transitioning; retrying attendance check.');
+    if(!status.active){finalizeTrack(ev,null,{reason:'session-ended',incomplete:run.checksDone<VOICE_CHECKS_TOTAL});return;}
+    if(!run.sessionBinding){finalizeTrack(ev,null,{reason:'identity-missing',incomplete:true});return;}
+    if(sessionIdentity(status)!==run.sessionBinding){finalizeTrack(ev,null,{reason:'session-changed',incomplete:true});return;}
+    if(presenceUnsupported(status))throw Error('Shotcaller does not provide per-user presence.');
     const settings = db().settings;
     const ignoreMuted = !!settings.voiceAttendanceIgnoreMuted;
     const ignoreDeafened = !!settings.voiceAttendanceIgnoreDeafened;
@@ -411,28 +396,19 @@ module.exports = function install(ctx) {
       try {
         const r = await callBot(`/voice-presence?channels=${[...evExtraIds].map(encodeURIComponent).join(',')}`);
         for (const c of r.channels || []) if (c.found) { rawExtraByChannel.set(c.channelId, c.connectedStates || []); extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened)); }
-      } catch { /* extra channels are a bonus, not a reason to skip the party channels below */ }
+      } catch (error) { throw error; /* a partial presence read must not consume a successful check */ }
     }
     let extraNum = 0;
     for (const id of evExtraIds) { extraNum++; if (!channelLabels.has(id)) channelLabels.set(id, `Extra channel ${extraNum}`); }
     ev = findEvent(evId);
-    if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt) return;
+    if (!ev || !ev.voiceTracking || !ev.voiceTracking.active || ev.voiceTracking.finishedAt || (run && ev.voiceTracking!==run)) return;
     // Keep the popup's channel list (id + label + whether it currently has anyone in it) fresh every check -
     // this is what lets "Who got tracked" show an empty channel as empty rather than just omitting it.
     ev.voiceTracking.channels = [...channelLabels.entries()].map(([channelId, label]) => ({
       channelId, label, empty: !(rawByChannel.get(channelId) || rawExtraByChannel.get(channelId) || []).length,
     }));
-    // Every owner currently connected to ANY channel of this live session - every channel the bot actually
-    // reported just now (byChannel, built above from status.parties in full), plus whichever extra channels
-    // apply - regardless of whether ev.voiceTracking.partyChannels' own name/position matching ever managed to
-    // attach a Guild Hall party to that specific channel. partyChannels exists for DISPLAY purposes only (the
-    // dashboard's per-party deafened-count readout, and the "who got tracked" popup's grouping) - it is not,
-    // and must not be, the gate on who gets credited. Matching a channel to a named party can fail or guess
-    // wrong (no leader to match by name, and no snapshot because the session wasn't started tied to this
-    // event) without that ever meaning "stop looking at this channel" - every channel in THIS live session
-    // belongs to this event's track by definition (only one event is ever actively tracked against a given
-    // session at a time - see the "any OTHER event still flagged as active" cleanup in beginVoiceTracking), so
-    // there is no risk of crediting someone from an unrelated session by simply checking all of them.
+    // Credit all eligible owners in this exact session plus configured extra channels.
+    // Party assignments, leaders, RSVP and the legacy partyChannels metadata are irrelevant.
     const sessionOwners = new Set();
     for (const ids of extraPresence.values()) for (const owner of ids) sessionOwners.add(owner);
     for (const ids of byChannel.values()) for (const owner of ids) sessionOwners.add(owner);
@@ -453,7 +429,7 @@ module.exports = function install(ctx) {
     }
     // The "who got tracked" popup's own log: every raw sighting this check, muted/deafened included, for
     // anyone present in ANY of this event's channels (the full live session, same reasoning as sessionOwners
-    // above - not just whichever subset partyChannels' own matching happened to attach a party name to) - not
+    // above) - not
     // just the ones the ignoreMuted/ignoreDeafened settings would actually credit. Reset to {} on every
     // beginVoiceTracking (a fresh ev.voiceTracking object each time), so "Track again" naturally clears it too.
     // credited flips true (and mutedAtCredit/deafenedAtCredit freeze) only for a sighting that actually passed
@@ -485,8 +461,7 @@ module.exports = function install(ctx) {
     if (ev.voiceTracking.checksDone >= VOICE_CHECKS_TOTAL) {
       finalizeTrack(ev, null);
     } else {
-      clearCheckTimer(ev.id);
-      checkTimers.set(ev.id, setTimeout(() => { runCheckSafe(ev.id, null); }, VOICE_CHECK_MS));
+      scheduleCheck(ev,VOICE_CHECK_MS);
       save();
     }
   }
@@ -495,33 +470,32 @@ module.exports = function install(ctx) {
   // ever scheduled the next check and the track sat at "1 of 3" forever. So a failed check is retried a few times
   // and then closed out with whatever was collected, and the watchdog below picks up a track that has no timer
   // at all (after a restart) - both end with the track finishing normally instead of hanging.
-  const checksInFlight = new Set();
-  async function runCheckSafe(evId, knownStatus) {
-    if (checksInFlight.has(evId)) return;
-    checksInFlight.add(evId);
-    try {
-      await runCheck(evId, knownStatus);
-    } catch (e) {
-      console.error('[voice-attendance] check failed:', e);
-      const ev = findEvent(evId);
-      const vt = ev && ev.voiceTracking;
-      if (vt && vt.active && !vt.finishedAt) {
-        vt.checkErrors = (vt.checkErrors || 0) + 1;
-        if (vt.checkErrors >= 5) { finalizeTrack(ev, null); save(); }
-        else { clearCheckTimer(evId); checkTimers.set(evId, setTimeout(() => { runCheckSafe(evId, null); }, VOICE_CHECK_MS)); }
-      }
-    } finally {
-      checksInFlight.delete(evId);
-    }
+  const checksInFlight=new Set();
+  function scheduleCheck(ev,delay){
+    clearCheckTimer(ev.id);const runId=ev.voiceTracking?.runId;
+    const timer=setTimeout(()=>{if(checkTimers.get(ev.id)!==timer)return;checkTimers.delete(ev.id);runCheckSafe(ev.id,null,runId);},Math.max(0,Math.min(delay,2147483647)));
+    checkTimers.set(ev.id,timer);
   }
-  tickHooks.push(async () => {
-    for (const ev of db().events) {
-      const vt = ev.voiceTracking;
-      if (!vt || !vt.active || vt.finishedAt || checkTimers.has(ev.id) || checksInFlight.has(ev.id)) continue;
-      // Active but nothing scheduled and nothing running: the server restarted mid-track (or a timer was lost).
-      // Carry on from where it stopped; runCheck itself closes the track if the session is gone.
-      console.warn(`[voice-attendance] resuming stalled track for event ${ev.id} (${vt.checksDone || 0} of ${VOICE_CHECKS_TOTAL} checks done)`);
-      runCheckSafe(ev.id, null);
+  async function runCheckSafe(evId,knownStatus,expectedRunId){
+    const ev=findEvent(evId),vt=ev?.voiceTracking;
+    if(!vt || !vt.active || vt.finishedAt || (expectedRunId && vt.runId!==expectedRunId) || checksInFlight.has(vt))return;
+    checksInFlight.add(vt);
+    try{await runCheck(evId,knownStatus,vt);if(findEvent(evId)?.voiceTracking===vt)vt.lastError=null;}
+    catch(error){
+      console.error('[voice-attendance] check failed:',error);
+      const current=findEvent(evId);
+      if(current?.voiceTracking===vt && vt.active && !vt.finishedAt){
+        vt.checkErrors=(vt.checkErrors || 0)+1;vt.lastError='Voice presence unavailable; retrying.';
+        if(vt.checkErrors>=5)finalizeTrack(current,null,{reason:'presence-unavailable',incomplete:true});
+        else scheduleCheck(current,VOICE_CHECK_MS);
+        save();
+      }
+    }finally{checksInFlight.delete(vt);}
+  }
+  tickHooks.push(async()=>{
+    for(const ev of db().events){const vt=ev.voiceTracking;if(!vt?.active || vt.finishedAt || checkTimers.has(ev.id) || checksInFlight.has(vt))continue;
+      if(!vt.runId){finalizeTrack(ev,null,{reason:'legacy-run-needs-restart',incomplete:true});continue;}
+      runCheckSafe(ev.id,null,vt.runId);
     }
   });
   // VOICE_POLL_INTERVAL_MS (env var name kept from before this track-model change, for test compatibility) is
@@ -555,65 +529,57 @@ module.exports = function install(ctx) {
 
   route('GET', '/api/admin/voice-test', () => voiceTest || { phase: null }, { officer: true });
 
-  route('POST', '/api/admin/voice-test/start', async ({ body, user }) => {
-    need(!voiceTest || ['ended', 'error'].includes(voiceTest.phase), 409, 'A test is already running - stop it first.');
-    voiceTest = { phase: 'starting', startedAt: Date.now(), trackAt: null, channels: [], error: null, confirmed: [], checksDone: 0, checksTotal: VOICE_CHECKS_TOTAL, nextCheckAt: null };
-    try {
-      const r = await startSession({ channelId: body.channelId, count: 3, partyNames: ['Test channel 2', 'Test channel 3'] });
-      voiceTest.channels = (r.parties || []).map((p) => ({ channelId: p.channelId, name: p.name }));
-      voiceTest.trackAt = Date.now() + VT_TRACK_DELAY_MS;
-      voiceTest.phase = 'waiting';
-      audit(user, 'voicetest.start', { type: 'guild' }, `${user.name} started a voice-attendance test.`);
-    } catch (e) {
-      voiceTest.phase = 'error';
-      voiceTest.error = e.message || 'Could not start Shotcaller.';
-    }
-    return voiceTest;
-  }, { officer: true });
-
-  route('POST', '/api/admin/voice-test/stop', async ({ user }) => {
-    if (voiceTest && ['starting', 'waiting', 'tracking'].includes(voiceTest.phase)) {
-      try { await callSession('/stop', 'POST'); } catch { /* best effort - the test slot is cleared below regardless */ }
-      audit(user, 'voicetest.stop', { type: 'guild' }, `${user.name} stopped the voice-attendance test.`);
-    }
-    voiceTest = null;
-    return { ok: true };
-  }, { officer: true });
-
-  async function pollVoiceTest() {
-    if (!voiceTest) return;
-    if (Date.now() - voiceTest.startedAt > VT_MAX_MS) {                  // forgotten/abandoned - clean up quietly
-      try { await callSession('/stop', 'POST'); } catch { /* already gone, or never really started - nothing to clean up */ }
-      voiceTest = null;
-      return;
-    }
-    if (voiceTest.phase === 'waiting') {
-      if (Date.now() >= voiceTest.trackAt) { voiceTest.phase = 'tracking'; voiceTest.nextCheckAt = Date.now(); }
-      return;
-    }
-    if (voiceTest.phase !== 'tracking') return;
-    if (Date.now() < voiceTest.nextCheckAt) return;                      // not due for the next of the 3 quick checks yet
-    let status;
-    try { status = await cachedSession(); }
-    catch { return; }                                                   // briefly unreachable - this check just learns nothing new, doesn't count against the 3
-    if (!status || !status.active) { voiceTest.phase = 'ended'; return; }   // stopped from elsewhere (Discord command, say)
-    const testIds = new Set(voiceTest.channels.map((c) => c.channelId));
-    const now = Date.now();
-    // A plain union across the test's (at most 3) checks, same as real tracking - seen once, in any one of
-    // them, is enough to be reported confirmed. Already-confirmed testers just get their mute/deaf refreshed.
-    for (const p of status.parties || []) {
-      if (!testIds.has(p.channelId)) continue;
-      for (const s of p.connectedStates || []) {
-        const existing = voiceTest.confirmed.find((c) => c.ownerId === s.id);
-        if (existing) { existing.mute = !!s.mute; existing.deaf = !!s.deaf; }
-        else voiceTest.confirmed.push({ ownerId: s.id, name: vtNameFor(s.id), mute: !!s.mute, deaf: !!s.deaf, confirmedAt: new Date(now).toISOString() });
+  route('POST','/api/admin/voice-test/start',async({body,user})=>{
+    need(!voiceTest || ['ended','error'].includes(voiceTest.phase),409,'A test is already running - stop it first.');
+    const op={runId:randomUUID(),phase:'starting',startedAt:Date.now(),trackAt:null,channels:[],sessionBinding:null,error:null,confirmed:[],checksDone:0,checksTotal:VOICE_CHECKS_TOTAL,nextCheckAt:null,cancelRequested:false};
+    voiceTest=op;
+    const work=(async()=>{
+      try{
+        const result=await startSession({channelId:body.channelId,count:3,partyNames:['Test channel 2','Test channel 3']});
+        op.sessionBinding=sessionIdentity(result);
+        if(op.cancelRequested || voiceTest!==op){await stopOwnedSession(op.sessionBinding);op.phase='ended';return{phase:null,cancelled:true};}
+        op.channels=(result.parties || []).map(p=>({channelId:p.channelId,name:p.name}));
+        op.trackAt=Date.now()+VT_TRACK_DELAY_MS;op.phase='waiting';
+        audit(user,'voicetest.start',{type:'guild'},`${user.name} started a voice-attendance test.`);
+      }catch(error){op.phase='error';op.error=error.message || 'Could not start Shotcaller.';}
+      return voiceTest===op?op:{phase:null};
+    })();
+    Object.defineProperty(op,'done',{value:work,enumerable:false});
+    return work;
+  },{officer:true});
+  route('POST','/api/admin/voice-test/stop',async({user})=>{
+    const op=voiceTest;if(!op)return{ok:true};
+    op.cancelRequested=true;
+    if(op.phase==='starting'){op.phase='stopping';await op.done;}
+    if(op.sessionBinding)await stopOwnedSession(op.sessionBinding);
+    if(voiceTest===op)voiceTest=null;
+    audit(user,'voicetest.stop',{type:'guild'},`${user.name} stopped the voice-attendance test.`);
+    return{ok:true};
+  },{officer:true});
+  const testsInFlight=new Set();
+  async function pollVoiceTest(){
+    const op=voiceTest;if(!op || testsInFlight.has(op))return;
+    testsInFlight.add(op);
+    try{
+      if(Date.now()-op.startedAt>VT_MAX_MS){
+        op.cancelRequested=true;if(op.sessionBinding)await stopOwnedSession(op.sessionBinding);
+        if(voiceTest===op)voiceTest=null;return;
       }
-    }
-    voiceTest.checksDone += 1;
-    if (voiceTest.checksDone >= voiceTest.checksTotal) voiceTest.phase = 'ended';
-    else voiceTest.nextCheckAt = now + VOICE_CHECK_MS;
+      if(op.phase==='waiting'){if(Date.now()>=op.trackAt){op.phase='tracking';op.nextCheckAt=Date.now();}return;}
+      if(op.phase!=='tracking' || Date.now()<op.nextCheckAt)return;
+      let status;try{status=await cachedSession();}catch{return;}
+      if(voiceTest!==op || op.cancelRequested || op.phase!=='tracking')return;
+      if(sessionIdentity(status)!==op.sessionBinding || !status.active){op.phase='ended';op.error='The test session ended or was replaced.';return;}
+      const ids=new Set(op.channels.map(c=>c.channelId)),now=Date.now();
+      for(const p of status.parties || [])if(ids.has(p.channelId))for(const state of p.connectedStates || []){
+        const found=op.confirmed.find(c=>c.ownerId===state.id);
+        if(found){found.mute=!!state.mute;found.deaf=!!state.deaf;}
+        else op.confirmed.push({ownerId:state.id,name:vtNameFor(state.id),mute:!!state.mute,deaf:!!state.deaf,confirmedAt:new Date(now).toISOString()});
+      }
+      op.checksDone++;if(op.checksDone>=op.checksTotal)op.phase='ended';else op.nextCheckAt=now+VOICE_CHECK_MS;
+    }finally{testsInFlight.delete(op);}
   }
-  setInterval(() => { pollVoiceTest().catch((e) => console.error('[voice-test] poll failed:', e)); }, VT_POLL_MS);
+  setInterval(()=>pollVoiceTest().catch(e=>console.error('[voice-test] poll failed:',e)),VT_POLL_MS);
 
   // ---------------------------------------------------------------- live panel
   route('GET', '/api/shotcaller/status', () => cachedSession(), { officer: true });
@@ -644,7 +610,7 @@ module.exports = function install(ctx) {
     if (body.eventId) {
       const ev = findEvent(body.eventId);
       if (ev) {
-        const realRest = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
+        const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
         snapshotVoiceSession(ev, r, realRest);
         save();
       }
@@ -654,21 +620,26 @@ module.exports = function install(ctx) {
 
   route('POST', '/api/shotcaller/mute', async ({ body, user }) => {
     const muted = yes(body.muted);
+    invalidateSession();
     const r = await callSession('/mute', 'POST', { muted });
+    invalidateSession();
     audit(user, 'shotcaller.mute', { type: 'guild' }, `${user.name} ${muted ? 'muted' : 'unmuted'} the Shotcaller session.`);
     return r;
   }, { officer: true });
 
-  route('POST', '/api/shotcaller/stop', async ({ user }) => {
-    const r = await callSession('/stop', 'POST');
-    audit(user, 'shotcaller.stop', { type: 'guild' }, `${user.name} stopped the Shotcaller session.`);
-    return r;
-  }, { officer: true });
+  route('POST','/api/shotcaller/stop',async({user,body={}})=>{
+    const current=await callSession('');
+    need(!body.sessionId || body.sessionId===current.sessionId,409,'This session changed. Refresh before stopping it.');
+    const binding=sessionIdentity(current);
+    await stopOwnedSession(binding);invalidateSession();
+    audit(user,'shotcaller.stop',{type:'guild'},`${user.name} stopped the Shotcaller session.`);
+    return{ok:true,active:false,sessionState:'inactive'};
+  },{officer:true});
 
   route('POST', '/api/shotcaller/dedicated', async ({ body, user }) => {
     const ids = Array.isArray(body.userIds) ? [...new Set(body.userIds.map(String))] : [];
     checkCandidates(ids);
-    const r = await callSession('/dedicated', 'POST', { userIds: ids });
+    const r = await callSession('/dedicated', 'POST', { userIds: ids });invalidateSession();
     audit(user, 'shotcaller.dedicated', { type: 'guild' }, `${user.name} set the dedicated caller(s): ${ids.length ? ids.map(nameOf).join(', ') : 'none'}.`);
     return r;
   }, { officer: true });
@@ -676,7 +647,7 @@ module.exports = function install(ctx) {
   route('POST', '/api/shotcaller/additional-callers', async ({ body, user }) => {
     const ids = Array.isArray(body.userIds) ? [...new Set(body.userIds.map(String))] : [];
     checkCandidates(ids);
-    const r = await callSession('/additional-callers', 'POST', { userIds: ids });
+    const r = await callSession('/additional-callers', 'POST', { userIds: ids });invalidateSession();
     audit(user, 'shotcaller.callers', { type: 'guild' }, `${user.name} set the extra callers: ${ids.length ? ids.map(nameOf).join(', ') : 'none'}.`);
     return r;
   }, { officer: true });
@@ -697,5 +668,5 @@ module.exports = function install(ctx) {
 
   // Exposed to server.js, which passes it on to server-features.js/server-community.js (as ctx.shotcallerApi) -
   // see server-community.js's post-parties route, the only other caller of startSession and of beginVoiceTracking.
-  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession };
+  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking };
 };

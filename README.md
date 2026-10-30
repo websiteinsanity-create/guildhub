@@ -3,6 +3,18 @@
 A small, self-hosted guild manager for Throne and Liberty. No database, no build step,
 no dependencies: just Node 18+ and one JSON file of data.
 
+## Gear Thread screenshot fix (v30)
+
+Screenshots enlarge inside the page, with fit/actual-size controls. Paste an image
+with Ctrl+V into the current screenshot topic or its upload dialog; Coach folder
+pasting attaches an image draft.
+
+## Skill-core update (v29)
+
+Gear Threads now include 271 source-attributed English Skill Core records, a shared
+Owned collection and per-build Active slots (1 weapon + 2 armor/accessory).
+See [SKILLCORES.md](SKILLCORES.md) for usage, source limitations and catalog imports.
+
 ## What it does
 
 - **Sign in with Discord**: every player signs in with their Discord account, like on the original guild manager.
@@ -689,3 +701,11 @@ officer-only routes protect everything destructive. Attendance PINs never reach 
 sees whether the PIN window is open. To sign everybody out, delete `data/secret.txt` and restart.
 
 Demo mode (no Discord settings) uses two shared passcodes (`guild` / `officer`) and is meant for your own PC only.
+
+
+## Screenshot galleries (v31)
+
+Each Gear Thread topic holds several screenshots per build. Existing single screenshots become the first image
+automatically. Add several images (file picker, drag and drop or Ctrl+V), drag thumbnails or use the arrow buttons to
+reorder (the first is the cover), delete single images, and page through them in the viewer with buttons, arrow keys or
+a swipe. Each image is limited to 6 MB; identical images in a topic are stored once.

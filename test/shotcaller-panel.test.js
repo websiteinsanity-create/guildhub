@@ -20,7 +20,7 @@ const KEY = 'test-shotcaller-key';
 //
 // startDelayMs simulates the real bot's slow /session/start (creating channels + logging relay bots in one at a
 // time, as its own docs describe) so a test can confirm Guild Hall waits long enough instead of giving up early.
-function startFakeBot(startDelayMs = 0) {
+function startFakeBot(startDelayMs = 0, stopDelayMs = 0) {
   const calls = [];
   const server = http.createServer((req, res) => {
     let data = '';
@@ -36,6 +36,7 @@ function startFakeBot(startDelayMs = 0) {
         const reply = () => send(200, { active: true, muted: false, dedicated: body.dedicatedCallerId ? [body.dedicatedCallerId] : [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) });
         return startDelayMs ? setTimeout(reply, startDelayMs) : reply();
       }
+      if (req.url === `/api/guilds/${GUILD}/session/stop`) return stopDelayMs ? setTimeout(() => send(200, { ok: true }), stopDelayMs) : send(200, { ok: true });
       if (req.url === `/api/guilds/${GUILD}/session`) return send(200, { active: false, lastVoiceChannel: null });
       send(404, { error: 'Not found' });
     });
@@ -191,4 +192,17 @@ withServer('an event stores shotcallerAutoStart, and it is pre-ticked but still 
   const generated = state.events.find((e) => e.seriesId === se.id);
   assert.ok(generated, 'the series generated at least one upcoming event');
   assert.equal(generated.shotcallerAutoStart, true, 'the flag is copied from the series onto every event it generates');
+});
+
+test('POST /api/shotcaller/stop waits past 5s while the bot deletes the party channels one by one', { timeout: 20000 }, async () => {
+  // The real bot deletes up to 11 channels through Discord's rate-limited API when stopping; with the old 5 s timeout
+  // Guild Hall reported "unreachable" while the bot was in fact still shutting down.
+  const bot = await startFakeBot(0, 6500);
+  const s = await startServer(bot);
+  try {
+    const r = await s.call('/api/shotcaller/stop', 'POST', {}, s.officer);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+  } finally {
+    await s.stop(); bot.server.close();
+  }
 });
