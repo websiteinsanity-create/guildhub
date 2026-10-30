@@ -6,6 +6,7 @@
 //   - the per-event chart of who is coming (with a per-role split)
 
 const { tzOffsetMinutes, isoDate } = require('./recurrence');
+const attendanceFinal = require('./attendance-finality');
 
 module.exports = function install(ctx) {
   const { route, need, clean, num, newId, save, config, discord, isOfficer, findMember, hooks, tickHooks, appUrl } = ctx;
@@ -30,7 +31,14 @@ module.exports = function install(ctx) {
     return map;
   }
   const isLeader = (owner, chars) => (db().users[owner] && db().users[owner].role === 'officer') || (chars || []).some((c) => LEAD.includes(c.rank));   // the leadership is not judged by itself
-  const isOnLeave = (owner, ms) => { const d = zoneDate(ms); return db().leaves.some((l) => l.ownerKey === owner && l.status === 'approved' && l.from <= d && d <= l.to); };
+  const dateCache = new Map();
+  const isOnLeave = (owner, ms) => {
+    const leaves = db().leaves.filter(l => l.ownerKey === owner && l.status === 'approved');
+    if (!leaves.length) return false;
+    if (!dateCache.has(ms)) { if (dateCache.size >= 4096) dateCache.clear(); dateCache.set(ms,zoneDate(ms)); }
+    const d = dateCache.get(ms);
+    return leaves.some(l => l.from <= d && d <= l.to);
+  };
   hooks.skipReminder.push((owner, ev) => isOnLeave(owner, Date.parse(ev.start)));
 
   // A starting attendance baseline decays away linearly, day by day, rather than vanishing the moment one
@@ -89,7 +97,7 @@ module.exports = function install(ctx) {
     // An event only counts once its attendance is final - event start plus the configured delay - not merely
     // once it is in the past. Judging it the moment it starts (or as soon as one person happens to check in)
     // would catch players still inside their own valid PIN window and wrongly call them a no-show.
-    const events = db().events.filter((e) => Date.parse(e.start) < t - c.finalAfterMinutes * 60000 && Date.parse(e.start) >= from && Date.parse(e.start) >= joinedAt && (!c.mandatoryOnly || e.mandatory));
+    const events = db().events.filter((e) => attendanceFinal(e,t,c.finalAfterMinutes) && Date.parse(e.start) >= from && Date.parse(e.start) >= joinedAt && (!c.mandatoryOnly || e.mandatory));
     const list = [];
     let counted = 0, came = 0, noshow = 0, noreply = 0;
     for (const e of events) {
@@ -110,17 +118,12 @@ module.exports = function install(ctx) {
     const pct = blendedCounted > 0 ? Math.floor(100 * blendedCame / blendedCounted) : null;
     return { counted, came, noshow, noreply, pct, list, virtualActive: virtual.active };
   }
-  // The loot panel's own version of the same computation - same per-event resolution and leave-of-absence/
-  // join-date rules as playerStats above, but over the loot window (an explicit [fromMs, toMs) the caller
-  // already worked out from the guild's own loot settings, not compliance's windowDays) and without
-  // compliance's finalAfterMinutes "only judge it once it's truly over" delay, matching how the loot panel has
-  // always judged an event the moment it starts, not some minutes after. Also blends in the same decaying
-  // starting-attendance baseline as playerStats, so a freshly-migrated guild sees consistent numbers on both
-  // pages, not just on Compliance.
+  // Loot uses its own date window but the same completed-attendance requirement as
+  // Compliance and Attendance. No provisional PIN/voice run is judged as a no-show.
   function lootStats(owner, chars, { fromMs, toMs, mandatoryOnly = true }, t = Date.now()) {
     const ids = chars.map((x) => x.id);
     const joinedAt = earliestJoinedAt(chars);
-    const events = db().events.filter((e) => { const s = Date.parse(e.start); return s >= fromMs && s < toMs && s <= t && s >= joinedAt && (!mandatoryOnly || e.mandatory); });
+    const events = db().events.filter((e) => { const s = Date.parse(e.start); return attendanceFinal(e,t,cfg().finalAfterMinutes) && s >= fromMs && s < toMs && s >= joinedAt && (!mandatoryOnly || e.mandatory); });
     let counted = 0, came = 0;
     for (const e of events) {
       const r = resolveOutcome(owner, ids, e);
@@ -279,8 +282,12 @@ module.exports = function install(ctx) {
   //     Only ever counts events attendance was actually taken for, same as the client's own rolled()/
   //     attendanceTracked check used to.
   // A plain member only ever gets their own row; an officer gets everyone's.
+  const statsCache = new Map(); let statsRevision=-1, statsDB=null;
   route('GET', '/api/attendance-stats', ({ query, user }) => {
     const off = isOfficer(user), P = players(), t = Date.now();
+    if (statsRevision !== ctx.revision || statsDB !== db()) { statsCache.clear(); statsRevision=ctx.revision; statsDB=db(); }
+    const key=JSON.stringify([off?'officer':user.key,query,Math.floor(t/1000)]);
+    if (ctx.revision !== undefined && statsCache.has(key)) return statsCache.get(key);
     const owners = off ? [...P.keys()] : (P.has(user.key) ? [user.key] : []);
     const useLoot = query && query.from && query.to;
     const useCustom = !useLoot && query && (query.windowDays !== undefined || query.mandatoryOnly !== undefined);
@@ -289,7 +296,7 @@ module.exports = function install(ctx) {
     const customDays = useCustom && query.windowDays !== 'all' ? Number(query.windowDays) : null;
     const customFrom = customDays ? t - customDays * 864e5 : -Infinity;
     const customMandatoryOnly = useCustom && query.mandatoryOnly === '1';
-    return owners.map((owner) => {
+    const result = owners.map((owner) => {
       const chars = P.get(owner) || [];
       if (useLoot) {
         const s = lootStats(owner, chars, { fromMs, toMs, mandatoryOnly: lootMandatoryOnly }, t);
@@ -298,7 +305,7 @@ module.exports = function install(ctx) {
       if (useCustom) {
         const ids = chars.map((x) => x.id);
         const joinedAt = earliestJoinedAt(chars);
-        const events = db().events.filter((e) => e.attendanceTracked && Date.parse(e.start) < t && Date.parse(e.start) >= customFrom && Date.parse(e.start) >= joinedAt && (!customMandatoryOnly || e.mandatory));
+        const events = db().events.filter((e) => attendanceFinal(e,t,cfg().finalAfterMinutes) && Date.parse(e.start) >= customFrom && Date.parse(e.start) >= joinedAt && (!customMandatoryOnly || e.mandatory));
         let counted = 0, came = 0, noshow = 0, noreply = 0; const list = [];
         for (const e of events) {
           const r = resolveOutcome(owner, ids, e);
@@ -313,6 +320,8 @@ module.exports = function install(ctx) {
       const s = playerStats(owner, chars, t);
       return { owner, name: nameOf(owner), pct: s.pct, counted: s.counted, came: s.came, noshow: s.noshow ?? null, noreply: s.noreply ?? null, virtualActive: s.virtualActive };
     });
+    if(ctx.revision !== undefined){if(statsCache.size>=64)statsCache.clear();statsCache.set(key,result);}
+    return result;
   });
 
   // ---------------------------------------------------------------- leave of absence

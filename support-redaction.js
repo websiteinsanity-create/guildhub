@@ -19,7 +19,7 @@ module.exports=function(secret,knownSecrets=[]){
   if(typeof value==='string')return text(value);
   if(typeof value==='number' && Number.isInteger(value) && Math.abs(value)>=1e14)return alias(value);
   if(Array.isArray(value))return value.map(walk);
-  if(value && typeof value==='object'){const result={};for(const [key,v] of Object.entries(value)){if(sensitive(key))continue;Object.defineProperty(result,text(key),{value:walk(v),enumerable:true,configurable:true,writable:true});}return result;}
+  if(value && typeof value==='object'){const result={};for(const [key,v] of Object.entries(value)){if(sensitive(key))continue;Object.defineProperty(result,key.replace(/(?<!\d)\d{15,22}(?!\d)/g,alias),{value:walk(v),enumerable:true,configurable:true,writable:true});}return result;}
   return value;
  }
  return walk;
