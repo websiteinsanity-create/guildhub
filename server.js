@@ -327,7 +327,7 @@ const canEditMember = (u, m) => isOfficer(u) || m.owner === u.key;   // owner = 
 const dropFromParty = (p, id) => { const builds = { ...(p.builds || {}) }; delete builds[id]; return { ...p, members: p.members.filter((x) => x !== id), leader: p.leader === id ? null : p.leader, builds }; };
 function normParties(arr) {
   if (!Array.isArray(arr)) return [];
-  const seen = new Set();
+  const seen = new Set(),voiceKeys=new Set();
   return arr.slice(0, 20).map((p, i) => {
     const list = Array.isArray(p) ? p : p && Array.isArray(p.members) ? p.members : [];
     let members = [];
@@ -376,7 +376,8 @@ function normParties(arr) {
     // override. A request that explicitly sends placeholderOverride (true or false) - from the current party
     // menu toggle, or anything else written after this version - is honored as-is instead of reinterpreted.
     const placeholderOverride = !Array.isArray(p) && p && p.placeholderOverride !== undefined ? !!p.placeholderOverride : placeholder;
-    return { name, members, leader, builds, placeholder, placeholderOverride };
+    let voiceKey=typeof p?.voiceKey==='string' && /^[a-f0-9-]{36}$/i.test(p.voiceKey) && !voiceKeys.has(p.voiceKey)?p.voiceKey:crypto.randomUUID();voiceKeys.add(voiceKey);
+    return { name, members, leader, builds, placeholder, placeholderOverride,voiceKey };
   });
 }
 // Single source of truth for "is this party a placeholder right now" - mirrored in public/app.js's copy of the

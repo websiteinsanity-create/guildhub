@@ -33,7 +33,7 @@ module.exports = function install(ctx) {
     try {
       res = await fetch(`${shotcaller.url}/api/guilds/${shotcaller.guildId}${path}`, {
         method,
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${shotcaller.apiKey}` },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${shotcaller.apiKey}`, ...(body?.operationId?{'x-shotcaller-operation-id':body.operationId}:{}) },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -121,7 +121,7 @@ module.exports = function install(ctx) {
   // the full 12-party cap. At count=1 this comes out to the same 45s the old flat budget already was, so a
   // small, healthy start is not made to wait any longer than before - it only grows from there as parties are
   // added.
-  const START_TIMEOUT_MS = (count) => 30000 + 15000 * count;
+  const START_TIMEOUT_MS = (count) => 60000 + 85000 * count;
 
   // Shared by the manual Start dialog's route below and by server-community.js's combined "Post to Discord +
   // start Shotcaller" flow (passed through as shotcallerApi - see server.js). Validates the same way either
@@ -131,25 +131,42 @@ module.exports = function install(ctx) {
   // leaves autoReplace off: that page already shows live active/inactive status, so hitting a 409 there would
   // only ever mean a genuine race with someone else, which is safer to report than to resolve by killing their
   // session.
-  async function startSession({ channelId, count, partyNames, dedicatedCallerId, autoReplace = false }) {
+  async function preflightSession({channelId,count,autoReplace=false,operationId=randomUUID()}){
+    need(Number.isInteger(count) && count>=1,400,'Choose a positive whole party count.');
+    need(/^\d{15,25}$/.test(String(channelId || '')),400,'Pick a voice channel.');
+    const began=Date.now();console.info(JSON.stringify({component:'guildhub',operationId,event:'shotcaller.preflight',count,channelId}));
+    try{
+      const result=await callSession('/preflight','POST',{channelId:String(channelId),count,allowActive:autoReplace,operationId},10000+12000*Math.min(count,12));
+      need(result.ok===true && result.count===Math.min(count,12),502,'Shotcaller did not confirm the preflight. No Discord post was sent.');
+      console.info(JSON.stringify({component:'guildhub',operationId,event:'shotcaller.preflight.ready',durationMs:Date.now()-began,count:result.count}));
+      return {...result,operationId};
+    }catch(error){error.operationId=operationId;error.message+=' [Operation '+operationId+']';console.info(JSON.stringify({component:'guildhub',operationId,event:'shotcaller.preflight.failed',durationMs:Date.now()-began}));throw error;}
+
+  }
+  async function startSession({ channelId, count, partyNames, dedicatedCallerId, autoReplace = false, prepared = null }) {
     need(configured(), 400, "Shotcaller is not set up yet. Set SHOTCALLER_URL and SHOTCALLER_API_KEY in the server's environment (DISCORD_GUILD_ID is reused from the existing Discord setup).");
-    need(Number.isInteger(count) && count >= 1 && count <= 12, 400, 'Pick a party count from 1 to 12.');
+    need(Number.isInteger(count) && count >= 1, 400, 'Pick a positive whole party count.');
+    const requestedCount=count;count=Math.min(12,count);
     const chId = String(channelId || '');
     need(/^\d{15,25}$/.test(chId), 400, 'Pick a voice channel.');
     const callerId = dedicatedCallerId ? String(dedicatedCallerId) : null;
     if (callerId) checkCandidates([callerId]);
     const names = Array.isArray(partyNames) ? partyNames.map((x) => (x == null ? null : String(x).slice(0, 80))) : [];
+    const preflight=prepared || await preflightSession({channelId:chId,count:requestedCount,autoReplace});
+    const operationId=preflight.operationId;
+    console.info(JSON.stringify({component:"guildhub",operationId,event:"shotcaller.start.request",count,channelId:chId}));
     if(autoReplace){
       const current=await callSession('');
       need(!['starting','stopping','stop-failed'].includes(sessionState(current)),409,'Shotcaller is starting or stopping. Wait before replacing it.');
+      need((current.sessionId || null)===(preflight.existingSessionId || null),409,'Shotcaller changed after preflight. Refresh before replacing it.');
       if(current.active)await stopOwnedSession(sessionIdentity(current));
     }
     invalidateSession();
     try{
-      const result=await callSession('/start','POST',{count,channelId:chId,dedicatedCallerId:callerId,partyNames:names},START_TIMEOUT_MS(count));
+      const result=await callSession('/start','POST',{count,channelId:chId,dedicatedCallerId:callerId,partyNames:names.slice(0,11),operationId},START_TIMEOUT_MS(count));
       for(const ev of db().events)if(ev.voiceTracking?.active && ev.voiceTracking.sessionBinding!==sessionIdentity(result))finalizeTrack(ev,null,{reason:'session-replaced',incomplete:true});
-      return result;
-    }finally{invalidateSession();}
+      return {...result,operationId,requestedCount,startedCount:count,skippedPartyCount:Math.max(0,requestedCount-count)};
+    }catch(error){error.operationId=operationId;throw error;}finally{invalidateSession();}
   }
 
   // ---------------------------------------------------------------- voice-presence attendance
@@ -210,9 +227,18 @@ module.exports = function install(ctx) {
     return (started.parties || []).filter(p=>p?.channelId).map(p=>({channelId:p.channelId,members:[]}));
   }
   const liveChannelKey = (started) => started.parties.map(p=>p?.channelId).filter(Boolean).join(',');
-  function snapshotVoiceSession(ev, started, realRest) {
-    if (ctx.effectiveAttendanceMode(ev) !== 'voice' || !started || !Array.isArray(started.parties)) return;
-    ev.voiceSessionSnapshot = {sessionBinding:sessionIdentity(started),channelKey:liveChannelKey(started),partyChannels:computePartyChannels(ev,started,realRest)};
+  function capturePartyPlan(ev){
+    return (ev.parties || []).map((p,index)=>({key:p.voiceKey || (p.voiceKey=randomUUID()),index,placeholder:index>0 && partyIsPlaceholder(p)}));
+  }
+  function snapshotVoiceSession(ev,started,realRest,plan=capturePartyPlan(ev)){
+    if(!started || !Array.isArray(started.parties))return;
+    let channelIndex=0;
+    ev.shotcallerCoverage={sessionId:started.sessionId || null,operationId:started.operationId || null,at:Date.now(),parties:plan.map(p=>{
+      if(p.placeholder)return {key:p.key,status:'placeholder',channelId:null};
+      const channel=started.parties[channelIndex++];return {key:p.key,status:channel?'managed':'unserved',channelId:channel?.channelId || null};
+    })};
+    if(ctx.effectiveAttendanceMode(ev)!=='voice')return;
+    ev.voiceSessionSnapshot={sessionBinding:sessionIdentity(started),channelKey:liveChannelKey(started),partyChannels:computePartyChannels(ev,started,realRest)};
   }
   function beginVoiceTracking(ev, started, realRest) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
@@ -371,6 +397,7 @@ module.exports = function install(ctx) {
     if(!status.active){finalizeTrack(ev,null,{reason:'session-ended',incomplete:run.checksDone<VOICE_CHECKS_TOTAL});return;}
     if(!run.sessionBinding){finalizeTrack(ev,null,{reason:'identity-missing',incomplete:true});return;}
     if(sessionIdentity(status)!==run.sessionBinding){finalizeTrack(ev,null,{reason:'session-changed',incomplete:true});return;}
+    if(status.diagnostics?.mainBot?.gatewayReady===false)throw Error('Discord gateway is unavailable; voice presence is unknown.');
     if(presenceUnsupported(status))throw Error('Shotcaller does not provide per-user presence.');
     const settings = db().settings;
     const ignoreMuted = !!settings.voiceAttendanceIgnoreMuted;
@@ -395,7 +422,13 @@ module.exports = function install(ctx) {
     if (evExtraIds.size) {
       try {
         const r = await callBot(`/voice-presence?channels=${[...evExtraIds].map(encodeURIComponent).join(',')}`);
-        for (const c of r.channels || []) if (c.found) { rawExtraByChannel.set(c.channelId, c.connectedStates || []); extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened)); }
+        const channels = Array.isArray(r.channels) ? r.channels : [];
+        const unavailable = [...evExtraIds].filter(id => {
+          const matches = channels.filter(c => c.channelId === id);
+          return matches.length !== 1 || matches[0].found !== true || !Array.isArray(matches[0].connectedStates);
+        });
+        if (unavailable.length) { const error = Error('Extra channel presence unavailable'); error.publicMessage = 'Could not verify extra channel(s): ' + unavailable.join(', ') + '. Check channel access and selection; retrying.'; throw error; }
+        for (const c of channels) if (evExtraIds.has(c.channelId)) { rawExtraByChannel.set(c.channelId, c.connectedStates); extraPresence.set(c.channelId, presentIds(c.connectedStates, ignoreMuted, ignoreDeafened)); }
       } catch (error) { throw error; /* a partial presence read must not consume a successful check */ }
     }
     let extraNum = 0;
@@ -480,12 +513,14 @@ module.exports = function install(ctx) {
     const ev=findEvent(evId),vt=ev?.voiceTracking;
     if(!vt || !vt.active || vt.finishedAt || (expectedRunId && vt.runId!==expectedRunId) || checksInFlight.has(vt))return;
     checksInFlight.add(vt);
-    try{await runCheck(evId,knownStatus,vt);if(findEvent(evId)?.voiceTracking===vt)vt.lastError=null;}
+    vt.lastAttemptAt=Date.now();vt.checkPhase="reading-presence";save();
+    try{await runCheck(evId,knownStatus,vt);if(findEvent(evId)?.voiceTracking===vt){vt.lastError=null;vt.lastSuccessfulCheckAt=Date.now();vt.checkPhase="waiting";}}
     catch(error){
       console.error('[voice-attendance] check failed:',error);
       const current=findEvent(evId);
       if(current?.voiceTracking===vt && vt.active && !vt.finishedAt){
-        vt.checkErrors=(vt.checkErrors || 0)+1;vt.lastError='Voice presence unavailable; retrying.';
+        vt.checkPhase="retrying";vt.lastErrorAt=Date.now();
+        vt.checkErrors=(vt.checkErrors || 0)+1;vt.lastError=error.publicMessage || 'Voice presence unavailable; retrying.';
         if(vt.checkErrors>=5)finalizeTrack(current,null,{reason:'presence-unavailable',incomplete:true});
         else scheduleCheck(current,VOICE_CHECK_MS);
         save();
@@ -586,8 +621,11 @@ module.exports = function install(ctx) {
 
   route('GET', '/api/shotcaller/voice-channels', () => callBot('/voice-channels'), { officer: true });
 
+  route('POST','/api/shotcaller/preflight',({body})=>preflightSession({...body,count:Number(body.count)}),{officer:true});
+
   route('POST', '/api/shotcaller/start', async ({ body, user }) => {
-    const count = Math.round(Number(body.count));
+    const eventPlan=body.eventId && findEvent(body.eventId)?capturePartyPlan(findEvent(body.eventId)):null;
+    const count = Number(body.count);
     // A failure here throws an HttpError whose message is already the REAL reason (the bot's own rejection
     // text, or what went wrong reaching it at all) - the officer only ever sees a short generic toast in the
     // app itself, by design, since a raw network/bot error isn't something they could act on in the moment.
@@ -598,7 +636,7 @@ module.exports = function install(ctx) {
     try {
       r = await startSession({ channelId: body.channelId, count, partyNames: body.partyNames, dedicatedCallerId: body.dedicatedCallerId });
     } catch (e) {
-      audit(user, 'shotcaller.start-failed', { type: 'guild' }, `${user.name} tried to start a Shotcaller session (${count} ${count === 1 ? 'party' : 'parties'}) - it failed: ${e.message || 'unknown error'}`);
+      audit(user, 'shotcaller.start-failed', { type: 'guild' }, `${user.name} tried to start a Shotcaller session (${count} ${count === 1 ? 'party' : 'parties'}) - it failed: ${e.message || 'unknown error'}${e.operationId ? " [Operation " + e.operationId + "]" : ""}`);
       throw e;
     }
     audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session (${count} ${count === 1 ? 'party' : 'parties'}).`);
@@ -611,12 +649,21 @@ module.exports = function install(ctx) {
       const ev = findEvent(body.eventId);
       if (ev) {
         const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
-        snapshotVoiceSession(ev, r, realRest);
+        snapshotVoiceSession(ev, r, realRest,eventPlan || capturePartyPlan(ev));
         save();
       }
     }
     return r;
   }, { officer: true });
+
+  const shotcallerControl=action=>async({body,user})=>{
+    need(typeof body.sessionId==='string' && body.sessionId,400,'Refresh the session before changing it.');
+    const result=await callSession('/'+action,'POST',body);invalidateSession();
+    audit(user,'shotcaller.'+action,{type:'guild'},action==='pause'?`${user.name} ${body.paused?'paused':'resumed'} Shotcaller audio and following. Attendance tracking continues.`:`${user.name} chose to wait for the main caller.`);
+    return result;
+  };
+  route('POST','/api/shotcaller/pause',shotcallerControl('pause'),{officer:true});
+  route('POST','/api/shotcaller/main-wait',shotcallerControl('main-wait'),{officer:true});
 
   route('POST', '/api/shotcaller/mute', async ({ body, user }) => {
     const muted = yes(body.muted);
@@ -638,8 +685,9 @@ module.exports = function install(ctx) {
 
   route('POST', '/api/shotcaller/dedicated', async ({ body, user }) => {
     const ids = Array.isArray(body.userIds) ? [...new Set(body.userIds.map(String))] : [];
+    need(ids.length<=1,400,"Choose zero or one main caller.");
     checkCandidates(ids);
-    const r = await callSession('/dedicated', 'POST', { userIds: ids });invalidateSession();
+    const r = await callSession('/dedicated', 'POST', { userIds: ids,sessionId:body.sessionId,absenceId:body.absenceId });invalidateSession();
     audit(user, 'shotcaller.dedicated', { type: 'guild' }, `${user.name} set the dedicated caller(s): ${ids.length ? ids.map(nameOf).join(', ') : 'none'}.`);
     return r;
   }, { officer: true });
@@ -668,5 +716,5 @@ module.exports = function install(ctx) {
 
   // Exposed to server.js, which passes it on to server-features.js/server-community.js (as ctx.shotcallerApi) -
   // see server-community.js's post-parties route, the only other caller of startSession and of beginVoiceTracking.
-  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking };
+  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan };
 };

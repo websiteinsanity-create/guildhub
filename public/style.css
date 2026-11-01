@@ -2769,3 +2769,9 @@ dialog:has(.gear-image-viewer) {width:min(1440px,calc(100vw - 32px));max-height:
  .board .midentity .wicon { width:16px; height:16px; }
  .board .mspec.specialization-scroll,.board .mrow.dim .mspec.specialization-scroll { line-height:14px; }
 }
+
+/* Shotcaller coverage and connection failures are states, not role colours. */
+.party-voice-warning{padding:8px 12px;border-top:1px solid #8b652b;background:#302719;color:#f4cb7f;font-size:.82rem}
+.sc-channel.is-disrupted{border-color:#df8b57;background:#2b2020;box-shadow:inset 3px 0 #df8b57}
+.sc-channel-issue{margin:6px 0;color:#f3b987;font-size:.82rem}
+.sc-live-dot.warning{background:#efb35b;box-shadow:0 0 10px #efb35b66}

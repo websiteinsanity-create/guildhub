@@ -855,8 +855,11 @@ FORMS.infoboard = (f) => {
 UI.dashShotcaller = null;
 let dashScTimer = null, dashScActive = false;
 async function loadDashShotcaller() {
-  try { UI.dashShotcaller = await api('/api/shotcaller/status'); } catch { UI.dashShotcaller = { active: false }; }
-  if (route().page === 'dashboard' && !$('#dlg').open) render();
+  try { UI.dashShotcaller = await api('/api/shotcaller/status'); UI.dashShotcallerError=''; } catch(e) { UI.dashShotcallerError=e.message; }
+  if (route().page === 'dashboard' && !$('#dlg').open) {
+    const panel = document.getElementById('dashboard-shotcaller');
+    if (panel) panel.innerHTML = shotcallerDashPanel();
+  }
 }
 AFTER_RENDER.push((page) => {
   if (page !== 'dashboard' || !isOfficer() || !S.cfg.shotcallerOn) { clearInterval(dashScTimer); dashScTimer = null; dashScActive = false; return; }
@@ -872,7 +875,7 @@ AFTER_RENDER.push((page) => {
 // The gear in the corner is separate from this panel's own state - it just edits the per-officer
 // quickstart defaults (S.prefs.quickShotcaller) that the Start button below uses, so it's shown
 // whenever Shotcaller is configured at all, regardless of whether a session is currently running.
-const scGearBtn = () => `<button class="btn sm sc-gear" data-act="sc-dash-settings" aria-label="Quickstart Shotcaller settings">⚙</button>`;
+const scGearBtn = () => `<button class="btn sm sc-gear" data-act="sc-dash-settings" aria-label="Shared Shotcaller session setup">⚙</button>`;
 // The artwork (with "SHOTCALLER" already lettered into it) is the full card background now, behind
 // everything - status text, the Start/Stop button, the data panels - not just a strip up top. A
 // visually-hidden heading is kept so the card still announces itself to screen readers.
@@ -883,10 +886,12 @@ function shotcallerDashPanel() {
     return `<div class="panel"><h3>Shotcaller</h3><div class="muted small">Not set up on this server yet. Set <code>SHOTCALLER_URL</code> and <code>SHOTCALLER_API_KEY</code> to turn this on.</div></div>`;
   }
   const d = UI.dashShotcaller;
+  if(UI.dashShotcallerError)return `<div class="panel"><h3>Shotcaller</h3><p role="status">Status unavailable: ${esc(UI.dashShotcallerError)}</p><a href="#/shotcaller">Open Shotcaller</a></div>`;
   if (!d) return `<div class="panel"><h3>Shotcaller</h3><div class="muted small">Loading…</div></div>`;
-  const starting = typeof scStarting !== 'undefined' && scStarting;
+  if(['stopping','stop-failed'].includes(d.sessionState))return `<div class="panel"><h3>Shotcaller</h3><p>${d.sessionState==='stopping'?'Stopping session…':'Session cleanup needs attention'}</p><a href="#/shotcaller">Open Shotcaller</a></div>`;
+  const starting = (typeof scStarting !== 'undefined' && scStarting) || d.sessionState==='starting';
   const state = starting ? 'starting' : d.active ? 'active' : 'inactive';
-  const label = { inactive: 'Inactive', starting: 'Starting…', active: 'Active' }[state];
+  const label = { inactive: 'Inactive', starting: 'Starting…', active: scConnectionIssue(d)?'Connection issue':d.paused?'Paused':'Active' }[state];
   if (starting) {
     // Same button, now an icon instead of the word "Start" - same circle-ish slot, orange like the
     // lightbar instead of green. The CSS keyframe on .sc-starting-btn plays once on mount (green pill
@@ -903,7 +908,7 @@ function shotcallerDashPanel() {
     // own Start dialog (and the guild-wide Admin > Shotcaller defaults it uses) are untouched by this.
     return `<div class="panel sc-card sc-${state}">${scBanner()}${scGearBtn()}<div class="sc-card-body">
       <div class="muted small">${label} · No session running.</div>
-      <button class="btn sc-start-btn" data-act="sc-dash-start">▶ Start</button>
+      <button class="btn sc-start-btn" data-act="sc-dash-start" ${scStartLoading?'disabled':''}>▶ ${scStartLoading?'Loading setup…':'Start'}</button>
       <div class="muted small" style="margin-top:10px"><a href="#/shotcaller">Open Shotcaller</a></div></div></div>`;
   }
   const connected = (d.parties || []).reduce((n, p) => n + (p.connected || 0), 0);
@@ -927,86 +932,11 @@ function shotcallerDashPanel() {
 }
 ACTIONS['sc-dash-stop'] = () => {
   if (!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.')) return;
-  act(async () => { await api('/api/shotcaller/stop', 'POST'); await loadDashShotcaller(); }, 'Shotcaller session stopped');
+  act(async () => { await api('/api/shotcaller/stop', 'POST',{sessionId:UI.dashShotcaller?.sessionId}); await loadDashShotcaller(); }, 'Shotcaller session stopped');
 };
-// Starts a session right away from the officer's own saved quickstart defaults - no dialog. Falls
-// back to the first available voice channel if none is saved yet (or the saved one no longer
-// exists), and to GvG - 8 parties / no dedicated caller if those were never set either.
-ACTIONS['sc-dash-start'] = () => {
-  (async () => {
-    try {
-      const q = (S.prefs && S.prefs.quickShotcaller) || {};
-      let channelId = q.channelId;
-      if (channelId) {
-        const { channels } = await api('/api/shotcaller/voice-channels');
-        if (!(channels || []).some((c) => c.id === channelId)) channelId = '';
-      }
-      if (!channelId) {
-        const { channels } = await api('/api/shotcaller/voice-channels');
-        if (!channels || !channels.length) return toast('No voice channels found in that Discord server.', true);
-        channelId = channels[0].id;
-      }
-      const count = q.mode === 'custom' ? Math.round(Number(q.customCount)) : Number(q.mode || 8);
-      if (!Number.isInteger(count) || count < 1 || count > 12) return toast('Your quickstart party count looks off - fix it in the gear settings.', true);
-      scStarting = true; render();
-      try {
-        await api('/api/shotcaller/start', 'POST', { channelId, count, partyNames: [], dedicatedCallerId: q.dedicatedCallerId || null });
-        toast('Shotcaller session started');
-      } finally {
-        scStarting = false;
-        await loadDashShotcaller();
-      }
-    } catch (e) { toast(e.message, true); }
-  })();
-};
-// Gear popup: only the defaults this dashboard card's own Start button uses - saved per officer on
-// /api/prefs under quickShotcaller, entirely separate from Admin > Shotcaller's guild-wide defaults
-// (S.settings.shotcaller) and from the full Shotcaller page's own Start dialog.
-ACTIONS['sc-dash-settings'] = () => {
-  (async () => {
-    const q = (S.prefs && S.prefs.quickShotcaller) || {};
-    let channels = [], channelError = '';
-    try { channels = (await api('/api/shotcaller/voice-channels')).channels || []; }
-    catch (e) { channelError = e.message; }
-    const st = S.settings.shotcaller || {};
-    const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
-    openDialog(`<form data-form="sc-quickstart-prefs"><h2>Quickstart Shotcaller settings</h2>
-      <div class="muted small" style="margin:-8px 0 12px">Only for the fast Start button on your dashboard - Admin &gt; Shotcaller's own defaults aren't changed by this.</div>
-      <div class="field"><label>Voice channel</label>
-        ${channels.length
-          ? `<select name="channelId"><option value="">First available channel</option>${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === q.channelId ? 'selected' : ''}>🔊 ${esc(c.name)}</option>`).join('')}</select>`
-          : `<div class="muted small">${channelError ? esc(channelError) : 'No voice channels found.'} The first available channel will be used when you start.</div>`}
-      </div>
-      <div class="row">
-        <div class="field"><label>Mode</label>
-          <select name="mode" data-act="sc-dash-mode" id="sc-dash-mode">
-            <option value="8" ${q.mode !== '12' && q.mode !== 'custom' ? 'selected' : ''}>GvG - 8 parties</option>
-            <option value="12" ${q.mode === '12' ? 'selected' : ''}>Full Guild - 12 parties</option>
-            <option value="custom" ${q.mode === 'custom' ? 'selected' : ''}>Custom - 1 to 12</option>
-          </select></div>
-        <div class="field ${q.mode === 'custom' ? '' : 'hidden'}" id="sc-dash-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" value="${q.customCount || 8}"></div>
-      </div>
-      <div class="field"><label>Dedicated caller</label>
-        <select name="dedicatedCallerId">
-          <option value="">No dedicated caller - anyone can call out</option>
-          ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === q.dedicatedCallerId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
-        </select></div>
-      <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div>
-    </form>`, true);
-  })();
-};
-CHANGES['sc-dash-mode'] = (el) => { $('#sc-dash-custom').classList.toggle('hidden', el.value !== 'custom'); };
-FORMS['sc-quickstart-prefs'] = (f, fd) => act(async () => {
-  await api('/api/prefs', 'PUT', {
-    quickShotcaller: {
-      channelId: fd.channelId || '',
-      mode: fd.mode,
-      customCount: fd.mode === 'custom' ? Math.round(Number(fd.customCount)) || 8 : 8,
-      dedicatedCallerId: fd.dedicatedCallerId || '',
-    },
-  });
-  closeDialog();
-}, 'Saved');
+// Both entry points use the shared form and per-officer persisted session setup.
+ACTIONS['sc-dash-start'] = button => scStartDialog(button);
+ACTIONS['sc-dash-settings'] = button => scStartDialog(button,true);
 
 /* ================= Attendance Tracking (dashboard panel, officer only) =================
    A direct, one-event-at-a-time front end for the voice-attendance engine that already runs continuously in
@@ -1108,6 +1038,11 @@ function attendanceTrackPanel() {
     </div>
   </div>`;
 }
+const attendanceChannelDrafts = new Map();
+document.addEventListener('change', e => {
+ const form = e.target.closest?.('form[data-form="att-extra"]');
+ if (form && e.target.name === 'vtxc') attendanceChannelDrafts.set(String(form.dataset.id), [...form.querySelectorAll('input[name=vtxc]:checked')].map(i => i.value));
+});
 function attVoiceControls(ev) {
   const { vt, running, finished, checksDone, checksTotal } = voiceTrackStatus(ev);
   const auto = ev.voiceTrackAuto !== false;
@@ -1135,7 +1070,7 @@ function attVoiceControls(ev) {
       <div class="att-reveal ${auto ? '' : 'att-reveal-open'}">
         <div class="field" style="margin-top:12px"><label>Extra channels tracked for this event</label>
           <form data-form="att-extra" data-id="${ev.id}">
-            ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(ev.voiceTrackExtraChannelIds || []) : ''}
+            ${typeof voiceExtraChannelsField === 'function' ? voiceExtraChannelsField(attendanceChannelDrafts.get(String(ev.id)) || ev.voiceTrackExtraChannelIds || []) : ''}
             <button class="btn sm" style="margin-top:8px">Save channels</button>
           </form>
         </div>
@@ -1173,7 +1108,7 @@ FORMS['att-extra'] = (f, fd, id) => {
   const evn = byId(S.events, Number(id));
   if (!evn) return;
   const ids = [...f.querySelectorAll('input[name=vtxc]:checked')].map((i) => i.value);
-  act(() => patchEvent(evn, { voiceTrackExtraChannelIds: ids }), 'Channels saved');
+  act(async () => { await patchEvent(evn, { voiceTrackExtraChannelIds: ids }); attendanceChannelDrafts.delete(String(id)); }, 'Channels saved');
 };
 ACTIONS['att-start'] = (el, d) => act(() => api(`/api/events/${d.id}/voice-track/start`, 'POST', {}), 'Tracking started');
 
@@ -1203,7 +1138,7 @@ VIEWS.dashboard = () => {
     loot: hidden.has('loot') || (!off && hiddenFromMembers('lootpanel')) ? '' : `<div class="full">${lootPanel()}</div>`,
     attendance: off && !hidden.has('attendance') ? `<div class="full">${attendanceTrackPanel()}</div>` : '',
     leadership: showLeadership ? leadershipPanel(leaders, side, infoInLeadership) : '',
-    next: side ? `<div class="side ${showLeadership ? '' : 'full'}">${showShotcaller ? shotcallerDashPanel() : ''}${showNext ? schedulePanel(upcoming) : ''}${sideHasInfo ? infoPanel() : ''}</div>` : '',
+    next: side ? `<div class="side ${showLeadership ? '' : 'full'}">${showShotcaller ? '<div id="dashboard-shotcaller">' + shotcallerDashPanel() + '</div>' : ''}${showNext ? schedulePanel(upcoming) : ''}${sideHasInfo ? infoPanel() : ''}</div>` : '',
   };
   return `
   <div class="page-head"><div><h1>Dashboard</h1><div class="muted">Welcome, ${esc(S.user.name)}.</div></div>${off ? '<button class="btn" data-act="dash-customize">Customize</button>' : ''}</div>
@@ -2185,7 +2120,7 @@ ACTIONS['parties-post'] = async (el, d) => {
     ${S.cfg.shotcallerOn ? `<hr style="border-color:var(--line);margin:14px 0">
     <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-bottom:10px"><input type="checkbox" name="scEnabled" id="pp-sc-on" data-act="pp-sc-toggle" ${scChecked ? 'checked' : ''} ${scAvailable ? '' : 'disabled'}> Also start Shotcaller for this event</label>
     ${scProblem ? `<div class="muted small" style="margin:-4px 0 10px">${esc(scProblem)}</div>` : ''}
-    ${missingLeaders.length ? `<div class="muted small" style="margin:-4px 0 10px">${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet - with Shotcaller ticked, posting will assign one automatically (Tank &gt; DPS &gt; Healer) rather than ask, since it needs one for every real party.</div>` : ''}
+    ${missingLeaders.length ? `<div class="muted small" style="margin:-4px 0 10px">${missingLeaders.map((p) => `"${esc(p.name)}"`).join(', ')} ${missingLeaders.length === 1 ? 'has' : 'have'} no leader yet. Leaders are optional for Shotcaller and attendance tracking. You can assign them before posting or continue without them.</div>` : ''}
     <div id="pp-sc-fields" class="${scChecked ? '' : 'hidden'}">
       <div class="field"><label>Voice channel (becomes Party 1 - yours)</label>
         <select name="scChannelId">${scChannels.map((c) => `<option value="${esc(c.id)}" ${c.id === scLastId ? 'selected' : ''}>🔊 ${esc(c.name)}${scLast && c.id === scLast.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
@@ -2234,7 +2169,7 @@ FORMS.postparties = (f, fd, id) => {
   const missingLeaders = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p) && !p.leader);
   if (missingLeaders.length) {
     PENDING_POST_PARTIES = (autoAssign) => finishPostParties(Number(id), opts, autoAssign);
-    openLeaderCheckDialog(ev, missingLeaders, scOn);
+    openLeaderCheckDialog(ev, missingLeaders, false);
     return;
   }
   finishPostParties(Number(id), opts, false);
@@ -2255,12 +2190,12 @@ async function finishPostParties(id, opts, autoAssign) {
   // preview drawn before the officer made this choice.
   let image;
   try { image = await blobToDataUrl(await renderPartiesImage(ev)); } catch (e) { return toast('Could not draw the picture: ' + e.message, true); }
-  if (opts.scOn) { toast('Posting - starting Shotcaller can take up to a minute...'); scStarting = true; render(); }
+  if (opts.scOn) { toast('Checking relays, posting parties and starting Shotcaller…'); scStarting = true; render(); }
   try {
     const r = await api(`/api/events/${id}/post-parties`, 'POST', { image, text: opts.text, channelId: opts.channelId, channelName: opts.channelName, shotcaller: opts.shotcaller });
     dmMercsTheirParty(byId(S.events, id));   // best-effort, does not block or affect the toast above
     toast(`Posted in #${opts.channelName}`);
-    if (r.shotcaller) toast(r.shotcaller.ok ? 'Shotcaller started' : `Shotcaller could not start: ${r.shotcaller.error}`, !r.shotcaller.ok);
+    if (r.shotcaller) toast(r.shotcaller.ok ? (r.shotcaller.warning || 'Shotcaller started') : `Shotcaller could not start: ${r.shotcaller.error}`, !r.shotcaller.ok);
   } catch (e) {
     toast(e.message, true);
   } finally {

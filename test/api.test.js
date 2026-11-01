@@ -148,11 +148,12 @@ withServer('party presets keep names and leaders, and clean up when a member is 
   const a = (await call('/api/members', 'POST', { name: 'Aaa', role: 'Tank' }, member)).body.id;
   const b = (await call('/api/members', 'POST', { name: 'Bbb', role: 'Healer', owner: 'Bbb' }, officer)).body.id;
   const p = (await call('/api/presets', 'POST', { name: 'Siege', parties: [{ name: 'Front', leader: a, members: [a, b] }, { name: '  ', leader: 999, members: [b] }] }, officer)).body;
-  assert.deepEqual(p.parties, [{ name: 'Front', members: [a, b], leader: a, builds: {}, placeholder: false, placeholderOverride: false }, { name: 'Party 2', members: [], leader: null, builds: {}, placeholder: false, placeholderOverride: false }], 'a member can only sit in one party, leader must belong to the party');
+  assert.deepEqual(partyContent(p.parties), [{ name: 'Front', members: [a, b], leader: a, builds: {}, placeholder: false, placeholderOverride: false }, { name: 'Party 2', members: [], leader: null, builds: {}, placeholder: false, placeholderOverride: false }], 'a member can only sit in one party, leader must belong to the party');
   assert.equal((await call('/api/presets', 'POST', { name: 'x' }, member)).status, 403);
   await call('/api/members/' + a, 'DELETE', null, officer);
   const after = (await call('/api/state', 'GET', null, member)).body.presets[0];
-  assert.deepEqual(after.parties[0], { name: 'Front', members: [b], leader: null, builds: {}, placeholder: false, placeholderOverride: false });
+  assert.equal(after.parties[0].voiceKey, p.parties[0].voiceKey, 'party identity survives member cleanup');
+  assert.deepEqual(partyContent(after.parties)[0], { name: 'Front', members: [b], leader: null, builds: {}, placeholder: false, placeholderOverride: false });
 });
 
 withServer('export and import round-trip everything', async ({ call, member, officer }) => {
@@ -169,7 +170,7 @@ withServer('export and import round-trip everything', async ({ call, member, off
 
 withServer('old data with bare id arrays as parties is converted on start', async ({ call, member }) => {
   const ev = (await call('/api/state', 'GET', null, member)).body.events[0];
-  assert.deepEqual(ev.parties, [{ name: 'Party 1', members: [1, 2], leader: null, builds: {}, placeholder: false, placeholderOverride: false }, { name: 'Party 2', members: [], leader: null, builds: {}, placeholder: false, placeholderOverride: false }]);
+  assert.deepEqual(partyContent(ev.parties), [{ name: 'Party 1', members: [1, 2], leader: null, builds: {}, placeholder: false, placeholderOverride: false }, { name: 'Party 2', members: [], leader: null, builds: {}, placeholder: false, placeholderOverride: false }]);
 }, {
   nextId: 20,
   members: [
@@ -256,7 +257,7 @@ withServer('a party preset can be tied to an event type, for upcoming and future
   assert.deepEqual([r1.applied, r1.skipped], [1, 1], 'events that already have parties are kept unless you say so');
   const parties = async () => Object.fromEntries((await call('/api/state', 'GET', null, member)).body.events.map((e) => [e.id, e.parties]));
   let p = await parties();
-  assert.deepEqual(p[next1.id], [{ name: 'Front', members: [a, b], leader: a, builds: {}, placeholder: false, placeholderOverride: false }]);
+  assert.deepEqual(partyContent(p[next1.id]), [{ name: 'Front', members: [a, b], leader: a, builds: {}, placeholder: false, placeholderOverride: false }]);
   assert.equal(p[next2.id][0].name, 'Mine');
   assert.equal(p[past.id].length, 0, 'past events are left alone');
   assert.equal(p[other.id].length, 0, 'other event types are left alone');
@@ -356,3 +357,10 @@ withServer('in passcode mode, a coach can actually be linked to a class too - no
   const unlink = await call(`/api/admin/coach-links/${r.body.id}`, 'DELETE', null, officer);
   assert.equal(unlink.status, 200);
 });
+
+function partyContent(parties) {
+  const keys = parties.map(p => p.voiceKey);
+  for (const key of keys) assert.match(key, /^[0-9a-f-]{36}$/i, 'party has a persistent voice identity');
+  assert.equal(new Set(keys).size, keys.length, 'party voice identities are unique');
+  return parties.map(({voiceKey, ...content}) => content);
+}

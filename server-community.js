@@ -214,8 +214,6 @@ module.exports = function install(ctx) {
       // below (computePartyChannels in server-shotcaller.js) - its channel is the one the officer just picked
       // directly and is never renamed by Shotcaller, so there is nothing a leader's name would ever be used
       // for there, unlike every other party (named "<leader>'s Party" by the bot).
-      const missing = ev.parties.slice(1).filter((p) => !partyIsPlaceholder(p) && !p.leader);
-      need(!missing.length, 400, `Pick a leader for ${missing.map((p) => `"${p.name}"`).join(', ')} first, or mark ${missing.length === 1 ? 'it' : 'them'} as a placeholder (party menu > "Mark as placeholder"), before starting Shotcaller with this post.`);
       need(shotcallerApi.configured(), 400, 'Shotcaller is not set up yet. See Admin > Shotcaller.');
       need(/^\d{15,25}$/.test(String(sc.channelId || '')), 400, 'Pick a voice channel for Shotcaller.');
       if (sc.dedicatedCallerId) shotcallerApi.checkCandidates([String(sc.dedicatedCallerId)]);
@@ -230,6 +228,10 @@ module.exports = function install(ctx) {
     // Remove the outdated previous party announcement first, if that is switched on. A message that is already
     // gone (someone deleted it by hand) is not an error - deleteMessage treats "not found" as success - and
     // either way this never blocks posting the new one.
+    const scPlan=sc?shotcallerApi.capturePartyPlan(ev):null;
+    const scCount=sc?Math.max(1,scPlan.filter(p=>!p.placeholder).length):0;
+    const scPartyNames=sc?ev.parties.slice(1).filter(p=>!partyIsPlaceholder(p)).map(p=>{const leader=p.leader?findMember(p.leader):null;return leader?`${leader.name}\'s Party`:null;}):[];
+    const scPrepared=sc?await shotcallerApi.preflightSession({channelId:sc.channelId,count:scCount,autoReplace:true}):null;
     let deletedPrevious = null;
     if (pp.deletePrevious && pp.lastMessage && pp.lastMessage.messageId) {
       const del = await discord.deleteMessage(pp.lastMessage.channelId, pp.lastMessage.messageId);
@@ -256,16 +258,17 @@ module.exports = function install(ctx) {
       const partyNames = realRest.map((p) => { const m = p.leader ? findMember(p.leader) : null; return m ? `${m.name}'s Party` : null; });
       try {
         const started = await shotcallerApi.startSession({
-          channelId: sc.channelId, count: 1 + realRest.length, partyNames,
-          dedicatedCallerId: sc.dedicatedCallerId || null, autoReplace: true,
+          channelId: sc.channelId, count: scCount, partyNames:scPartyNames,
+          dedicatedCallerId: sc.dedicatedCallerId || null, autoReplace: true, prepared:scPrepared,
         });
         audit(user, 'shotcaller.start', { type: 'guild' }, `${user.name} started a Shotcaller session for "${ev.title}" while posting its parties to Discord.`);
-        shotcaller = { ok: true, data: started };
+        shotcaller = { ok: true, data: started, warning: started.skippedPartyCount ? `${started.skippedPartyCount} additional parties have no Shotcaller voice channel (12-channel maximum).` : null };
         // Freeze this event's party layout against the channels the bot just created, regardless of whether
         // tracking starts immediately below - if automatic tracking is off for this event, "Start tracking
         // now" could run much later, after the parties were reassigned by voice or chat instead of re-posted,
         // and needs this to still find each party's real channel (see snapshotVoiceSession's own comment).
-        shotcallerApi.snapshotVoiceSession(ev, started, realRest);
+        shotcallerApi.snapshotVoiceSession(ev, started, realRest,scPlan);
+        save();
         // In 'voice' attendance mode, this is normally the moment attendance tracking for this event actually
         // begins - see beginVoiceTracking in server-shotcaller.js (a no-op in 'pin' mode either way). Unless an
         // officer switched "automatic tracking" off for this one event (Voice channel tracking and Reminders on
