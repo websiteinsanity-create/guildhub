@@ -39,3 +39,14 @@ test('failed polls retain the last snapshot and record observations without bot 
  await run('pollShotcaller()');assert.equal(run('SC.data.parties.length'),2);assert.equal(run('SC.error'),'temporary failure');assert.equal(run('scStatusEvents[0].message'),'Control API request failed.');
  ctx.success=async()=>({active:false});run('api=success');await run('pollShotcaller()');assert.equal(run('SC.error'),'');assert.equal(run('SC.data.active'),false);assert(run('SC.receivedAt'));assert(run('scStatusEvents.some(e=>e.message===\'Control API responded.\')'));
 });
+
+test('availability dialog is officer-only, offers a single replacement and closes on return',()=>{
+ let html='',closed=0;
+ ctx.openDialog=value=>{html=value;node('#dlg').open=true;};ctx.closeDialog=()=>{closed++;node('#dlg').open=false;};
+ let form=null;ctx.document.querySelector=selector=>selector==='#dlg form[data-form="sc-replacement"]'?form:node(selector);
+ run("SC={data:{active:true,sessionId:'session',mainCaller:{showReplacement:true,absenceId:'absence'}},error:''};S.user={role:'officer'};S.settings.shotcaller={candidateUserIds:['caller']};route=()=>({page:'shotcaller'})");node('#dlg').open=false;
+ run('scMainAvailability()');assert(html.includes('Main shotcaller unavailable'));assert(html.includes('type="radio"'));assert(html.includes('Set replacement'));assert(html.includes('Wait'));
+ form={dataset:{absence:'absence',session:'session'}};run('SC.data.mainCaller.showReplacement=false;scMainAvailability()');assert.equal(closed,1);
+ form=null;html='';node('#dlg').open=false;run('S.user.readOnly=true;SC.data.mainCaller.showReplacement=true;scMainAvailability()');assert.equal(html,'');
+ ctx.document.querySelector=node;run('S.user.readOnly=false');
+});

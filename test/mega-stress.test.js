@@ -48,6 +48,7 @@ function startFakeBot() {
       const send = (status, obj) => { const j = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json' }); res.end(j); };
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: 'Unauthorized' });
       if (req.url === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: VOICE_CHANNEL, name: 'Command' }] });
+      if (req.url.endsWith('/session/preflight')) return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:null});
       if (req.url === `/api/guilds/${GUILD}/session/start`) {
         session = { active: true, muted: false, dedicated: [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) };
         return send(200, session);

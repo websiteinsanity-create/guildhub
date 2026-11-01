@@ -3,7 +3,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const sourcePath=path.join(__dirname,'../server-shotcaller.js');
 const raw=fs.readFileSync(sourcePath,'utf8');
-const source=raw.replace('return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking };','return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, _test:{runCheckSafe,pollVoiceTest,checkTimers,getVoiceTest:()=>voiceTest} };');
+const source=raw.replace('return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan };','return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan, _test:{runCheckSafe,pollVoiceTest,checkTimers,getVoiceTest:()=>voiceTest} };');
 assert.notEqual(source,raw,'Only expose internals for observation; do not alter their logic.');
 const NOW=Date.parse('2026-10-28T12:00:00Z'),user={key:'officer',name:'Officer'};
 const status=(owner=null,channel='old-channel',sessionId='session-original')=>({active:true,sessionId,parties:[{index:1,channelId:channel,name:'Party 1',connectedStates:owner?[{id:owner,mute:false,deaf:false}]:[]}],dedicated:[],additionalCallers:[]});
@@ -12,12 +12,12 @@ function harness(db,request=async()=>status(),clock={now:NOW}) {
  const routes=new Map(),timers=new Map(),tickHooks=[],module={exports:{}},logs=[];let timerId=0,attendanceWrites=0;
  class Clock extends Date{constructor(...args){super(...(args.length?args:[clock.now]));}static now(){return clock.now;}}
  const ctx={db,shotcaller:{url:'http://fake-bot',apiKey:'test-key',guildId:'111111111111111111'},route:(method,url,fn)=>routes.set(method+' '+url,fn),need:(ok,code,message)=>{if(!ok){const e=Error(message);e.status=code;throw e;}},HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}},save(){},audit(){},findMember:id=>db.members.find(m=>m.id===id),findEvent:id=>db.events.find(e=>String(e.id)===String(id)),eventFor:e=>structuredClone(e),setAttended:(ev,ids)=>{attendanceWrites++;ev.attended=[...ids];ev.attendanceTracked=true;},partyIsPlaceholder:p=>!p.members.length,effectiveAttendanceMode:()=> 'voice',tickHooks};
- const context={module,exports:module.exports,require:require('node:module').createRequire(sourcePath),Date:Clock,URL,AbortSignal,console:{error:(...x)=>logs.push(x),warn:(...x)=>logs.push(x)},setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),setInterval:()=>0,fetch:async(url,opts)=>{const data=await request(url,opts);return{ok:true,status:200,json:async()=>data};},process:{env:{}}};
+ const context={module,exports:module.exports,require:require('node:module').createRequire(sourcePath),Date:Clock,URL,AbortSignal,console:{info:(...x)=>logs.push(x),error:(...x)=>logs.push(x),warn:(...x)=>logs.push(x)},setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),setInterval:()=>0,fetch:async(url,opts)=>{const body=opts.body?JSON.parse(opts.body):{};const data=url.endsWith('/session/preflight')?{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:(await request(url.replace('/preflight',''),{method:'GET'})).sessionId || null}:await request(url,opts);return{ok:true,status:200,json:async()=>data};},process:{env:{}}};
  vm.runInNewContext(source,context,{filename:sourcePath});const api=module.exports(ctx);
  return {api,routes,timers,tickHooks,clock,writes:()=>attendanceWrites,logs,call:(method,url,body={})=>routes.get(method+' '+url)({body,user,params:{id:'1'}})};
 }
 const dbFor=e=>({events:[e],members:[{id:11,name:'Alice',owner:'alice',active:true}],users:{},settings:{shotcaller:{candidateUserIds:[]}}});
-const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
+const flush=async()=>{for(let i=0;i<24;i++)await Promise.resolve();};
 test('transient API errors retry without consuming checks or finalizing attendance',async()=>{
  const ev=event(),h=harness(dbFor(ev),async()=>{throw Error('temporary outage');});h.api.beginVoiceTracking(ev,status(),[]);await flush();
  await h.api._test.runCheckSafe(1,null);assert.equal(ev.voiceTracking.active,true);assert.equal(ev.voiceTracking.checksDone,1);assert.equal(ev.voiceTracking.checkErrors,1);
@@ -90,4 +90,25 @@ test('manual cancellation discards an already pending voice read without stoppin
  h.api.beginVoiceTracking(ev,status(),[]);await flush();const pending=h.api._test.runCheckSafe(1,null);await flush();
  h.api.cancelVoiceTracking(ev);ev.attended=[];const writes=h.writes();release(status('alice'));await pending;
  assert.equal(ev.voiceTracking.active,false);assert(ev.voiceTracking.finishedAt);assert.deepEqual(ev.attended,[]);assert.equal(h.writes(),writes);
+});
+for(const response of [{channels:[]},{channels:[{channelId:'extra',found:false}]},{channels:[{channelId:'extra',found:true}]}])test('unverified extra channel must not consume checks or finalize absence: '+JSON.stringify(response),async()=>{
+ const ev=event();ev.voiceTrackExtraChannelIds=['extra'];const h=harness(dbFor(ev),async url=>url.includes('voice-presence')?response:status());h.api.beginVoiceTracking(ev,status(),[]);await flush();
+ for(let i=0;i<5;i++)await h.api._test.runCheckSafe(1,status());
+ assert.equal(ev.voiceTracking.checksDone,0);assert.equal(ev.attendanceTracked,false);assert.equal(ev.voiceTracking.incomplete,true);assert.match(ev.voiceTracking.lastError,/extra/);
+});
+test('extra channel outage recovers and confirmed empty channels remain valid',async()=>{
+ const ev=event();ev.voiceTrackExtraChannelIds=['extra'];let available=false;const h=harness(dbFor(ev),async url=>url.includes('voice-presence')?{channels:available?[{channelId:'extra',found:true,connectedStates:[]}]:[]}:status());h.api.beginVoiceTracking(ev,status(),[]);await flush();await h.api._test.runCheckSafe(1,status());assert.equal(ev.voiceTracking.checksDone,0);
+ available=true;for(let i=0;i<3;i++)await h.api._test.runCheckSafe(1,status());assert.equal(ev.voiceTracking.checksDone,3);assert.equal(ev.attendanceTracked,true);
+});
+
+test('paused Shotcaller still tracks 100 players across twelve channels, including raw deafened sightings',async()=>{
+ const ev=event(),db=dbFor(ev);db.members=Array.from({length:100},(_,i)=>({id:i+1,name:'Player '+i,owner:'owner'+i,active:true}));db.settings.voiceAttendanceIgnoreDeafened=true;
+ const snapshot={...status(),paused:true,parties:Array.from({length:12},(_,i)=>({index:i+1,channelId:'channel'+i,connectedStates:db.members.filter((_,j)=>j%12===i).map((m,j)=>({id:m.owner,mute:false,deaf:j===0}))}))};
+ const h=harness(db,async()=>snapshot);h.api.beginVoiceTracking(ev,snapshot,[]);await flush();await h.api._test.runCheckSafe(1,snapshot);await h.api._test.runCheckSafe(1,snapshot);
+ assert.equal(ev.voiceTracking.checksDone,3);assert.equal(Object.keys(ev.voiceTracking.seen).length,100);assert.equal(ev.attended.length,88);assert.equal(ev.attendanceTracked,true);assert.equal(ev.voiceTracking.active,false);
+});
+
+test('a disconnected main gateway cannot turn a stale empty snapshot into no-shows',async()=>{
+ const ev=event(),snapshot={...status(),diagnostics:{mainBot:{gatewayReady:false}}},h=harness(dbFor(ev),async()=>snapshot);
+ h.api.beginVoiceTracking(ev,snapshot,[]);await flush();assert.equal(ev.voiceTracking.checksDone,0);assert.equal(ev.attendanceTracked,false);assert.equal(ev.voiceTracking.checkErrors,1);
 });

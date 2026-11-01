@@ -811,10 +811,10 @@ function viewRoster() {
    <select data-ui="rosterSort" aria-label="Sort members">${[{key:'name',label:'Name A–Z'},{key:'gs',label:'Gear score'},{key:'watermark',label:'Watermark'},{key:'rank',label:'Rank'},...(off && tab === 'members' ? [{key:'attendance',label:'Attendance'}] : [])].map(o=>`<option value="${o.key}" ${UI.rosterSort === o.key ? 'selected' : ''}>Sort: ${o.label}</option>`).join('')}</select>
    ${tab === 'members' ? `<label class="roster-inactive-toggle"><input type="checkbox" data-ui="rosterInactive" ${UI.rosterInactive?'checked':''}>Show inactive</label>` : `<select data-ui="rosterEvent" aria-label="Filter mercenary event"><option value="">All events</option>${[...new Set(mercs.map(m=>m.mercFor))].map(id=>{const ev=byId(S.events,id);return `<option value="${id}" ${Number(UI.rosterEvent)===id?'selected':''}>${esc(ev ? ev.title : 'Deleted event #' + id)}</option>`;}).join('')}</select>`}
   `}
-  ${filtered ? '<button class="roster-text-button" data-act="roster-reset">Reset filters</button>' : ''}
+  <button class="roster-text-button" data-act="roster-reset" ${filtered ? '' : 'hidden'}>Reset filters</button>
   ${tab === 'members' && !S.user.support && !S.members.some(m=>m.owner===S.user.key && !m.mercenary) ? '<button class="btn primary" data-act="member-new">Add character</button>' : ''}
   </div>
-  ${tab === 'coaches' ? rosterCoachContent() : `${eventList.length ? rosterTable(eventList,tab === 'mercenaries') : rosterEmpty(tab === 'mercenaries' ? 'No mercenaries match.' : 'No members match.')}<div class="roster-result-count">${eventList.length} of ${source.length} ${tab === 'mercenaries' ? 'mercenaries' : 'members'}</div>`}
+  <div id="roster-results">${tab === 'coaches' ? rosterCoachContent() : `${eventList.length ? rosterTable(eventList,tab === 'mercenaries') : rosterEmpty(tab === 'mercenaries' ? 'No mercenaries match.' : 'No members match.')}<div class="roster-result-count">${eventList.length} of ${source.length} ${tab === 'mercenaries' ? 'mercenaries' : 'members'}</div>`}</div>
  </section>`;
 }
 ACTIONS['roster-tab'] = (el,d) => {
@@ -1607,6 +1607,9 @@ function partyCard(ctx, parties, p, i, ev, clearOn) {
   const ms = p.members.map((id) => byId(S.members, id)).filter(Boolean);
   const size = S.cfg.partySize;
   const ph = partyIsPlaceholder(p);
+  const coverage=ev?.shotcallerCoverage;
+  const assigned=coverage?.parties?.find(entry=>entry.key===p.voiceKey);
+  const unserved=coverage && !ph && (!assigned || assigned.status!=='managed');
   // A preset carries whoever was in the line-up when it was saved, not whoever actually said Going for THIS
   // event - so once loaded into an event, anyone in the party who has not confirmed attending (and is not a
   // mercenary, who was placed here deliberately rather than loaded from a saved line-up) is shown separately,
@@ -1629,6 +1632,7 @@ function partyCard(ctx, parties, p, i, ev, clearOn) {
         <button data-act="party-placeholder-toggle" ${at}>${ph ? 'Unmark as placeholder' : 'Mark as placeholder'}</button>
         <button data-act="p-clear" ${at}>Remove all members</button><button class="danger" data-act="party-del" ${at}>Delete party</button></div></details>` : ''}
     </div>
+    ${unserved?'<div class="party-voice-warning" role="status">No Shotcaller channel <span class="small">· not covered by the last session setup</span></div>':''}
     <div class="party-composition">${S.cfg.roles.map(r => `<span style="--c:${roleColor(r)}">${attending.filter(m => effectiveBuild(m, p).role === r).length} ${esc(r)}</span>`).join('')} ${attending.length === size ? '<span class="full-label">Full</span>' : ''}</div>
     <div class="pdrop" ${off ? 'data-drop="party"' : ''} data-i="${i}">
       ${attending.map((m) => memberRow(m, at, { from: 'party', i, leader: p.leader, parties, ev })).join('')}
@@ -2418,7 +2422,7 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target;
   if (CHANGES[el.dataset.act]) { CHANGES[el.dataset.act](el); return; }
-  if (el.dataset.ui) { UI[el.dataset.ui] = el.type === 'checkbox' ? el.checked : el.value; render(); }
+  if (el.dataset.ui) { const value = el.type === 'checkbox' ? el.checked : el.value; if (UI[el.dataset.ui] === value) return; UI[el.dataset.ui] = value; render(); }
   else if (el.dataset.act === 'party-rename') mutateParties(el, (ps, i) => { ps[i].name = el.value.trim() || `Party ${i + 1}`; });
   else if (el.dataset.act === 'points-toggle') act(() => api('/api/settings', 'PUT', { pointsEnabled: el.checked }), el.checked ? 'Points are on' : 'Points are off');
   else if (el.dataset.act === 'rsvp-row') rsvpNow(el.dataset.ev, el.dataset.m, el.value);
@@ -2472,7 +2476,15 @@ document.addEventListener('input', (e) => {
   }
   const k = e.target.dataset.ui;
   if (k === 'rosterQ' || k === 'lootQ' || k === 'lootCompareQ' || k === 'vodLibraryQ' || k === 'reqQ' || k === 'leaveQ' || k === 'warnQ' || k === 'approvalQ') {
-    UI[k] = e.target.value; const pos = e.target.selectionStart; render();
+    UI[k] = e.target.value; const pos = e.target.selectionStart;
+    if (k === 'rosterQ' && $('#roster-results')) {
+      const template = document.createElement('template'); template.innerHTML = viewRoster();
+      $('#roster-results').innerHTML = template.content.querySelector('#roster-results').innerHTML;
+      const reset = document.querySelector('.roster-toolbar [data-act=roster-reset]');
+      if (reset) reset.hidden = !(['rosterQ','rosterRole','rosterWeapon','rosterMode','rosterTag','rosterCoachClass','rosterEvent'].some(key => UI[key]) || UI.rosterInactive);
+      return;
+    }
+    render();
     const i = $(`[data-ui=${k}]`); i.focus(); i.setSelectionRange(pos, pos);
   }
 });

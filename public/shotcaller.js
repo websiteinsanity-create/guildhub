@@ -37,7 +37,9 @@ async function pollShotcaller() {
   catch (e) { if(serial!==scPollSerial)return;SC={...SC,loading:false,error:e.message}; }
   scObserve(previous,SC);
   const editingSetup=UI.scTab==='setup' && document.querySelector('.sc-setup-panel .sc-start-form');
+  // Render first: opening the replacement prompt before render() would block that render and leave the page behind it stale ("Loading voice session…").
   if (route().page === 'shotcaller' && !$('#dlg').open && !editingSetup) render();
+  scMainAvailability();
 }
 // Starts polling every 5s while the Shotcaller page is open (active or inactive, so a /shotcaller command run
 // directly in Discord is picked up here too), and stops the moment the officer navigates elsewhere. Guarded by
@@ -61,10 +63,10 @@ async function scAct(fn, okMsg) {
 const scName = (id) => { const u = (S.users || []).find((x) => x.id === id); return u ? u.name : id; };
 // A picker scoped to the Admin-curated candidate list (Admin > Shotcaller), not the whole roster - dedicated
 // and extra callers are both drawn from the same shortlist.
-function candidatePickerFor(name, selected = []) {
+function candidatePickerFor(name, selected = [],single=false) {
   const list = (S.settings.shotcaller.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   return `<div class="pp"><input type="search" class="pp-filter" placeholder="Search callers" aria-label="Search callers"><div class="scrollbox">${
-    list.map((p) => `<label class="tagpick" data-n="${esc(p.name.toLowerCase())}"><input type="checkbox" name="${name}" value="${esc(p.key)}" ${selected.includes(p.key) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')
+    list.map((p) => `<label class="tagpick" data-n="${esc(p.name.toLowerCase())}"><input type="${single?'radio':'checkbox'}" name="${name}" value="${esc(p.key)}" ${selected.includes(p.key) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')
     || '<span class="muted small">No candidates yet - add some in Admin &gt; Shotcaller.</span>'
   }</div></div>`;
 }
@@ -82,21 +84,21 @@ function scCallerList(ids,removeAct) {
  return ids.length?`<div class="sc-caller-list">${ids.map(id=>`<div class="sc-caller-person"><span class="sc-initials" aria-hidden="true">${esc(scName(id).slice(0,2).toUpperCase())}</span><strong>${esc(scName(id))}</strong><button class="btn sm sc-remove" data-act="${removeAct}" data-id="${esc(id)}" aria-label="Remove ${esc(scName(id))}">×</button></div>`).join('')}</div>`:'<p class="sc-secondary">No callers selected</p>';
 }
 function scCallers(d,active,starting) {
- const next=UI.scSetupDraft?.dedicatedCallerId ?? S.settings.shotcaller?.defaultCallerId;
- return `<aside class="sc-console-callers"><h2>${navIcon('member')} Callers</h2><section><div class="sc-section-heading"><h3>Dedicated callers</h3>${active?'<button class="btn sm" data-act="sc-dedicated-manage">Manage ›</button>':''}</div><p class="sc-secondary">Heard across all parties.</p>${active?scCallerList(d.dedicated||[],'sc-dedicated-remove'):`<p class="sc-next-caller">${next?esc(scName(next)):'No dedicated caller selected'}<small>Next session</small></p>${!starting?'<button class="btn sm" data-act="sc-tab" data-tab="setup">Choose caller</button>':''}`}</section><section><div class="sc-section-heading"><h3>Extra callers</h3>${active?'<button class="btn sm" data-act="sc-extra-manage">Manage ›</button>':''}</div><p class="sc-secondary">In addition to the configured caller role.</p>${active?scCallerList(d.additionalCallers||[],'sc-extra-remove'):'<p class="sc-secondary">Manage extra callers once the session is active.</p>'}</section></aside>`;
+ const next=scSetupDraft().dedicatedCallerId ?? S.settings.shotcaller?.defaultCallerId;
+ return `<aside class="sc-console-callers"><h2>${navIcon('member')} Callers</h2><section><div class="sc-section-heading"><h3>Main caller</h3>${active?'<button class="btn sm" data-act="sc-dedicated-manage">Manage ›</button>':''}</div><p class="sc-secondary">Heard across all parties.</p>${active?scCallerList(d.dedicated||[],'sc-dedicated-remove'):`<p class="sc-next-caller">${next?esc(scName(next)):'No dedicated caller selected'}<small>Next session</small></p>${!starting?'<button class="btn sm" data-act="sc-tab" data-tab="setup">Choose caller</button>':''}`}</section><section><div class="sc-section-heading"><h3>Extra callers</h3>${active?'<button class="btn sm" data-act="sc-extra-manage">Manage ›</button>':''}</div><p class="sc-secondary">In addition to the configured caller role.</p>${active?scCallerList(d.additionalCallers||[],'sc-extra-remove'):'<p class="sc-secondary">Manage extra callers once the session is active.</p>'}</section></aside>`;
 }
 function scSessionConsole(d={},state='inactive') {
  const active=state==='active',starting=state==='starting';
  const parties=active?(d.parties||[]):[],connected=parties.reduce((n,p)=>n+Math.max(0,Number(p.connected)||0),0);
  const muted=active&&(scMutePending===null?!!d.muted:scMutePending);
- return `<div class="sc-console-top"><section class="sc-console-session ${starting?'is-starting':''}"><div class="sc-session-state"><span class="sc-live-dot ${active?'live':starting?'starting':''}"></span><h2>${starting?'Starting session…':active?'Live session':'No active session'}</h2><span class="sc-audio ${muted?'muted':''}">${navIcon('shotcaller')} Audio ${active?(muted?'muted':'on'):'off'}</span></div><div class="sc-session-totals"><div><strong>${active?connected:'—'}</strong><span>connected</span></div><div><strong>${active?parties.length:'—'}</strong><span>party channels</span></div></div>${starting?'<p class="sc-session-note" role="status">Setting up voice channels and connecting relay bots.</p>':muted?'<p class="sc-session-note">Callouts are muted across parties. Local Discord conversations still work.</p>':!active?'<p class="sc-session-note">Start a voice session for your event, a saved line-up or a custom party setup.</p>':''}<div class="sc-session-actions">${active?`<button class="btn" data-act="sc-mute" ${scMutePending!==null||scStopping?'disabled':''}>${muted?'Unmute session':'Mute session'}</button><button class="btn danger" data-act="sc-stop" ${scStopping?'disabled':''}>${scStopping?'Stopping…':'Stop session'}</button>`:`<button class="btn primary" data-act="sc-start" ${starting?'disabled':''}>${starting?'Starting session…':'Start session'}</button>${!starting?'<button class="btn" data-act="sc-tab" data-tab="setup">Session setup</button>':''}`}</div></section>${scCallers(d,active,starting)}</div><section class="sc-console-parties"><div class="sc-section-heading"><h2>${navIcon('shotcaller')} Party channels</h2>${active?`<span>${parties.length} channels · ${connected} connected</span>`:''}</div>${active?`<div class="sc-party-grid">${parties.map(p=>`<article class="sc-channel ${p.connected?'':'is-empty'}"><span class="sc-channel-icon" aria-hidden="true">${navIcon('shotcaller')}</span><div><h3>${esc(p.name)}</h3><div class="sc-channel-count"><strong>${Math.max(0,Number(p.connected)||0)}</strong><span>connected</span></div></div></article>`).join('')||'<p class="sc-secondary">No party channels reported.</p>'}</div>`:starting?`<div class="sc-start-animation" role="status"><div class="sc-start-symbol" aria-hidden="true"><span></span>${navIcon('shotcaller')}</div><strong>Preparing your voice session<span class="sc-loading-dots" aria-hidden="true">…</span></strong><p>Channels and relay bots are being prepared. This can take a little while.</p></div>`:'<div class="sc-session-empty"><span aria-hidden="true">'+navIcon('shotcaller')+'</span><strong>Your party channels will appear here</strong><p>Choose a voice channel, party setup and caller to get started.</p></div>'}</section><div class="sc-bridge-note">${navIcon('requests')}<strong>Bridge</strong><span>Not available yet</span></div>`;
+ return `<div class="sc-console-top"><section class="sc-console-session ${starting?'is-starting':''}"><div class="sc-session-state"><span class="sc-live-dot ${active?(scConnectionIssue(d)?'warning':'live'):starting?'starting':''}"></span><h2>${starting?'Starting session…':active?(scConnectionIssue(d)?'Connection issue':d.paused?'Session paused':'Live session'):'No active session'}</h2><span class="sc-audio ${muted?'muted':''}">${navIcon('shotcaller')} Audio ${active?(d.paused?'paused':muted?'muted':'on'):'off'}</span></div><div class="sc-session-totals"><div><strong>${active?connected:'—'}</strong><span>connected</span></div><div><strong>${active?parties.length:'—'}</strong><span>party channels</span></div></div>${active&&scConnectionIssue(d)?'<p class="sc-session-note sc-channel-issue" role="status">Some party relays are unavailable. Healthy party channels remain active; affected channels are marked below.</p>':''}${starting?'<p class="sc-session-note" role="status">Setting up voice channels and connecting relay bots.</p>':muted?'<p class="sc-session-note">Callouts are muted across parties. Local Discord conversations still work.</p>':!active?'<p class="sc-session-note">Start a voice session for your event, a saved line-up or a custom party setup.</p>':''}<div class="sc-session-actions">${active?`<button class="btn" data-act="sc-pause">${d.paused?'Resume session':'Pause session'}</button><button class="btn" data-act="sc-mute" ${scMutePending!==null||scStopping?'disabled':''}>${muted?'Unmute session':'Mute session'}</button><button class="btn danger" data-act="sc-stop" ${scStopping?'disabled':''}>${scStopping?'Stopping…':'Stop session'}</button>`:`<button class="btn primary" data-act="sc-start" ${starting||scStartLoading?'disabled':''}>${starting?'Starting session…':scStartLoading?'Loading setup…':'Start session'}</button>${starting && d.sessionState==='starting' && d.sessionId?'<button class="btn danger" data-act="sc-stop">Cancel start</button>':''}${!starting?'<button class="btn" data-act="sc-tab" data-tab="setup">Session setup</button>':''}`}</div></section>${scCallers(d,active,starting)}</div><section class="sc-console-parties"><div class="sc-section-heading"><h2>${navIcon('shotcaller')} Party channels</h2>${active?`<span>${parties.length} channels · ${connected} connected</span>`:''}</div>${active?`<div class="sc-party-grid">${parties.map(p=>`<article class="sc-channel ${p.connected?'':'is-empty'} ${scPartyIssue(d,p)?'is-disrupted':''}"><span class="sc-channel-icon" aria-hidden="true">${navIcon('shotcaller')}</span><div><h3>${esc(p.name)}</h3>${scPartyIssue(d,p)?'<p class="sc-channel-issue" role="status">Connection issue · relay unavailable</p>':''}<div class="sc-channel-count"><strong>${Math.max(0,Number(p.connected)||0)}</strong><span>connected</span></div></div></article>`).join('')||'<p class="sc-secondary">No party channels reported.</p>'}</div>`:starting?`<div class="sc-start-animation" role="status"><div class="sc-start-symbol" aria-hidden="true"><span></span>${navIcon('shotcaller')}</div><strong>Preparing your voice session<span class="sc-loading-dots" aria-hidden="true">…</span></strong><p>Channels and relay bots are being prepared. This can take a little while.</p></div>`:'<div class="sc-session-empty"><span aria-hidden="true">'+navIcon('shotcaller')+'</span><strong>Your party channels will appear here</strong><p>Choose a voice channel, party setup and caller to get started.</p></div>'}</section><div class="sc-bridge-note">${navIcon('requests')}<strong>Bridge</strong><span>Not available yet</span></div>`;
 }
 function viewShotcaller() {
  if(!isOfficer())return '<div class="empty">Officers only.</div>';
  const header=scPageHeader();
  if(UI.scTab==='status')return `<section class="sc-workspace">${header}${scTabs()}${scSystemStatus()}</section>`;
  if(!S.cfg.shotcallerOn)return `<section class="sc-workspace">${header}${scTabs()}<div class="panel sc-message"><h2>Shotcaller is not connected</h2><p>Configure the Shotcaller connection in the server settings to enable voice controls.</p></div></section>`;
- if(scStarting)return `<section class="sc-workspace">${header}${scTabs()}${scSessionConsole({},'starting')}</section>`;
+ if(scStarting)return `<section class="sc-workspace">${header}${scTabs()}${scSessionConsole(SC.data || {},'starting')}</section>`;
  if(SC.loading)return `<section class="sc-workspace">${header}${scTabs()}<div class="sc-message" role="status">Loading voice session…</div></section>`;
  if(SC.error)return `<section class="sc-workspace">${header}${scTabs()}<div class="panel sc-message"><h2>Unable to load voice session</h2><p>${esc(SC.error)}</p><button class="btn" data-act="sc-retry">Try again</button></div></section>`;
  const phase=SC.data?.sessionState || SC.data?.diagnostics?.sessionState;
@@ -106,7 +108,7 @@ function viewShotcaller() {
  return SC.data?.active?scActivePage(SC.data):scInactivePage();
 }
 function scActivePage(d) { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole(d,'active')}</section>`; }
-function scStartingPage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole({},'starting')}</section>`; }
+function scStartingPage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole(SC.data || {},'starting')}</section>`; }
 function scInactivePage() { return `<section class="sc-workspace">${scPageHeader()}${scTabs()}${scSessionConsole({},'inactive')}</section>`; }
 VIEWS.shotcaller=()=>viewShotcaller();
 let scStatusRefreshing=false;
@@ -134,7 +136,7 @@ function scSystemStatus() {
  const metric=(label,value,detail)=>`<article class="sc-status-metric"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></article>`;
  const row=(name,bot,channel,rejoins,player)=>`<tr><th scope="row"><strong>${esc(name)}</strong>${bot?.name?`<small>${esc(bot.name)}</small>`:''}</th><td>${esc(channel || '—')}</td><td>${gateway(bot?.gatewayReady)}</td><td>${voice(bot?.voiceState)}</td><td>${ms(bot?.gatewayPingMs)}</td><td>${rejoins===null?'—':n(rejoins)}</td><td>${esc(player || 'Not reported')}</td></tr>`;
  const relayRows=diag?relays.map(r=>row('Relay '+r.index,r,parties.find(p=>p.channelId===r.channelId)?.name || r.channelId,r.rejoinAttempts,r.playerState)).join(''):parties.map((p,i)=>row('Relay '+(i+1),null,p.name,null,null)).join('');
- return `<section class="sc-system-status"><div class="sc-section-heading"><div><h2>System status</h2><p class="sc-secondary">Read-only health and connection information.</p></div><button type="button" class="btn" data-act="sc-retry" ${!configured || scStatusRefreshing?'disabled':''}>Refresh status</button></div>${!configured?'<div class="sc-status-notice">Configure the existing Shotcaller integration to receive status updates.</div>':''}${stale && configured?`<div class="sc-status-notice is-error" role="status"><strong>Control API unavailable.</strong> ${esc(SC.error)}${SC.data?' Values below are from the last successful response; they are not live.':''}</div>`:''}${!diag?'<div class="sc-status-notice">This bot does not report detailed telemetry yet. Session and channel data remain available; individual bot connections, gateway ping and process metrics are not inferred. Install the optional status addon to report them.</div>':''}<div class="sc-status-metrics">${metric('Control API',apiState,'GuildHub → Shotcaller control API')}${metric('Session',!SC.data?'Not reported':['starting','stopping','stop-failed'].includes(d.sessionState || diag?.sessionState)?(d.sessionState || diag.sessionState):d.active?(d.muted?'Active · muted':'Active'):'Inactive',stale?'Last known state':'Reported session state')}${metric('Relay voice connections',diag&&d.active?ready+' / '+(number(diag.expectedRelays)??relays.length)+' ready':'Not reported','Requires gateway online and voice ready')}${metric('People in party channels',SC.data?String(humans):'Not reported','Human members; excludes bots')}</div><section class="panel sc-status-panel"><div class="sc-section-heading"><h2>Bots & voice connections</h2>${badge(stale?'Last known snapshot':diag?'Reported telemetry':'Limited telemetry',stale?'warn':'unknown')}</div><div class="sc-status-table-wrap"><table class="sc-status-table"><thead><tr><th>Bot</th><th>Voice channel</th><th>Discord gateway</th><th>Voice connection</th><th>Gateway ping</th><th>Rejoin attempts</th><th>Audio player</th></tr></thead><tbody>${row('Main bot',diag?.mainBot,d.active?parties[0]?.name:null,null,null)}${relayRows}</tbody></table></div>${!d.active?'<p class="sc-secondary">No active session relay connections are reported. Idle bots are not assumed to be offline.</p>':''}<p class="sc-secondary">Gateway ping is a Discord connection metric, not end-to-end speech delay. An idle audio player is normal when nobody is speaking.</p></section><div class="sc-status-bottom"><section class="panel sc-status-panel"><h2>Process & updates</h2><dl class="sc-status-facts"><div><dt>Bot process uptime</dt><dd>${uptime(diag?.uptimeSeconds)}</dd></div><div><dt>Bot memory (RSS)</dt><dd>${number(diag?.memoryRssMiB)===null?'Not reported':n(diag.memoryRssMiB)+' MiB'}</dd></div><div><dt>Configured relay tokens</dt><dd>${n(diag?.configuredRelays)}</dd></div><div><dt>Last successful update</dt><dd>${date(SC.receivedAt)}</dd></div><div><dt>Bot snapshot time</dt><dd>${diag?date(diag.sampledAt):'Not reported'}</dd></div><div><dt>Status request (HTTP)</dt><dd>${ms(SC.requestMs)}</dd></div><div><dt>Voice transmission delay</dt><dd>Not measured</dd></div></dl><p class="sc-secondary">Refreshes every 5 seconds while this page is open. The server may briefly reuse a cached response. HTTP request time includes the proxy/cache and does not measure voice latency.</p></section><section class="panel sc-status-panel"><h2>Recent observations</h2><p class="sc-secondary">Status changes observed in this browser, not bot logs.</p><ol class="sc-status-observations">${scStatusEvents.map(event=>`<li><time>${date(event.at)}</time><span>${esc(event.message)}</span></li>`).join('') || '<li>No status changes observed yet.</li>'}</ol></section></div></section>`;
+ return `<section class="sc-system-status"><div class="sc-section-heading"><div><h2>System status</h2><p class="sc-secondary">Read-only health and connection information.</p></div><button type="button" class="btn" data-act="sc-retry" ${!configured || scStatusRefreshing?'disabled':''}>Refresh status</button></div>${!configured?'<div class="sc-status-notice">Configure the existing Shotcaller integration to receive status updates.</div>':''}${stale && configured?`<div class="sc-status-notice is-error" role="status"><strong>Control API unavailable.</strong> ${esc(SC.error)}${SC.data?' Values below are from the last successful response; they are not live.':''}</div>`:''}${!diag?'<div class="sc-status-notice">This bot does not report detailed telemetry yet. Session and channel data remain available; individual bot connections, gateway ping and process metrics are not inferred. Install the optional status addon to report them.</div>':''}<div class="sc-status-metrics">${metric('Control API',apiState,'GuildHub → Shotcaller control API')}${metric('Session',!SC.data?'Not reported':['starting','stopping','stop-failed'].includes(d.sessionState || diag?.sessionState)?(d.sessionState || diag.sessionState):d.active?(scConnectionIssue(d)?'Connection issue':d.paused?'Active · paused':d.muted?'Active · muted':'Active'):'Inactive',stale?'Last known state':'Reported session state')}${metric('Relay voice connections',diag&&d.active?ready+' / '+(number(diag.expectedRelays)??relays.length)+' ready':'Not reported','Requires gateway online and voice ready')}${metric('People in party channels',SC.data?String(humans):'Not reported','Human members; excludes bots')}</div><section class="panel sc-status-panel"><div class="sc-section-heading"><h2>Bots & voice connections</h2>${badge(stale?'Last known snapshot':diag?'Reported telemetry':'Limited telemetry',stale?'warn':'unknown')}</div><div class="sc-status-table-wrap"><table class="sc-status-table"><thead><tr><th>Bot</th><th>Voice channel</th><th>Discord gateway</th><th>Voice connection</th><th>Gateway ping</th><th>Rejoin attempts</th><th>Audio player</th></tr></thead><tbody>${row('Main bot',diag?.mainBot,d.active?(parties.find(p=>p.channelId===diag?.mainBot?.channelId)?.name || (diag?.mainBot?.channelId?'External main caller channel':'Background')):null,null,null)}${relayRows}</tbody></table></div>${!d.active?'<p class="sc-secondary">No active session relay connections are reported. Idle bots are not assumed to be offline.</p>':''}<p class="sc-secondary">Gateway ping is a Discord connection metric, not end-to-end speech delay. An idle audio player is normal when nobody is speaking.</p></section><div class="sc-status-bottom"><section class="panel sc-status-panel"><h2>Process & updates</h2><dl class="sc-status-facts"><div><dt>Bot process uptime</dt><dd>${uptime(diag?.uptimeSeconds)}</dd></div><div><dt>Bot memory (RSS)</dt><dd>${number(diag?.memoryRssMiB)===null?'Not reported':n(diag.memoryRssMiB)+' MiB'}</dd></div><div><dt>Configured relay tokens</dt><dd>${n(diag?.configuredRelays)}</dd></div><div><dt>Last successful update</dt><dd>${date(SC.receivedAt)}</dd></div><div><dt>Bot snapshot time</dt><dd>${diag?date(diag.sampledAt):'Not reported'}</dd></div><div><dt>Status request (HTTP)</dt><dd>${ms(SC.requestMs)}</dd></div><div><dt>Voice transmission delay</dt><dd>Not measured</dd></div></dl><p class="sc-secondary">Refreshes every 5 seconds while this page is open. The server may briefly reuse a cached response. HTTP request time includes the proxy/cache and does not measure voice latency.</p></section><section class="panel sc-status-panel"><h2>Recent observations</h2>${scOperationTrace(d)}${scAudioTelemetry(d)}<p class="sc-secondary">Status changes observed in this browser, not bot logs.</p><ol class="sc-status-observations">${scStatusEvents.map(event=>`<li><time>${date(event.at)}</time><span>${esc(event.message)}</span></li>`).join('') || '<li>No status changes observed yet.</li>'}</ol></section></div></section>`;
 }
 ACTIONS['sc-load-setup']=async()=>{
  if(scSetupLoading)return;scSetupLoading=true;render();
@@ -152,7 +154,7 @@ ACTIONS['sc-mute']=async()=>{
  finally{scMutePending=null;await pollShotcaller();}
 };
 ACTIONS['sc-stop']=async()=>{
- if((!SC.data?.active && !['stopping','stop-failed'].includes(SC.data?.sessionState))||scStopping)return;
+ if((!SC.data?.active && !['starting','stopping','stop-failed'].includes(SC.data?.sessionState))||scStopping)return;
  if(!confirm('Stop this Shotcaller session? The relay bots and dedicated caller will disconnect from voice. Party channels stay up until everyone leaves them.'))return;
  scStopping=true;scPollSerial++;render();
  try{await scAct(()=>api('/api/shotcaller/stop','POST',{sessionId:SC.data?.sessionId}),'Shotcaller session stopped');}
@@ -160,38 +162,48 @@ ACTIONS['sc-stop']=async()=>{
 };
 // Start dialog: ported from the approved mockup (voice channel / mode / voice-channel-setup / dedicated caller).
 // Needs the bot's live voice-channel list, so it's fetched first - the dialog only opens once that answers.
-async function scStartDialog(){
- if(scStarting||scStartLoading)return;
- scStartLoading=true;
+async function scStartDialog(button,configure=false){
+ if(scStarting||scStartLoading)return;scStartLoading=true;if(button)button.disabled=true;
  try{
   const channels=(await api('/api/shotcaller/voice-channels')).channels||[];
   if(!channels.length){toast('No voice channels found in that Discord server.',true);return;}
-  openDialog(scStartForm(channels),true);
+  openDialog(scStartForm(channels,configure),true);
  }catch(error){toast(error.message,true);}
- finally{scStartLoading=false;}
+ finally{scStartLoading=false;if(button)button.disabled=false;}
 }
+function scSetupDraft(){return {...(S.prefs?.quickShotcaller || {}),...(UI.scSetupDraft || {})};}
+async function scSaveSetup(form,fd){
+ const draft={...scSetupDraft(),...fd};
+ draft.mode=form.elements?.mode?.value ?? draft.mode ?? '';
+ draft.customCount=form.elements?.customCount?.value ?? draft.customCount ?? '';
+ const prefs=await api('/api/prefs','PUT',{quickShotcaller:draft});
+ S.prefs=prefs;delete UI.scSetupDraft;return draft;
+}
+function scConnectionIssue(data){return !!data?.connectionIssue || (data?.parties || []).some(p=>scPartyIssue(data,p));}
+function scPartyIssue(data,party){const relay=data?.diagnostics?.relays?.find(r=>r.channelId===party.channelId);return party.connectionIssue===true || !!relay && (relay.gatewayReady===false || relay.voiceState && relay.voiceState!=='ready');}
 function scStartForm(channels,configure=false){
-  const draft=UI.scSetupDraft || {};
+  const draft=scSetupDraft();
   const last = SC.data && SC.data.lastVoiceChannel;
-  const lastId=channels.some(c=>c.id===draft.channelId)?draft.channelId:last&&channels.some(c=>c.id===last.channelId)?last.channelId:channels[0]?.id;
+  const lastId=channels.some(c=>c.id===draft.channelId)?draft.channelId:'';
   const st = S.settings.shotcaller || {};
   const candidates = (st.candidateUserIds || []).map((id) => ({ key: id, name: scName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   // Only events/presets that actually have parties to match are worth offering here.
   const upcomingEvents = S.events.filter((e) => e.parties.length && new Date(e.start) >= Date.now() - 3 * 36e5).sort((a, b) => new Date(a.start) - new Date(b.start));
   const presetsWithParties = S.presets.filter((p) => p.parties.length);
   const kind=(draft.setupKind==='event'&&upcomingEvents.length)||(draft.setupKind==='preset'&&presetsWithParties.length)?draft.setupKind:'default';
-  const mode=['8','12','custom'].includes(draft.mode)?draft.mode:'8';
+  const mode=['8','12','custom'].includes(draft.mode)?draft.mode:'';
   return `<form class="sc-start-form" data-form="${configure?'shotcaller-configure':'shotcaller-start'}">${configure?'':'<h2>Start Shotcaller session</h2>'}
     <div class="field"><label>Voice channel (becomes Party 1 - yours)</label>
-      <select name="channelId">${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === lastId ? 'selected' : ''}>${esc(c.name)}${last && c.id === last.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
+      <select name="channelId" required><option value="">Choose a voice channel</option>${channels.map((c) => `<option value="${esc(c.id)}" ${c.id === lastId ? 'selected' : ''}>${esc(c.name)}${last && c.id === last.channelId ? ' (last used)' : ''}</option>`).join('')}</select></div>
     <div class="row">
       <div class="field"><label>Mode</label>
-        <select name="mode" data-act="sc-mode" id="sc-mode" ${kind!=='default'?'disabled':''}>
+        <select name="mode" data-act="sc-mode" id="sc-mode" required ${kind!=='default'?'disabled':''}>
+          <option value="">Choose a party mode</option>
           <option value="8" ${mode==='8'?'selected':''}>GvG - 8 parties</option>
           <option value="12" ${mode==='12'?'selected':''}>Full Guild - 12 parties</option>
           <option value="custom" ${mode==='custom'?'selected':''}>Custom - 1 to 12</option>
         </select></div>
-      <div class="field ${mode==='custom'?'':'hidden'}" id="sc-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" value="${Number(draft.customCount)||8}" ${kind!=='default'?'disabled':''}></div>
+      <div class="field ${mode==='custom'?'':'hidden'}" id="sc-custom"><label>Number of parties (1-12)</label><input type="number" name="customCount" min="1" max="12" step="1" value="${draft.customCount?Number(draft.customCount):''}" ${kind!=='default'?'disabled':''}></div>
     </div>
     <div class="muted small hidden" id="sc-mode-note" style="margin-top:-6px;margin-bottom:12px"></div>
     <div class="field"><label>Voice channel setup</label>
@@ -201,14 +213,14 @@ function scStartForm(channels,configure=false){
         ${presetsWithParties.length ? `<option value="preset" ${kind==='preset'?'selected':''}>Use preset - match a saved line-up</option>` : ''}
       </select></div>
     <div class="field ${kind==='event'?'':'hidden'}" id="sc-setup-event"><label>Event</label>
-      <select name="eventId">${upcomingEvents.map((e) => { const n = 1 + e.parties.slice(1).filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}" ${String(draft.eventId)===String(e.id)?'selected':''}>${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+      <select name="eventId" ${kind==='event'?'required':''}><option value="">Choose an event</option>${upcomingEvents.map((e) => { const n = 1 + e.parties.slice(1).filter((p) => !partyIsPlaceholder(p)).length; return `<option value="${e.id}" ${String(draft.eventId)===String(e.id)?'selected':''}>${esc(e.title)} - ${fmtShort(e.start)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== e.parties.length ? `, ${e.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
       <div class="muted small" style="margin-top:6px">Party count comes from this event's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field ${kind==='preset'?'':'hidden'}" id="sc-setup-preset"><label>Preset</label>
-      <select name="presetId">${presetsWithParties.map((p) => { const n = 1 + p.parties.slice(1).filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}" ${String(draft.presetId)===String(p.id)?'selected':''}>${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
+      <select name="presetId" ${kind==='preset'?'required':''}><option value="">Choose a preset</option>${presetsWithParties.map((p) => { const n = 1 + p.parties.slice(1).filter((x) => !partyIsPlaceholder(x)).length; return `<option value="${p.id}" ${String(draft.presetId)===String(p.id)?'selected':''}>${esc(p.name)} (${n} ${n === 1 ? 'party' : 'parties'}${n !== p.parties.length ? `, ${p.parties.length - n} placeholder` : ''})</option>`; }).join('')}</select>
       <div class="muted small" style="margin-top:6px">Party count comes from this preset's non-placeholder parties, and the channels Shotcaller creates are renamed to match its party leaders.</div></div>
     <div class="field"><label>Shotcaller</label>
       <select name="dedicatedCallerId">
-        <option value="">No dedicated caller - anyone can call out</option>
+        <option value="">No main caller - PTT-Prio to all other parties</option>
         ${candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === (draft.dedicatedCallerId ?? st.defaultCallerId) ? 'selected' : ''}>${esc(c.name)}${c.key === st.defaultCallerId ? ' (default)' : ''}</option>`).join('')}
       </select>
       <div class="muted small" style="margin-top:6px">Defaults to whoever's set as the default caller in Admin - not necessarily you. Pick someone else here just for this session, or set a new default in Admin.</div></div>
@@ -216,10 +228,11 @@ function scStartForm(channels,configure=false){
       <button class="btn primary" ${!channels.length?'disabled':''}>${configure?'Save next session setup':'Start session'}</button></div>
   </form>`;
 }
-ACTIONS['sc-start']=()=>scStartDialog();
-FORMS['shotcaller-configure']=(form,fd)=>{
- UI.scSetupDraft={...fd,mode:fd.mode||$('#sc-mode')?.value||'8',customCount:fd.customCount||$('#sc-custom input')?.value||'8'};
- UI.scTab='session';render();toast('Setup saved for the next session you start here');
+ACTIONS['sc-start']=button=>scStartDialog(button);
+FORMS['shotcaller-configure']=async(form,fd)=>{
+ const button=form.querySelector('button[type="submit"],button.btn.primary');if(button)button.disabled=true;
+ try{await scSaveSetup(form,fd);closeDialog();UI.scTab='session';render();toast('Session setup saved for Dashboard and Shotcaller');}
+ catch(error){toast(error.message,true);}finally{if(button)button.disabled=false;}
 };
 CHANGES['sc-mode'] = (el) => { $('#sc-custom').classList.toggle('hidden', el.value !== 'custom'); };
 CHANGES['sc-setup'] = (el) => {
@@ -228,6 +241,7 @@ CHANGES['sc-setup'] = (el) => {
   $('#sc-setup-preset').classList.toggle('hidden', el.value !== 'preset');
   const modeSel = $('#sc-mode'), note = $('#sc-mode-note'), customInput = $('#sc-custom input');
   modeSel.disabled = overridden;
+  const form=el.closest('form');if(form){form.elements.eventId.required=el.value==='event';form.elements.presetId.required=el.value==='preset';}
   if (customInput) customInput.disabled = overridden;
   note.classList.toggle('hidden', !overridden);
   note.textContent = overridden ? `Party count is set by the ${el.value === 'event' ? 'chosen event' : 'chosen preset'}, not by Mode.` : '';
@@ -246,11 +260,11 @@ FORMS['shotcaller-start'] = (f, fd) => {
     // (server-community.js). partyNames[0] names channels[1] (Party 2), and so on, matching the bot's own
     // /start endpoint indexing.
     const realRest = chosen.parties.slice(1).filter((p) => !partyIsPlaceholder(p));
-    if (1 + realRest.length > 12) return toast(`"${chosen.title || chosen.name}" has ${1 + realRest.length} non-placeholder parties - Shotcaller supports at most 12.`, true);
-    count = 1 + realRest.length;
-    partyNames = realRest.map((p) => { const ld = p.leader ? byId(S.members, p.leader) : null; return ld ? `${ld.name}'s Party` : null; });
+    if (1 + realRest.length > 12) toast(`${1 + realRest.length - 12} additional parties will have no Shotcaller channel (12-channel maximum).`);
+    count = Math.min(12,1 + realRest.length);
+    partyNames = realRest.slice(0,11).map((p) => { const ld = p.leader ? byId(S.members, p.leader) : null; return ld ? `${ld.name}'s Party` : null; });
   } else {
-    count = fd.mode === 'custom' ? Math.round(Number(fd.customCount)) : Number(fd.mode);
+    count = fd.mode === 'custom' ? Number(fd.customCount) : Number(fd.mode);
   }
   if (!Number.isInteger(count) || count < 1 || count > 12) return toast('Pick a party count from 1 to 12.', true);
   // Starting can legitimately take a while, more so with more parties (server-shotcaller.js scales its own
@@ -269,6 +283,7 @@ FORMS['shotcaller-start'] = (f, fd) => {
       // separately, maybe much later, maybe after parties were reassigned by voice instead of re-posted -
       // still finds each party's actual channel instead of guessing from whatever order the parties happen
       // to be in by then.
+      await scSaveSetup(f,fd);
       await api('/api/shotcaller/start', 'POST', { channelId: fd.channelId, count, partyNames, dedicatedCallerId: fd.dedicatedCallerId || null, eventId: fd.setupKind === 'event' ? fd.eventId : null });
       delete UI.scSetupDraft;
       toast('Shotcaller session started');
@@ -277,22 +292,23 @@ FORMS['shotcaller-start'] = (f, fd) => {
     } finally {
       scStarting = false;
       await pollShotcaller();
+      if(route().page==='dashboard')await loadDashShotcaller();
     }
   })();
 };
 
 ACTIONS['sc-dedicated-manage'] = () => {
   const sel = (SC.data && SC.data.dedicated) || [];
-  openDialog(`<form data-form="sc-dedicated"><h2>Manage dedicated caller(s)</h2>
+  openDialog(`<form data-form="sc-dedicated"><h2>Manage main caller</h2>
     <div class="muted small" style="margin:-4px 0 10px">Heard by every other party, wherever they're standing. Candidates are set in Admin &gt; Shotcaller.</div>
-    ${candidatePickerFor('scded', sel)}
+    ${candidatePickerFor('scded', sel,true)}<label><input type="radio" name="scded" value="" ${sel.length?'':'checked'}> No main caller</label>
     <div class="dlg-actions"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button class="btn primary">Save</button></div></form>`);
 };
 FORMS['sc-dedicated'] = (f) => {
-  const ids = [...f.querySelectorAll('input[name=scded]:checked')].map((i) => i.value);
-  scAct(async () => { await api('/api/shotcaller/dedicated', 'POST', { userIds: ids }); closeDialog(); }, 'Dedicated caller(s) updated');
+  const ids = [...f.querySelectorAll('input[name=scded]:checked')].map((i) => i.value).filter(Boolean);
+  scAct(async () => { await api('/api/shotcaller/dedicated', 'POST', { userIds: ids,sessionId:SC.data?.sessionId }); closeDialog(); }, 'Main caller updated');
 };
-ACTIONS['sc-dedicated-remove'] = (el, d) => scAct(() => api('/api/shotcaller/dedicated', 'POST', { userIds: (SC.data.dedicated || []).filter((id) => id !== d.id) }), 'Removed');
+ACTIONS['sc-dedicated-remove'] = (el, d) => scAct(() => api('/api/shotcaller/dedicated', 'POST', { userIds: (SC.data.dedicated || []).filter((id) => id !== d.id),sessionId:SC.data?.sessionId }), 'Removed');
 
 ACTIONS['sc-extra-manage'] = () => {
   const sel = (SC.data && SC.data.additionalCallers) || [];
@@ -484,3 +500,30 @@ FORMS['shotcaller-callers'] = (f) => act(() => api('/api/admin/shotcaller', 'PUT
   candidateUserIds: [...f.querySelectorAll('input[name=sccaller]:checked')].map((i) => i.value),
   defaultCallerId: f.elements.scdefault.value,
 }), 'Saved');
+
+function scMainAvailability(){
+ const dialog=document.querySelector('#dlg form[data-form="sc-replacement"]');
+ const state=SC.data?.mainCaller;
+ if(dialog && (!SC.data?.active || SC.error || !state?.showReplacement || dialog.dataset.absence!==state.absenceId || dialog.dataset.session!==SC.data.sessionId)){closeDialog();return;}
+ if(route().page!=='shotcaller' || SC.error || !SC.data?.active || !state?.showReplacement || !isOfficer() || S.user?.readOnly || $('#dlg').open)return;
+ openDialog(`<form data-form="sc-replacement" data-absence="${esc(state.absenceId)}" data-session="${esc(SC.data.sessionId)}"><h2>Main shotcaller unavailable</h2><p>Choose a replacement or wait for the main shotcaller to return.</p>${candidatePickerFor('replacement',[],true)}<div class="dlg-actions"><button type="button" class="btn" data-act="sc-main-wait">Wait</button><button class="btn primary">Set replacement</button></div></form>`);
+}
+FORMS['sc-replacement']=(form)=>{
+ const id=form.querySelector('input[name="replacement"]:checked')?.value;
+ if(!id)return toast('Choose a replacement main caller.',true);
+ scAct(async()=>{await api('/api/shotcaller/dedicated','POST',{userIds:[id],sessionId:form.dataset.session,absenceId:form.dataset.absence});closeDialog();},'Replacement main caller selected');
+};
+ACTIONS['sc-main-wait']=()=>{const form=document.querySelector('#dlg form[data-form="sc-replacement"]');if(!form)return;return scAct(async()=>{await api('/api/shotcaller/main-wait','POST',{sessionId:form.dataset.session,absenceId:form.dataset.absence});closeDialog();},'Waiting for main caller');};
+ACTIONS['sc-pause']=()=>scAct(()=>api('/api/shotcaller/pause','POST',{sessionId:SC.data?.sessionId,paused:!SC.data?.paused}),SC.data?.paused?'Session resumed':'Session paused; attendance tracking continues');
+
+function scAudioTelemetry(data){
+ const audio=data?.audioTelemetry;if(!audio)return '';
+ const channelName=id=>data.parties?.find(p=>p.channelId===id)?.name || (id?'External channel':'Unknown channel');
+ const signal=audio.lastPrioritySignal;
+ return `<h3>Audio routing</h3><p class="sc-secondary">${Number(audio.started)||0} routes started · ${Number(audio.packets)||0} received audio packets. These counters do not prove audible delivery.</p>${signal?`<p class="sc-secondary">Last priority signal: ${esc(new Date(signal.at).toLocaleTimeString())} · ${signal.authorised?'authorised':'not authorised'} · flags ${Number(signal.flags)||0}${signal.paused?' · paused':''}</p>`:'<p class="sc-secondary">No priority signal reported yet.</p>'}<ol class="sc-status-observations">${(audio.recentRoutes || []).slice(0,8).map(r=>`<li><time>${esc(new Date(r.at).toLocaleTimeString())}</time><span>${r.kind==='main'?'Main caller':'Callout'}: ${esc(channelName(r.sourceChannelId))} → ${esc((r.targetChannelIds || []).map(channelName).join(', '))}</span></li>`).join('') || '<li>No audio routes reported yet.</li>'}</ol>`;
+}
+
+function scOperationTrace(data){
+ const logs=data?.operations || [];if(!logs.length && !data?.operationId)return '';
+ return `<h3>Session operation</h3><p class="small">Operation: ${esc(data.operationId || logs[logs.length-1]?.operationId || 'Not reported')}</p><details><summary>Startup and connection log</summary><ol class="sc-status-observations">${logs.slice(-20).reverse().map(log=>`<li><time>${esc(new Date(log.at).toLocaleTimeString())}</time><span>${esc(log.event)}${log.relay?' · Relay '+Number(log.relay):''}${log.attempt?' · attempt '+Number(log.attempt):''}${log.durationMs!==undefined?' · '+Number(log.durationMs)+' ms':''}${log.error?' · '+esc(log.error):''}</span></li>`).join('')}</ol></details>`;
+}

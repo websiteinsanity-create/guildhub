@@ -49,6 +49,7 @@ function startFakeBot(opts) {
         const ids = (u.searchParams.get('channels') || '').split(',').filter(Boolean);
         return send(200, { channels: ids.map((id) => { const states = connected[id] || []; return { channelId: id, found: true, connected: states.length, connectedUserIds: states.map((s) => s.id), connectedStates: states }; }) });
       }
+      if (req.url.split('?')[0].endsWith('/session/preflight')) return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:null});
       if (u.pathname === `/api/guilds/${GUILD}/session/start`) {
         session = { active: true, muted: false, dedicated: [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}` })) };
         return send(200, withConnected(session));

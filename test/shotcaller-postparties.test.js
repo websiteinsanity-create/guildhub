@@ -32,6 +32,7 @@ function startFakeBot() {
       const send = (status, obj) => { const j = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json' }); res.end(j); };
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: 'Unauthorized' });
       if (req.url === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: '200000000000000001', name: 'Command' }] });
+      if (req.url.split('?')[0].endsWith('/session/preflight')) return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:null});
       if (req.url === `/api/guilds/${GUILD}/session/start`) {
         if (body.channelId === '999999999999999999') return send(400, { error: 'That channel is not a voice channel in this server.' });
         session = { active: true, muted: false, dedicated: [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) };
@@ -119,17 +120,11 @@ withServer('posting without the shotcaller field behaves exactly as before (unaf
   assert.equal(r.body.shotcaller, null);
 });
 
-withServer('enabling shotcaller blocks the WHOLE post when ANY non-anchor real party has no leader, however small (a small real party is never auto-exempt)', async (s) => {
-  // Party 1 (the anchor, index 0) is always exempt from the leader check - its channel is the one already
-  // picked directly, never renamed by Shotcaller, so it needs no leader regardless of size (see the "the picked
-  // anchor channel" test below). Give it a leader anyway here so this test is only exercising Party 2 and 3.
-  const ev = await makeEventWithParties(s, [{ members: 6, leader: true }, { members: 6, leader: false }, { members: 2, leader: false }]);
-  const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({ shotcaller: { enabled: true, channelId: '200000000000000001' } }), s.officer);
-  assert.equal(r.status, 400);
-  assert.match(r.body.error, /Party 2/);
-  assert.match(r.body.error, /Party 3/, 'Party 3 has real members (just 2 of them) and needs a leader too - a small party is not automatically exempt');
-  assert.equal(s.fake.state.posts.length, 0, 'nothing was posted to Discord - the whole action was blocked');
-  assert.equal(s.bot.calls.length, 0, 'the Shotcaller bot was never even contacted');
+withServer('Shotcaller starts real parties without requiring legacy party leaders', async (s) => {
+  const ev = await makeEventWithParties(s, [{members:6,leader:true},{members:6,leader:false},{members:2,leader:false}]);
+  const r=await s.call(`/api/events/${ev.id}/post-parties`,'POST',postBody({shotcaller:{enabled:true,channelId:'200000000000000001'}}),s.officer);
+  assert.equal(r.status,200);assert.equal(r.body.shotcaller.ok,true);assert.equal(s.fake.state.posts.length,1);
+  const start=s.bot.calls.find(c=>c.url.endsWith('/session/start'));assert.equal(start.body.count,3);assert.deepEqual(start.body.partyNames,[null,null]);
 });
 
 withServer('a manually-flagged placeholder party is exempt from the leader check, AND skipped entirely from the Shotcaller session', async (s) => {

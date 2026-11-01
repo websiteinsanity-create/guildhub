@@ -31,6 +31,7 @@ function startFakeBot(startDelayMs = 0, stopDelayMs = 0) {
       const send = (status, obj) => { const j = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json' }); res.end(j); };
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: 'Unauthorized' });
       if (req.url === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: '200000000000000001', name: 'General Voice' }, { id: '200000000000000002', name: 'Officer Voice' }] });
+      if (req.url.split('?')[0].endsWith('/session/preflight')) return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:null});
       if (req.url === `/api/guilds/${GUILD}/session/start`) {
         if (body.channelId === '900000000000000099') return send(400, { error: 'That channel is not a voice channel in this server.' });
         const reply = () => send(200, { active: true, muted: false, dedicated: body.dedicatedCallerId ? [body.dedicatedCallerId] : [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) });
@@ -109,7 +110,9 @@ withServer('POST /api/shotcaller/start forwards count/channelId/partyNames/dedic
   assert.equal(ok.body.parties.length, 3);
   const sent = bot.calls.find((c) => c.url.endsWith('/session/start'));
   assert.equal(sent.auth, `Bearer ${KEY}`);
-  assert.deepEqual(sent.body, { count: 3, channelId: '200000000000000001', dedicatedCallerId: null, partyNames: ["Aria's Party", null] });
+  assert.match(sent.body.operationId,/^[a-f0-9-]{36}$/);
+  const {operationId,...startBody}=sent.body;
+  assert.deepEqual(startBody, { count: 3, channelId: '200000000000000001', dedicatedCallerId: null, partyNames: ["Aria's Party", null] });
 
   const rejected = await s.call('/api/shotcaller/start', 'POST', { count: 2, channelId: '900000000000000099' }, s.officer);
   assert.equal(rejected.status, 400);
@@ -205,4 +208,10 @@ test('POST /api/shotcaller/stop waits past 5s while the bot deletes the party ch
   } finally {
     await s.stop(); bot.server.close();
   }
+});
+
+withServer('more than twelve parties starts exactly twelve and reports the skipped count',async(s,bot)=>{
+ const r=await s.call('/api/shotcaller/start','POST',{count:15,channelId:'200000000000000001',partyNames:Array.from({length:14},(_,i)=>'Party '+(i+2))},s.officer);
+ assert.equal(r.status,200);assert.equal(r.body.startedCount,12);assert.equal(r.body.skippedPartyCount,3);
+ const request=bot.calls.find(c=>c.url.endsWith('/session/start'));assert.equal(request.body.count,12);assert.equal(request.body.partyNames.length,11);
 });

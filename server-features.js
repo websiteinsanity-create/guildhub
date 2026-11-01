@@ -633,11 +633,13 @@ module.exports = function install(ctx) {
     // never reads or writes.
     if (body.quickShotcaller !== undefined) {
       const q = body.quickShotcaller && typeof body.quickShotcaller === 'object' ? body.quickShotcaller : {};
-      const mode = ['8', '12', 'custom'].includes(q.mode) ? q.mode : '8';
+      const mode = ['8', '12', 'custom'].includes(q.mode) ? q.mode : '';
       next.quickShotcaller = {
         channelId: typeof q.channelId === 'string' ? q.channelId.slice(0, 64) : '',
         mode,
-        customCount: Math.min(12, Math.max(1, Math.round(Number(q.customCount)) || 8)),
+        customCount: Number.isInteger(Number(q.customCount)) && Number(q.customCount)>=1 && Number(q.customCount)<=12?Number(q.customCount):null,
+        setupKind:['event','preset'].includes(q.setupKind)?q.setupKind:'default',
+        eventId:q.eventId?String(q.eventId).slice(0,64):'',presetId:q.presetId?String(q.presetId).slice(0,64):'',
         dedicatedCallerId: typeof q.dedicatedCallerId === 'string' ? q.dedicatedCallerId.slice(0, 64) : '',
       };
     }

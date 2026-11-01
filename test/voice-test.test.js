@@ -31,6 +31,7 @@ function startFakeBot() {
       const send = (status, obj) => { const j = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json' }); res.end(j); };
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: 'Unauthorized' });
       if (u.pathname === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: ANCHOR_CHANNEL, name: 'Voice' }] });
+      if (req.url.split('?')[0].endsWith('/session/preflight')) return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:null});
       if (u.pathname === `/api/guilds/${GUILD}/session/start`) {
         if (session) return send(409, { error: 'A Shotcaller session is already active.' });
         session = { active: true, muted: false, dedicated: [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: i === 0 ? ANCHOR_CHANNEL : 'c' + i, name: i === 0 ? 'Voice' : (body.partyNames[i - 1] || `Party ${i + 1}`) })) };
