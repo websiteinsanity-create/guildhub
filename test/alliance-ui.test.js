@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../public/alliance.js'),'utf8');
 function ui(){const nodes=new Map(),listeners={},node=key=>{if(!nodes.has(key)){const classes=new Set();nodes.set(key,{innerHTML:'',textContent:'',hidden:true,open:false,dataset:{},classList:{remove:key=>classes.delete(key),toggle(key){if(classes.has(key)){classes.delete(key);return false;}classes.add(key);return true;}},setAttribute(){},focus(){}});}return nodes.get(key);};
- const context={document:{activeElement:null,querySelector:node,querySelectorAll:()=>[],addEventListener:(type,fn)=>listeners[type]=fn},fetch:()=>new Promise(()=>{}),setInterval(){}};
+ const context={document:{activeElement:null,querySelector:node,querySelectorAll:()=>[],addEventListener:(type,fn)=>{const previous=listeners[type];listeners[type]=event=>{previous?.(event);fn(event);};}},fetch:()=>new Promise(()=>{}),setInterval(){}};
  vm.createContext(context);vm.runInContext(source,context);return{context,node,listeners,run:code=>vm.runInContext(code,context)};
 }
 function buttonsAreStyled(html){const buttons=[...html.matchAll(/<button\b([^>]*)>/g)];assert(buttons.length>0);for(const [,attrs] of buttons)assert(/class="[^"]*\bbtn\b/.test(attrs),'unstyled button: '+attrs);}
@@ -56,4 +56,14 @@ test('navigation cannot re-enable live actions after a failed status poll',async
 test('the new setup form sends its selected channel, party count and main caller to the existing endpoint',async()=>{
  const h=ui(),requests=[];h.context.fetch=async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});return{ok:true,json:async()=>({active:true})};};
  h.run("channels=[{id:'raid',name:'Alliance Raid'}];setup.channelId='raid';setup.count=12;setup.callerId='caller'");await h.run('startRequest()');assert.equal(requests.length,1);assert.equal(requests[0].url,'/api/alliance/start');assert.deepEqual(requests[0].body,{channelId:'raid',count:12,dedicatedCallerId:'caller'});
+});
+
+test('Insanity admin context retains all five Portal pages and adds administration without changing identity',()=>{
+ const h=ui();h.context.sample={active:false,sessionState:'inactive',parties:[],bridge};h.context.context={mode:'insanity-admin',actor:{name:'Insanity Officer'},capabilities:{managePermissions:true,manageSwipe:true}};
+ h.run("status=sample;applyPortalContext(context);portalPermissions={access:{enabled:true,officerRoleIds:[],officerUserIds:[]},bridge:{bufferMs:40,allowAllianceManage:false}};navigate('discord')");
+ assert.equal(h.node('#return-to-guildhub').hidden,false);assert.equal(h.node('#access-title').textContent,'Insanity Admin');assert(h.node('#voice').innerHTML.includes('Save Alliance Settings'));assert(h.node('#admin-context').textContent.includes('Insanity Officer'));
+ h.run("navigate('bridge')");assert(h.node('#voice').innerHTML.includes('data-action="swipe"'));for(const title of ['Dashboard','Shotcaller','Bridge & Comms','Callers & Advisors','Discord Settings'])assert(h.node('#portal-nav').innerHTML.includes(title));
+});
+test('partner context has no new administration forms or Insanity Swipe control',()=>{
+ const h=ui();h.context.sample={active:false,sessionState:'inactive',parties:[],bridge};h.run("status=sample;applyPortalContext({mode:'partner',capabilities:{}});navigate('discord')");assert.equal(h.node('#return-to-guildhub').hidden,true);assert(!h.node('#voice').innerHTML.includes('Save Alliance Settings'));h.run("navigate('bridge')");assert(!h.node('#voice').innerHTML.includes('data-action="swipe"'));
 });

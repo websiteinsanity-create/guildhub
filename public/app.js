@@ -373,6 +373,7 @@ const NAV = [
   { key: 'approvals', label: () => 'Approvals', officer: true, badge: () => S.changes.filter((c) => c.status === 'pending').length + S.leaves.filter((l) => l.status === 'pending').length + S.explanations.filter((x) => x.status === 'pending').length + S.applications.filter((a) => a.status === 'pending').length },
   { key: 'warnings', label: () => 'Warnings', badge: () => (isOfficer() ? 0 : activeWarn(S.user.key).length) },
   { key: 'shotcaller', label: () => 'Shotcaller', officer: true },
+  { key: 'alliance-management', label: () => 'Alliance Management', allianceAdmin: true },
   { key: 'auditlog', label: () => 'Audit log', officer: true },
   { key: 'admin', label: () => 'Admin', officer: true },
   { key: 'diagnostics', label: () => 'Diagnostics', officer: true },
@@ -396,6 +397,7 @@ function canSee(page, id) {
     const mine = myGearThreadId();
     return mine != null && id != null && String(mine) === String(id);
   }
+  if(n.allianceAdmin)return !!S.user?.canManageAlliance && !S.user?.support && !S.user?.readOnly;
   if (n.officer) return isOfficer();
   if (n.coach) return isOfficer() || S.isCoach;      // a real, in-guild class coach (isCoach(u) already treats every officer as a coach too server-side, but checking isOfficer() here as well keeps this readable without relying on that)
   return isOfficer() || !(n.hide && hiddenFromMembers(n.hide));
@@ -404,10 +406,11 @@ const NAV_GROUPS = [
   { key: 'overview', label: 'Overview', items: ['dashboard', 'member'] },
   { key: 'organization', label: 'Organization', items: ['events', 'parties', 'points', 'shotcaller'] },
   { key: 'guild', label: 'Guild', items: ['loot', 'vods', 'gearthreads', 'mygearthread', 'requests', 'leave'] },
-  { key: 'leadership', label: 'Leadership', items: ['approvals', 'warnings', 'auditlog', 'diagnostics', 'admin'] },
+  { key: 'leadership', label: 'Leadership', items: ['approvals', 'warnings', 'alliance-management', 'auditlog', 'diagnostics', 'admin'] },
   { key: 'account', label: 'Account', items: ['apply', 'merc', 'guest-coach'] },
 ];
 const NAV_PATHS = {
+ 'alliance-management':'M10 14l4-4 M8 16l-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0 M16 8l2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0',
  dashboard:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',
  member:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 4a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
  events:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',

@@ -302,6 +302,7 @@ function tooManyFailures(ip) {
 
 // ---------- helpers ----------
 const isOfficer = (u) => u.role === 'officer';
+const alliancePolicy=require('./alliance-policy')({getDb:()=>db,discord});
 const isCoach = (u) => !!u.coach || isOfficer(u);   // officers can do anything a coach can
 const LEADERSHIP = config.leadershipRanks || ['Guild Master', 'Officer'];
 const DUTY_STATUSES = ['todo', 'doing', 'done'];
@@ -610,10 +611,10 @@ function setAttended(ev, characterIds, { mode, by, skipReevaluate = false }) {
 
 // ---------- routes ----------
 const routes = [];
-const route = (method, pattern, handler, { auth = true, officer = false, applicant = false, alliance=false } = {}) => {
+const route = (method, pattern, handler, { auth = true, officer = false, applicant = false, alliance=false, allianceAdmin=false } = {}) => {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '$');
-  routes.push({ method, re, keys, handler, auth, officer, applicant,alliance });
+  routes.push({ method, re, keys, handler, auth, officer, applicant,alliance,allianceAdmin });
 };
 
 // ---------- audit log: records who changed what, across this file and the feature modules ----------
@@ -1696,7 +1697,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
   return { moved: n };
 }, { officer: true });
 
-require('./server-alliance')({route,need,shotcaller:{url:SHOTCALLER_URL,apiKey:SHOTCALLER_API_KEY,guildId:discord.cfg.guildId},allianceGuildId:process.env.ALLIANCE_GUILD_ID,audit:audit.log});
+require('./server-alliance')({route,need,shotcaller:{url:SHOTCALLER_URL,apiKey:SHOTCALLER_API_KEY,guildId:discord.cfg.guildId},allianceGuildId:process.env.ALLIANCE_GUILD_ID,audit:audit.log,canAdmin:alliancePolicy.canAdmin,access:alliancePolicy.access,getDb:()=>db,save});
 // ---------- Shotcaller control panel (officer-only proxy to the separate Shotcaller bot's HTTP API) ----------
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
@@ -1713,7 +1714,7 @@ const shotcallerApi = require('./server-shotcaller')({
 // (defined above, long before this runs) needs that reference at call time, not at parse time.
 const featuresCtx = {
  get revision() { return dataRevision; },
-  route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
+  canManageAlliance:alliancePolicy.canAdmin, route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, setAttended, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
   LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi, partyIsPlaceholder,
   get db() { return db; },
@@ -1804,7 +1805,7 @@ http.createServer(async (req, res) => {
       const merc = cookieOf(req, 'gh_merc') === '1';
       const guestCoachLink = cookieOf(req, 'gh_guestcoach') === '1';
       const alliance=cookieOf(req,'gh_alliance')==='1';
-      const u = await discord.resolveUser(code,alliance);
+      const u = await discord.resolveUser(code,alliance,alliance?alliancePolicy.access():null);
       if(alliance){
         const token=makeToken({key:u.id,name:u.name,role:'alliance',allianceGuildId:u.guildId,allianceRoles:u.roles,discord:true},8/24);
         res.writeHead(302,{Location:'/alliance.html','Set-Cookie':[cookieHeader(SESSION_COOKIE,token,8*3600),cookieHeader('gh_alliance','',0),cookieHeader('gh_oauth','',0)]});return res.end();
@@ -1933,14 +1934,13 @@ http.createServer(async (req, res) => {
         user = readToken(bearer || cookieOf(req, SESSION_COOKIE));
         need(user, 401, 'Please sign in.');
         if(user.role==='alliance'){
-          const roles=(process.env.ALLIANCE_OFFICER_ROLE_IDS || '').split(',').map(x=>x.trim());
-          const users=(process.env.ALLIANCE_OFFICER_USER_IDS || '').split(',').map(x=>x.trim());
-          need(user.allianceGuildId===process.env.ALLIANCE_GUILD_ID && (users.includes(user.key) || (user.allianceRoles || []).some(id=>roles.includes(id))),403,'Alliance access is disabled.');
+          need(alliancePolicy.canPartner(user,process.env.ALLIANCE_GUILD_ID),403,'Alliance access is disabled.');
           need(r.alliance===true,403,'Alliance access is limited to Alliance voice controls.');
         }
         if(user.support){need(supportAccess.valid(user),403,'Support access is disabled.');user.role='officer';}
         if(user.support)need(require('./support-read-policy')(req.method,url.pathname),403,'Support access is read-only. This operation is not permitted.');
-        if(r.alliance)need(user.role==='alliance',403,'Sign in through the Alliance access page.');
+        if(r.alliance)need(user.role==='alliance' || alliancePolicy.canAdmin(user),403,'Alliance officer or Insanity administrator access is required.');
+        if(r.allianceAdmin)need(alliancePolicy.canAdmin(user),403,'Insanity administrator access is required.');
         // Keep session flags in sync with the persisted user record. Admin coach assignments can
         // change while someone is already signed in, so the signed session must not retain a stale
         // `coach` value until the next Discord login.

@@ -112,7 +112,7 @@ module.exports = function install(ctx) {
       return out;
     });
     return {
-      user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: user.role, support: !!user.support, readOnly: !!user.support, canViewLeadership: !!user.support && isOfficer(user) },
+      user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: user.role, canManageAlliance:!!ctx.canManageAlliance?.(user), support: !!user.support, readOnly: !!user.support, canViewLeadership: !!user.support && isOfficer(user) },
       members: D.members.filter((m) => off || !m.pendingApproval || own.has(m.id)).map((m) => (off || ownOrCoached(m.id) ? m : { ...m, questlogs: [] })),     // Questlog links: the leadership, the owner, and their coach
       events,
       points: off ? D.points : hide('points') ? [] : D.points.filter((p) => ownOrCoached(p.memberId)),
@@ -135,7 +135,7 @@ module.exports = function install(ctx) {
       tags: off ? D.tags : [],
       playerTags: off ? D.playerTags : {},
       prefs: D.prefs[user.key] || {},
-      settings: D.settings,
+      settings: ctx.canManageAlliance?.(user)?D.settings:Object.fromEntries(Object.entries(D.settings).filter(([key])=>key!=='allianceAccess')),
       // A single shared scratchpad for whoever is building parties - the same note on the Presets page and on
       // every event's board, officer-only. Kept separate from the settings object above (which is sent to
       // everyone) so the note's actual content never reaches a non-officer, not just hidden from their view.
