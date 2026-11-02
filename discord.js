@@ -70,7 +70,7 @@ function createDiscord(env = process.env) {
 
   // Turns the ?code=... from Discord into a person. Somebody who is not in the Discord server (or lacks the member role) comes back with
   // role "applicant": the caller decides whether applicants may sign in at all.
-  async function resolveUser(code) {
+  async function resolveUser(code,alliance=false) {
     const tok = await api('/oauth2/token', {
       method: 'POST',
       form: { client_id: cfg.clientId, client_secret: cfg.clientSecret, grant_type: 'authorization_code', code, redirect_uri: redirectUri() },
@@ -78,8 +78,16 @@ function createDiscord(env = process.env) {
     if (!tok.ok || !tok.data.access_token) throw new Error('Discord did not accept the sign-in. Please try again.');
     const me = await api('/users/@me', { token: tok.data.access_token });
     if (!me.ok || !me.data.id) throw new Error('Could not read your Discord profile.');
-    const mem = await api(`/users/@me/guilds/${cfg.guildId}/member`, { token: tok.data.access_token });
+    const targetGuild=alliance?env.ALLIANCE_GUILD_ID:cfg.guildId;
+    if(alliance && (!targetGuild || targetGuild===cfg.guildId))throw Error('Alliance login is not configured.');
+    const mem = await api(`/users/@me/guilds/${targetGuild}/member`, { token: tok.data.access_token });
     const inGuild = mem.ok, roles = inGuild ? (mem.data.roles || []) : [];
+    if(alliance){
+      const allowedUsers=(env.ALLIANCE_OFFICER_USER_IDS || '').split(',').map(x=>x.trim());
+      const allowedRoles=(env.ALLIANCE_OFFICER_ROLE_IDS || '').split(',').map(x=>x.trim());
+      if(!inGuild || !(allowedUsers.includes(me.data.id) || roles.some(id=>allowedRoles.includes(id))))throw Error('Alliance officer access is required.');
+      return {id:me.data.id,name:String(mem.data.nick || me.data.global_name || me.data.username).slice(0,40),role:'alliance',guildId:targetGuild,roles};
+    }
     const officer = cfg.officerUserIds.includes(me.data.id) || roles.some((r) => cfg.officerRoleIds.includes(r));
     const member = officer || (inGuild && (!cfg.memberRoleId || roles.includes(cfg.memberRoleId)));
     return {

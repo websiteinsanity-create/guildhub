@@ -610,10 +610,10 @@ function setAttended(ev, characterIds, { mode, by, skipReevaluate = false }) {
 
 // ---------- routes ----------
 const routes = [];
-const route = (method, pattern, handler, { auth = true, officer = false, applicant = false } = {}) => {
+const route = (method, pattern, handler, { auth = true, officer = false, applicant = false, alliance=false } = {}) => {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '$');
-  routes.push({ method, re, keys, handler, auth, officer, applicant });
+  routes.push({ method, re, keys, handler, auth, officer, applicant,alliance });
 };
 
 // ---------- audit log: records who changed what, across this file and the feature modules ----------
@@ -1696,6 +1696,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
   return { moved: n };
 }, { officer: true });
 
+require('./server-alliance')({route,need,shotcaller:{url:SHOTCALLER_URL,apiKey:SHOTCALLER_API_KEY,guildId:discord.cfg.guildId},allianceGuildId:process.env.ALLIANCE_GUILD_ID,audit:audit.log});
 // ---------- Shotcaller control panel (officer-only proxy to the separate Shotcaller bot's HTTP API) ----------
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
@@ -1788,12 +1789,13 @@ http.createServer(async (req, res) => {
     // guild who is only ever there to review VODs for one class, never a member in any other sense.
     const cookies = [cookieHeader('gh_oauth', state, 600)];
     if (url.searchParams.get('merc') === '1') cookies.push(cookieHeader('gh_merc', '1', 600));
+    cookies.push(cookieHeader('gh_alliance',url.searchParams.get('alliance')==='1'?'1':'',url.searchParams.get('alliance')==='1'?600:0));
     if (url.searchParams.get('guestcoach') === '1') cookies.push(cookieHeader('gh_guestcoach', '1', 600));
     res.writeHead(302, { Location: discord.authorizeUrl(state), 'Set-Cookie': cookies });
     return res.end();
   }
   if (url.pathname === '/auth/discord/callback' && req.method === 'GET') {
-    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': [cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0)] }); res.end(); };
+    const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': [cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0),cookieHeader('gh_alliance','',0)] }); res.end(); };
     try {
       if (!discord.loginEnabled) return fail('Discord sign-in is not set up on this server.');
       if (url.searchParams.get('error')) return fail('Discord sign-in was cancelled.');
@@ -1801,7 +1803,12 @@ http.createServer(async (req, res) => {
       if (!state || !code || !safeEqual(state, cookieOf(req, 'gh_oauth'))) return fail('The sign-in link expired. Please try again.');
       const merc = cookieOf(req, 'gh_merc') === '1';
       const guestCoachLink = cookieOf(req, 'gh_guestcoach') === '1';
-      const u = await discord.resolveUser(code);
+      const alliance=cookieOf(req,'gh_alliance')==='1';
+      const u = await discord.resolveUser(code,alliance);
+      if(alliance){
+        const token=makeToken({key:u.id,name:u.name,role:'alliance',allianceGuildId:u.guildId,allianceRoles:u.roles,discord:true},8/24);
+        res.writeHead(302,{Location:'/alliance.html','Set-Cookie':[cookieHeader(SESSION_COOKIE,token,8*3600),cookieHeader('gh_alliance','',0),cookieHeader('gh_oauth','',0)]});return res.end();
+      }
       const known = db.users[u.id];
       // A guest coach is never a guild member, in any sense - whether they arrived just now via the invite
       // link or are signing back in afterwards, they always land as an applicant with nothing beyond coaching
@@ -1829,7 +1836,7 @@ http.createServer(async (req, res) => {
       // was the actual cause of players having to re-authorize with Discord every time they opened the site on
       // the same device after as little as a week away.
       const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 30);
-      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 30 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0)] });
+      res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 30 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0),cookieHeader('gh_alliance','',0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
   }
@@ -1925,8 +1932,15 @@ http.createServer(async (req, res) => {
         const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
         user = readToken(bearer || cookieOf(req, SESSION_COOKIE));
         need(user, 401, 'Please sign in.');
+        if(user.role==='alliance'){
+          const roles=(process.env.ALLIANCE_OFFICER_ROLE_IDS || '').split(',').map(x=>x.trim());
+          const users=(process.env.ALLIANCE_OFFICER_USER_IDS || '').split(',').map(x=>x.trim());
+          need(user.allianceGuildId===process.env.ALLIANCE_GUILD_ID && (users.includes(user.key) || (user.allianceRoles || []).some(id=>roles.includes(id))),403,'Alliance access is disabled.');
+          need(r.alliance===true,403,'Alliance access is limited to Alliance voice controls.');
+        }
         if(user.support){need(supportAccess.valid(user),403,'Support access is disabled.');user.role='officer';}
         if(user.support)need(require('./support-read-policy')(req.method,url.pathname),403,'Support access is read-only. This operation is not permitted.');
+        if(r.alliance)need(user.role==='alliance',403,'Sign in through the Alliance access page.');
         // Keep session flags in sync with the persisted user record. Admin coach assignments can
         // change while someone is already signed in, so the signed session must not retain a stale
         // `coach` value until the next Discord login.

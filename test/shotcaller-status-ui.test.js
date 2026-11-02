@@ -22,6 +22,13 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync(require('node:path').join(
 const run=s=>vm.runInContext(s,ctx);
 run("S.user={key:'officer',role:'officer'};S.cfg={shotcallerOn:true,roles:[],classes:[]};S.settings.shotcaller={};render=()=>{};route=()=>({page:'shotcaller'})");
 vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../public/shotcaller.js'),'utf8'),ctx);
+
+test('bridge stays available without an internal session and shutdown offers both choices',()=>{
+ ctx.bridge={state:'waiting',desired:true,active:false,partnerGuildId:'alliance',sessions:[],mainEnabled:{},canManageMains:true};
+ run("SC={loading:false,data:{active:false,sessionState:'inactive',bridge},error:''};UI.scTab='session'");
+ const html=run('viewShotcaller()');assert(html.includes('Alliance Bridge · waiting'));assert(html.includes('End Alliance Bridge'));
+ const dialog=run('scBridgeStopDialog()');assert(dialog.includes('Keep Bridge Waiting'));assert(dialog.includes('End Alliance Bridge'));
+});
 test('System status works with the existing bot without inventing relay health or latency',()=>{
  run("UI.scTab='status';SC={loading:false,data:{active:true,parties:[{name:'Party one',connected:6}]},error:'',receivedAt:'2026-10-28T12:00:00Z',requestMs:12}");
  const html=run('viewShotcaller()');assert(html.includes('System status'));assert(html.includes('Limited telemetry'));assert(html.includes('Not reported'));assert(html.includes('Party one'));assert(html.includes('Not measured'));assert(!html.includes('1 / 1 ready'));assert(!html.includes('Stop session'));

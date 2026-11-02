@@ -7,6 +7,8 @@ test('every registered business mutation is blocked before handler execution for
  const login=await fetch(s.base+'/api/support/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'SupportAI',code})});assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
  const before=(await s.call('/api/export','GET',null,s.officer)).body;
  const calls=new Set();for(const name of fs.readdirSync(path.join(__dirname,'..')).filter(n=>n.endsWith('.js'))){const source=fs.readFileSync(path.join(__dirname,'..',name),'utf8');for(const match of source.matchAll(/route\(\s*'(POST|PUT|DELETE|PATCH)'\s*,\s*'([^']+)'/g)){if(['/api/login','/api/support/login','/api/logout'].includes(match[2]))continue;calls.add(match[1]+' '+match[2].replace(/:\w+/g,'1'));}}
+ calls.delete('POST /api/alliance/');
+ for(const action of ['start','stop','mute','pause','dedicated','additional-callers','bridge'])calls.add('POST /api/alliance/'+action);
  assert(calls.size>80);
  for(const action of calls){const [method,url]=action.split(' ');const response=await fetch(s.base+url,{method,headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({})});assert.equal(response.status,403,action);assert((await response.json()).error.includes('read-only'),action);}
  for(const url of ['/api/state','/api/attendance-stats','/api/admin/diagnostics','/api/admin/audit']){const response=await fetch(s.base+url,{headers:{Cookie:cookie}});assert.equal(response.status,200,url);const result=await response.json();if(url==='/api/state')assert.equal(result.user.readOnly,true);}

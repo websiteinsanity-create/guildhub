@@ -22,7 +22,7 @@ const pngDataUrl = () => 'data:image/png;base64,' + FAKE_PNG.toString('base64');
 
 function startFakeBot() {
   const calls = [];
-  let session = null;
+  let session = null, bridgeDesired=false, sequence=0, preflightError=null;
   const server = http.createServer((req, res) => {
     let data = '';
     req.on('data', (c) => { data += c; });
@@ -32,18 +32,27 @@ function startFakeBot() {
       const send = (status, obj) => { const j = JSON.stringify(obj); res.writeHead(status, { 'content-type': 'application/json' }); res.end(j); };
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: 'Unauthorized' });
       if (req.url === `/api/guilds/${GUILD}/voice-channels`) return send(200, { channels: [{ id: '200000000000000001', name: 'Command' }] });
-      if (req.url.split('?')[0].endsWith('/session/preflight')) return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:null});
+      if (req.url.split('?')[0].endsWith('/session/preflight')) {
+        if(preflightError)return send(409,{error:preflightError});
+        return send(200,{ok:true,count:Math.min(12,body.count),operationId:body.operationId,existingSessionId:session?.sessionId || null});
+      }
       if (req.url === `/api/guilds/${GUILD}/session/start`) {
         if (body.channelId === '999999999999999999') return send(400, { error: 'That channel is not a voice channel in this server.' });
-        session = { active: true, muted: false, dedicated: [], additionalCallers: [], callerRoleId: null, bridge: null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0 })) };
+        session = { active: true, sessionId:'session-'+(++sequence),sessionState:'active', muted: false, dedicated: [], additionalCallers: [], callerRoleId: null, bridge: bridgeDesired?{desired:true,active:true,state:'active'}:null, parties: Array.from({ length: body.count }, (_, i) => ({ index: i + 1, channelId: 'c' + i, name: body.partyNames[i - 1] || `Party ${i + 1}`, connected: 0,connectedUserIds:[],connectedStates:[] })) };
         return send(200, session);
       }
-      if (req.url === `/api/guilds/${GUILD}/session/stop`) { session = null; return send(200, { ok: true }); }
+      if (req.url === `/api/guilds/${GUILD}/session/stop`) {
+        if(bridgeDesired && !['keep','end'].includes(body.bridgeChoice))return send(409,{error:'Choose Keep Bridge Waiting or End Alliance Bridge.'});
+        if(body.bridgeChoice==='end')bridgeDesired=false;
+        session = null; return send(200, { ok: true });
+      }
       if (req.url === `/api/guilds/${GUILD}/session`) return send(200, session || { active: false, lastVoiceChannel: null });
       send(404, { error: 'Not found' });
     });
   });
-  return new Promise((resolve) => server.listen(0, () => resolve({ server, url: `http://localhost:${server.address().port}`, calls, activeSession: () => session })));
+  return new Promise((resolve) => server.listen(0, () => resolve({ server, url: `http://localhost:${server.address().port}`, calls, activeSession: () => session,
+    setBridge(){bridgeDesired=true;if(session)session.bridge={desired:true,active:true,state:'active'};},
+    failPreflight(message){preflightError=message;},bridgeDesired:()=>bridgeDesired })));
 }
 
 async function startServer(seedDb) {
@@ -182,6 +191,34 @@ withServer('an already-active Shotcaller session is stopped automatically before
   const stopIdx = urls.lastIndexOf(`/api/guilds/${GUILD}/session/stop:POST`);
   const startIdx = urls.lastIndexOf(`/api/guilds/${GUILD}/session/start:POST`);
   assert.ok(stopIdx !== -1 && stopIdx < startIdx, 'the old session was stopped before the new one was started: ' + JSON.stringify(urls));
+  assert.equal(s.bot.calls[stopIdx].body.bridgeChoice,'keep');
+});
+
+withServer('combined post replaces an active bridged session with Keep and binds tracking to the new layout',async s=>{
+  await s.call('/api/settings','PUT',{attendanceMode:'voice'},s.officer);
+  await s.call('/api/admin/discord','PUT',{partyPost:{deletePrevious:true}},s.officer);
+  const ev=await makeEventWithParties(s,[{members:6,leader:true},{members:6,leader:true}]);
+  const before=await s.call(`/api/events/${ev.id}/post-parties`,'POST',postBody({}),s.officer);assert.equal(before.status,200);
+  const oldPost=s.fake.state.posts[0];
+  await fetch(`${s.bot.url}/api/guilds/${GUILD}/session/start`,{method:'POST',headers:{authorization:`Bearer ${KEY}`,'content-type':'application/json'},body:JSON.stringify({count:3,channelId:'200000000000000001',partyNames:[]})});
+  const oldId=s.bot.activeSession().sessionId;s.bot.setBridge();
+  const result=await s.call(`/api/events/${ev.id}/post-parties`,'POST',postBody({shotcaller:{enabled:true,channelId:'200000000000000001'}}),s.officer);
+  assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.shotcaller.ok,true,JSON.stringify(result.body));
+  const replacement=s.bot.activeSession();assert.notEqual(replacement.sessionId,oldId);assert.equal(replacement.parties.length,2);assert.equal(replacement.bridge.state,'active');assert.equal(s.bot.bridgeDesired(),true);
+  const stop=s.bot.calls.find(c=>c.url.endsWith('/session/stop'));assert.deepEqual(stop.body,{sessionId:oldId,bridgeChoice:'keep'});
+  assert.equal(oldPost.deleted,true);assert.equal(s.fake.state.posts.length,2);
+  const saved=(await s.call('/api/state','GET',null,s.officer)).body.events.find(e=>e.id===ev.id);
+  assert.equal(saved.voiceSessionSnapshot.sessionBinding,'id:'+replacement.sessionId);assert.equal(saved.voiceTracking.sessionBinding,'id:'+replacement.sessionId);assert.equal(saved.voiceTracking.active,true);assert.equal(saved.voiceTracking.partyChannels.length,2);
+});
+
+withServer('failed preflight with an active bridge preserves the previous post and session without a replacement',async s=>{
+  await s.call('/api/admin/discord','PUT',{partyPost:{deletePrevious:true}},s.officer);
+  const ev=await makeEventWithParties(s,[{members:6,leader:true}]);
+  await s.call(`/api/events/${ev.id}/post-parties`,'POST',postBody({}),s.officer);
+  await fetch(`${s.bot.url}/api/guilds/${GUILD}/session/start`,{method:'POST',headers:{authorization:`Bearer ${KEY}`,'content-type':'application/json'},body:JSON.stringify({count:3,channelId:'200000000000000001',partyNames:[]})});
+  s.bot.setBridge();const old=s.bot.activeSession();s.bot.failPreflight('Relay unavailable');
+  const result=await s.call(`/api/events/${ev.id}/post-parties`,'POST',postBody({shotcaller:{enabled:true,channelId:'200000000000000001'}}),s.officer);
+  assert.equal(result.status,409);assert.equal(s.fake.state.posts.length,1);assert.equal(s.fake.state.posts[0].deleted,false);assert.equal(s.bot.activeSession(),old);assert.equal(s.bot.calls.filter(c=>c.url.endsWith('/session/stop')).length,0);
 });
 
 withServer('an invalid voice channel id fails validation up front and blocks the whole action (no Discord post either)', async (s) => {

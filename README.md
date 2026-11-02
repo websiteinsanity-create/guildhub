@@ -709,3 +709,6 @@ Each Gear Thread topic holds several screenshots per build. Existing single scre
 automatically. Add several images (file picker, drag and drop or Ctrl+V), drag thumbnails or use the arrow buttons to
 reorder (the first is the cover), delete single images, and page through them in the viewer with buttons, arrow keys or
 a swipe. Each image is limited to 6 MB; identical images in a topic are stored once.
+
+## Alliance Bridge 1.44.1
+See ALLIANCE_BRIDGE_DE.md for the restricted Alliance portal, permissions, deployment and validation limits. Based on the uploaded guildhall-1.43.26.zip (its package.json reports 1.43.25).
