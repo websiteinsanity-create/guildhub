@@ -464,3 +464,47 @@ withServer(
   },
   { VOICE_POLL_INTERVAL_MS: '5000' },
 );
+
+for (const voiceTrackAuto of [false, true]) {
+  withServer(`manual start and restart bypass future event time and +10-minute offset (automatic=${voiceTrackAuto})`, async (s) => {
+    await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceTrackStartOffsetMinutes: 0 }, s.officer);
+    const { ev, anchorMembers } = await makeTrackedEvent(s, 60, { voiceTrackAuto, voiceTrackStartOffsetMinutes: 10, voiceTrackExtraChannelIds: [OWN_EXTRA_CHANNEL, '200000000000000078'] });
+    // Start the session separately; a manual track must work regardless of the auto switch.
+    const session = await s.call('/api/shotcaller/start', 'POST', { count: 1, channelId: VOICE_CHANNEL }, s.officer);
+    assert.equal(session.status, 200, JSON.stringify(session.body));
+    s.bot.setConnected(OWN_EXTRA_CHANNEL, [anchorMembers[0].owner]);
+    s.bot.setConnected('200000000000000078', [anchorMembers[1].owner]);
+    const before = Date.now();
+    const start = await s.call(`/api/events/${ev.id}/voice-track/start`, 'POST', {}, s.officer);
+    assert.equal(start.status, 200, JSON.stringify(start.body));
+    let finished = await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.voiceTracking?.finishedAt ? e : null; });
+    assert.equal(finished.voiceTracking.checksDone, 3);
+    assert.ok(finished.voiceTracking.gateAt >= before && finished.voiceTracking.gateAt < Date.parse(ev.start));
+    assert.equal(finished.voiceTracking.gateAt, finished.voiceTracking.startedAt);
+    assert.deepEqual([...finished.attended].sort(), anchorMembers.map(m => m.id).sort());
+    assert.equal(finished.voiceTrackStartOffsetMinutes, 10, 'manual start does not change the automatic schedule');
+    const firstRun = finished.voiceTracking.runId;
+    s.bot.setConnected(OWN_EXTRA_CHANNEL, []);
+    const restart = await s.call(`/api/events/${ev.id}/voice-track/restart`, 'POST', {}, s.officer);
+    assert.equal(restart.status, 200, JSON.stringify(restart.body));
+    finished = await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.voiceTracking?.finishedAt ? e : null; });
+    assert.notEqual(finished.voiceTracking.runId, firstRun);
+    assert.equal(finished.voiceTracking.checksDone, 3);
+    assert.equal(finished.voiceTracking.gateAt, finished.voiceTracking.startedAt);
+    assert.deepEqual(finished.attended, [anchorMembers[1].id], 'restart removes prior sightings and captures fresh extra-channel presence');
+  });
+}
+
+withServer('automatic tracking retains the event-specific future gate over the guild offset', async (s) => {
+  await s.call('/api/settings', 'PUT', { attendanceMode: 'voice', voiceTrackStartOffsetMinutes: 0 }, s.officer);
+  const { ev, anchorMembers } = await makeTrackedEvent(s, 60, { voiceTrackAuto: true, voiceTrackStartOffsetMinutes: 10 });
+  s.bot.setConnected(VOICE_CHANNEL, anchorMembers.map(m => m.owner));
+  const post = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
+  assert.equal(post.status, 200, JSON.stringify(post.body));
+  await new Promise(resolve => setTimeout(resolve, 450));
+  const waiting = await attendedOf(s, ev.id);
+  assert.equal(waiting.voiceTracking.active, true);
+  assert.equal(waiting.voiceTracking.gateAt, Date.parse(ev.start) + 10 * 60000);
+  assert.equal(waiting.voiceTracking.checksDone, 0);
+  assert.deepEqual(waiting.attended, []);
+});

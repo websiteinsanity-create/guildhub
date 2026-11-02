@@ -33,7 +33,7 @@ module.exports = function install(ctx) {
     try {
       res = await fetch(`${shotcaller.url}/api/guilds/${shotcaller.guildId}${path}`, {
         method,
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${shotcaller.apiKey}`, ...(body?.operationId?{'x-shotcaller-operation-id':body.operationId}:{}) },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${shotcaller.apiKey}`, 'x-shotcaller-admin':'true', ...(body?.operationId?{'x-shotcaller-operation-id':body.operationId}:{}) },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -99,12 +99,12 @@ module.exports = function install(ctx) {
   function closeSessionTracks(binding,reason){
     for(const ev of db().events){const vt=ev.voiceTracking;if(vt?.active && (!binding || vt.sessionBinding===binding))finalizeTrack(ev,null,{reason,incomplete:vt.checksDone<VOICE_CHECKS_TOTAL});}
   }
-  async function stopOwnedSession(binding){
+  async function stopOwnedSession(binding,bridgeChoice){
     const current=await callSession('');
     if(!current.active && sessionState(current)==='inactive')return false;
     if(binding && sessionIdentity(current)!==binding)return false;
     invalidateSession();
-    await callSession('/stop','POST',current.sessionId?{sessionId:current.sessionId}:{},60000);
+    await callSession('/stop','POST',current.sessionId?{sessionId:current.sessionId,bridgeChoice}:{},60000);
     await waitForIdle();invalidateSession();
     closeSessionTracks(binding,'session-stopped');return true;
   }
@@ -159,7 +159,9 @@ module.exports = function install(ctx) {
       const current=await callSession('');
       need(!['starting','stopping','stop-failed'].includes(sessionState(current)),409,'Shotcaller is starting or stopping. Wait before replacing it.');
       need((current.sessionId || null)===(preflight.existingSessionId || null),409,'Shotcaller changed after preflight. Refresh before replacing it.');
-      if(current.active)await stopOwnedSession(sessionIdentity(current));
+      // Automatic party-layout replacement keeps the existing Bridge request alive.
+      // Manual stops still require the user's explicit Keep/End selection.
+      if(current.active)await stopOwnedSession(sessionIdentity(current),'keep');
     }
     invalidateSession();
     try{
@@ -240,7 +242,7 @@ module.exports = function install(ctx) {
     if(ctx.effectiveAttendanceMode(ev)!=='voice')return;
     ev.voiceSessionSnapshot={sessionBinding:sessionIdentity(started),channelKey:liveChannelKey(started),partyChannels:computePartyChannels(ev,started,realRest)};
   }
-  function beginVoiceTracking(ev, started, realRest) {
+  function beginVoiceTracking(ev, started, realRest, { manual = false } = {}) {
     if (ctx.effectiveAttendanceMode(ev) !== 'voice') return;
     if (!started || !Array.isArray(started.parties)) return;
     need(started.active,409,'Shotcaller must be active before tracking begins.');
@@ -251,8 +253,12 @@ module.exports = function install(ctx) {
     for(const other of db().events)if(other.id!==ev.id && other.voiceTracking?.active)finalizeTrack(other,null,{reason:'another-event',incomplete:other.voiceTracking.checksDone<VOICE_CHECKS_TOTAL});
     clearCheckTimer(ev.id);
     const offsetMs=(Number(ev.voiceTrackStartOffsetMinutes ?? db().settings.voiceTrackStartOffsetMinutes)||0)*60000;
-    const gateAt=Date.parse(ev.start)+offsetMs;
-    ev.voiceTracking={runId:randomUUID(),sessionBinding:sessionIdentity(started),legacyIdentity:!started.sessionId,gateAt,active:true,partyChannels,seen:{},sessionSeen:[],channels:[],checksDone:0,startedAt:Date.now(),finishedAt:null};
+    const startedAt=Date.now();
+    // An officer's explicit start/restart means now, even for a future event.
+    // Only automatic starts use the event's configured time and offset.
+    // Persist the gate so later checks and recovery retain the same decision.
+    const gateAt=manual ? startedAt : Date.parse(ev.start)+offsetMs;
+    ev.voiceTracking={runId:randomUUID(),sessionBinding:sessionIdentity(started),legacyIdentity:!started.sessionId,gateAt,active:true,partyChannels,seen:{},sessionSeen:[],channels:[],checksDone:0,startedAt,finishedAt:null};
 
     if (presenceUnsupported(started)) {
       ev.voiceTracking.presenceUnsupported = true;
@@ -281,7 +287,7 @@ module.exports = function install(ctx) {
     const status = await callSession('');
     need(status && status.active, 409, 'Shotcaller is not running right now - start it first, then come back and start tracking.');
     const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
-    beginVoiceTracking(ev, status, realRest);
+    beginVoiceTracking(ev, status, realRest, { manual: true });
     audit(user, 'event.voicetrack.start', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually started voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
   }, { officer: true });
@@ -306,7 +312,7 @@ module.exports = function install(ctx) {
     ev.attendanceTracked = undo ? (undo.attendanceTracked === undefined ? false : undo.attendanceTracked) : false;
     ev.attendanceUndo = null;
     const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
-    beginVoiceTracking(ev, status, realRest);
+    beginVoiceTracking(ev, status, realRest, { manual: true });
     audit(user, 'event.voicetrack.restart', { type: 'event', id: ev.id, name: ev.title }, `${user.name} reset and restarted voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
   }, { officer: true });
@@ -678,7 +684,7 @@ module.exports = function install(ctx) {
     const current=await callSession('');
     need(!body.sessionId || body.sessionId===current.sessionId,409,'This session changed. Refresh before stopping it.');
     const binding=sessionIdentity(current);
-    await stopOwnedSession(binding);invalidateSession();
+    await stopOwnedSession(binding,body.bridgeChoice);invalidateSession();
     audit(user,'shotcaller.stop',{type:'guild'},`${user.name} stopped the Shotcaller session.`);
     return{ok:true,active:false,sessionState:'inactive'};
   },{officer:true});
@@ -700,6 +706,17 @@ module.exports = function install(ctx) {
     return r;
   }, { officer: true });
 
+  route('POST','/api/shotcaller/bridge',async({body,user})=>{
+    need(['start','end','mains','swipe'].includes(body.action),400,'Unknown bridge action.');
+    const result=await callSession('/bridge','POST',{action:body.action,mainEnabled:body.mainEnabled,enabled:body.enabled});invalidateSession();
+    audit(user,'shotcaller.bridge.'+body.action,{type:'guild'},JSON.stringify({by:user.name,action:body.action,mainEnabled:result.mainEnabled,swipe:result.swipe}));return result;
+  },{officer:true});
+  route('GET','/api/admin/alliance-bridge',async()=>{const status=await callSession('');return status.bridge || null;},{officer:true});
+  route('PUT','/api/admin/alliance-bridge',async({body,user})=>{
+    const before=(await callSession('')).bridge;
+    const result=await callSession('/bridge','POST',{action:'settings',allowAllianceManage:body.allowAllianceManage,bufferMs:body.bufferMs});invalidateSession();
+    audit(user,'shotcaller.bridge.settings',{type:'settings'},JSON.stringify({by:user.name,before,after:{allowAllianceManage:result.allowAllianceManage,bufferMs:result.audio?.bufferMs}}));return result;
+  },{officer:true});
   // ---------------------------------------------------------------- Admin: who can be picked as a caller
   route('PUT', '/api/admin/shotcaller', ({ body, user }) => {
     const st = db().settings.shotcaller, touched = [];
