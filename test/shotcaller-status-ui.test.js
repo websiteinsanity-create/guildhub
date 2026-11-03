@@ -25,8 +25,8 @@ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../public/s
 
 test('bridge stays available without an internal session and shutdown offers both choices',()=>{
  ctx.bridge={state:'waiting',desired:true,active:false,partnerGuildId:'alliance',sessions:[],mainEnabled:{},canManageMains:true};
- run("SC={loading:false,data:{active:false,sessionState:'inactive',bridge},error:''};UI.scTab='session'");
- const html=run('viewShotcaller()');assert(html.includes('Alliance Bridge · waiting'));assert(html.includes('End Alliance Bridge'));
+ run("SC={loading:false,data:{active:false,sessionState:'inactive',bridge},error:''};UI.scTab='bridge'");
+ const html=run('viewShotcaller()');assert(html.includes('aria-label="Alliance Bridge controls"'));assert(html.includes('>Waiting</strong>'));assert(html.includes('End Alliance Bridge'));
  const dialog=run('scBridgeStopDialog()');assert(dialog.includes('Keep Bridge Waiting'));assert(dialog.includes('End Alliance Bridge'));
 });
 test('System status works with the existing bot without inventing relay health or latency',()=>{
@@ -56,4 +56,17 @@ test('availability dialog is officer-only, offers a single replacement and close
  form={dataset:{absence:'absence',session:'session'}};run('SC.data.mainCaller.showReplacement=false;scMainAvailability()');assert.equal(closed,1);
  form=null;html='';node('#dlg').open=false;run('S.user.readOnly=true;SC.data.mainCaller.showReplacement=true;scMainAvailability()');assert.equal(html,'');
  ctx.document.querySelector=node;run('S.user.readOnly=false');
+});
+
+test('Bridge & Comms is the sole Shotcaller bridge surface and works during startup and failures',async()=>{
+ run("S.user.role='officer';S.cfg.shotcallerOn=true;UI.scTab='session';SC={loading:false,error:'',data:{active:false,sessionState:'inactive',bridge}}");
+ let html=run('viewShotcaller()');assert(html.includes('data-tab="bridge"'));assert(!html.includes('sc-alliance-bridge'));
+ await run("ACTIONS['sc-tab'](null,{tab:'bridge'})");html=run('viewShotcaller()');assert(html.includes('sc-alliance-bridge'));assert(html.includes('End Alliance Bridge'));assert(!html.includes('sc-console-parties'));
+ for(const [value,label] of [['off','Disconnected'],['waiting','Waiting'],['connecting','Connecting'],['active','Active'],['paused','Paused'],['reconnecting','Reconnecting']]){ctx.state=value;run('SC.data.bridge.state=state');assert(run('viewShotcaller()').includes('>'+label+'</strong>'));}
+ run("SC.data.sessionState='starting'");assert(run('viewShotcaller()').includes('sc-alliance-bridge'));
+ run("SC.error='offline'");html=run('viewShotcaller()');assert(html.includes('Status may be outdated'));assert(/<button[^>]*data-act="sc-bridge-toggle"[^>]*disabled/.test(html));
+});
+test('voice setup names describe the existing manual anchor and channel layouts',()=>{
+ run("SC.error='';S.events=[];S.presets=[];S.prefs={};UI.scSetupDraft={}");
+ const html=run("scStartForm([{id:'voice',name:'Raid'}])");assert(html.includes('Starting Voice Channel'));assert(html.includes('This channel becomes Party 1'));assert(html.includes('Numbered Party Channels'));assert(!html.includes('plain Party 1-N'));assert(!html.includes('Automatic Channel Selection'));
 });
