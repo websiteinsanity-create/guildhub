@@ -2108,6 +2108,14 @@ details.vod-player-fold .fold-body { padding: 0 0 10px 10px; }
 .sc-console-tabs button { display:flex; align-items:center; gap:8px; background:transparent; color:#b9a8ca; border:0; border-bottom:3px solid transparent; padding:12px 18px; cursor:pointer; }
 .sc-console-tabs button.active { color:#e6cb96; border-bottom-color:#d7b87a; background:linear-gradient(transparent,#b78d4d15); }
 .sc-console-tabs svg { width:17px; height:17px; }
+.sc-alliance-bridge .sc-channel { min-width:0; overflow-wrap:anywhere; }
+.sc-alliance-bridge .sc-section-heading { flex-wrap:wrap; gap:12px; }
+.sc-alliance-bridge details { margin:10px 0; font-size:12px; }
+.sc-alliance-bridge details ul { padding-left:18px; }
+@media(max-width:650px) {
+ .sc-alliance-bridge .sc-party-grid { grid-template-columns:minmax(0,1fr); }
+ .sc-alliance-bridge .btn { min-height:44px; }
+}
 .sc-console-tabs > span { margin-left:auto; font-size:11px; color:#a796b7; }
 .sc-console-top { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(280px,1fr); gap:16px; }
 .sc-console-session,.sc-console-callers,.sc-console-parties,.sc-setup-panel { border:1px solid #44314f; border-radius:9px; background:#1b1520; min-width:0; }
@@ -2778,3 +2786,104 @@ dialog:has(.gear-image-viewer) {width:min(1440px,calc(100vw - 32px));max-height:
 
 /* Alliance Management reuses the existing Insanity panels, buttons and navigation. */
 .am-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}.am-guild-list article{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:14px 0}.am-main-options{display:grid;gap:12px;margin:18px 0}.am-grid textarea{width:100%}.am-grid form{display:grid;gap:12px}.am-grid .seg{flex-wrap:wrap}@media(max-width:850px){.am-grid{grid-template-columns:1fr}.am-guild-list article{align-items:flex-start;flex-direction:column}}
+/* Approved Variant 3: real controls over independent artwork assets. */
+.sc-matrix-workspace { --bm-gold:#d9b875; --bm-line:#6f5776; --bm-text:#f2edf6; color:var(--bm-text); }
+.sc-matrix-workspace .sc-eyebrow { display:none; }
+.sc-matrix-workspace .page-head { margin-bottom:6px; }
+.sc-matrix-workspace .page-head h1 { font:650 26px/1.2 var(--body); color:#d3c7e4; }
+.sc-matrix-workspace .page-head p { font-size:13px; }
+.sc-matrix-workspace .sc-console-tabs { margin-bottom:16px; }
+.sc-matrix-workspace .sc-console-tabs button { padding:10px 20px; font-size:13px; }
+.bm-shell { font:13px/1.4 var(--body); }
+.bm-matrix { display:grid; grid-template-columns:minmax(0,1.18fr) minmax(0,1fr) minmax(0,1.18fr); gap:18px; align-items:stretch; }
+.bm-matrix h2 { font:650 20px/1.2 var(--body); letter-spacing:-.35px; }
+.bm-guild { position:relative; min-height:190px; border:1px solid #4b8d3a; border-radius:13px; overflow:hidden; background-color:#120e18; box-shadow:inset 0 -2px 4px #69dc5a44,0 6px 22px #0008; }
+.bm-guild::before { content:""; position:absolute; inset:0; background-repeat:no-repeat; background-size:cover; pointer-events:none; }
+.bm-insanity::before { background-image:linear-gradient(0deg,#0b09132e,transparent 55%),url('/img/bridge-matrix/insanity-rogue.jpg'); background-position:left center; }
+.bm-alliance { border-color:#4e99df; box-shadow:inset 0 -2px 4px #438cf866,0 6px 22px #0008; }
+.bm-alliance::before { background-image:linear-gradient(0deg,#0b09133d,transparent 55%),url('/img/bridge-matrix/alliance-knight.jpg'); background-position:right center; }
+.bm-guild-top { position:relative; display:flex; align-items:center; gap:10px; margin:30px 16px 0 36%; }
+.bm-alliance .bm-guild-top { margin-left:25%; margin-right:24%; }
+.bm-guild-top p { display:flex; align-items:center; gap:6px; margin:8px 0 0; font-size:11px; white-space:nowrap; }
+.bm-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#86818c; flex:none; }
+.bm-dot.is-ready { background:#21d437; box-shadow:0 0 6px #29d34433; }
+.bm-relays { margin-left:auto; text-align:right; white-space:nowrap; }
+.bm-relays strong { display:block; font-size:21px; font-weight:650; }
+.bm-relays span { display:block; font-size:10px; }
+.bm-alliance .bm-relays { position:absolute; left:100%; margin-left:12px; top:4px; }
+.bm-crest { position:absolute; left:-67px; top:-4px; width:54px; height:60px; color:#a9bbdd; filter:drop-shadow(0 2px 2px #000); }
+.bm-crest svg { width:100%; height:100%; stroke-width:1; fill:#788cb122; }
+.bm-caller { position:absolute; bottom:22px; left:22%; right:12px; min-height:60px; display:flex; align-items:center; gap:9px; padding:8px 9px; border:1px solid #66526d; border-radius:10px; background:linear-gradient(100deg,#110c19e8,#130f1aeb); box-shadow:inset 0 1px #ab84b122,0 4px 12px #0008; }
+.bm-alliance .bm-caller { left:12px; right:19%; }
+.bm-avatar { width:37px; height:37px; border:1px solid #625073; border-radius:50%; display:grid; place-items:center; color:#8b7dff; background:#251a38aa; flex:none; }
+.bm-avatar svg { width:25px; height:25px; fill:#887aff33; }
+.bm-caller > div { min-width:0; }
+.bm-caller-title { font-size:12px; }
+.bm-caller p { display:flex; align-items:center; gap:5px; margin:3px 0 0; font-size:11px; white-space:nowrap; }
+.bm-caller p > span { max-width:100px; overflow:hidden; text-overflow:ellipsis; }
+.bm-caller small { font-size:10px; color:#c9bbd7; }
+.bm-main-badge { display:flex; align-items:center; justify-content:center; gap:6px; margin-left:auto; padding:8px; border:1px solid #504450; border-radius:6px; color:#a89bac; font-size:11px; white-space:nowrap; }
+.bm-main-badge.is-main { color:#ffe6a3; border-color:#c5a770; background:linear-gradient(#5d3d321a,#bb92500e); }
+.bm-main-badge svg { width:17px; height:17px; fill:currentColor; }
+.bm-center { position:relative; min-width:0; min-height:190px; padding:4px 11px 11px; text-align:center; border:1px solid #897046; border-radius:34px 34px 14px 14px; background:radial-gradient(ellipse at 50% 35%,#482e332d,transparent 70%),linear-gradient(#19131c,#100d16); box-shadow:inset 0 1px #ddbd7844,0 5px 20px #0008; }
+.bm-center h2 { font-size:19px; padding-bottom:6px; border-bottom:1px solid #83624733; }
+.bm-connection { height:57px; position:relative; display:grid; place-items:center; }
+.bm-wave { position:absolute; width:100%; height:60px; opacity:.75; stroke:url('#bm-wave-color'); stroke-width:1; filter:drop-shadow(0 0 3px #b64bdd); }
+.bm-link { position:relative; display:grid; place-items:center; width:53px; height:53px; color:#ffdf91; border:2px solid #ffdb88; border-radius:50%; box-shadow:0 0 7px #f9bd5d,0 0 24px #ddaa5e77,inset 0 0 14px #dca35255; background:#2c211ae8; }
+.bm-link svg { width:34px; height:34px; }
+.bm-state { display:inline-flex; align-items:center; gap:8px; justify-content:center; min-width:106px; padding:3px 14px; border:1px solid #7d7485; border-radius:6px; color:#c9c0d4; background:#1e1925; position:relative; margin-top:-1px; }
+.bm-state strong { font-size:14px; font-weight:500; }
+.bm-state-copy { margin:5px 0 8px; min-height:15px; font-size:10px; color:#d1c7d7; }
+.bm-controls { display:flex; align-items:stretch; justify-content:center; gap:6px; }
+.bm-controls .btn { display:flex; align-items:center; justify-content:center; gap:5px; flex:1; padding:7px 4px; min-height:31px; border:1px solid #ad94bd; border-radius:5px; color:#f5edfa; background:linear-gradient(#33263b66,#100c15); font-size:10px; white-space:nowrap; }
+.bm-controls .btn:hover:not(:disabled) { border-color:#e8cc91; box-shadow:0 0 8px #a66d7333; }
+.bm-controls .btn svg { width:13px; height:13px; flex:none; }
+.bm-controls .bm-end { color:#ffb1b0; border-color:#d7484b; background:linear-gradient(#6b1b2b55,#1c0d16); }
+.bm-settings { display:flex; align-items:center; margin-top:15px; min-height:49px; padding:7px 14px; border:1px solid #54405f; border-radius:13px; background:linear-gradient(#211827,#110e17); gap:0; box-shadow:inset 0 1px #dcb8ee0c; }
+.bm-settings h3 { display:flex; align-items:center; gap:12px; padding:0 20px 0 9px; margin-right:13px; border-right:1px solid #6a5374; font:600 13px/1.3 var(--body); white-space:nowrap; }
+.bm-settings svg { width:17px; height:17px; flex:none; color:#d7c9e3; }
+.bm-setting { display:flex; align-items:center; justify-content:center; gap:12px; margin:0; padding:0 17px; min-height:29px; font-size:12px; color:#f0e8f4; white-space:nowrap; flex:1; background:none; border:0; }
+.bm-setting > span:first-child { display:flex; align-items:center; gap:7px; }
+.bm-setting > span:first-child svg { color:#ead28e; fill:#ead28e; }
+.bm-switch { position:relative; width:37px; height:21px; flex:none; display:block; }
+.bm-switch input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; z-index:1; cursor:pointer; }
+.bm-switch > span { display:block; width:100%; height:100%; background:linear-gradient(#716178,#3c3446); border:1px solid #b0a2ba; border-radius:15px; }
+.bm-switch > span::after { content:""; display:block; width:15px; height:15px; margin:2px; background:linear-gradient(white,#d9d4df); border-radius:50%; box-shadow:0 1px 2px #000; }
+.bm-switch input:checked + span,.bm-switch.is-on > span { background:linear-gradient(#67c950,#218e24); border-color:#8fdf7d; }
+.bm-switch input:checked + span::after,.bm-switch.is-on > span::after { transform:translateX(15px); }
+.bm-switch input:focus-visible + span { outline:2px solid #ffe5a8; outline-offset:3px; }
+.bm-switch input:disabled { cursor:default; }
+.bm-setting:has(input:disabled) { opacity:.6; }
+.bm-ptt { border-left:1px solid #6a5374; gap:9px; cursor:help; }
+.bm-ptt svg:last-child,.bm-swipe > svg:nth-last-child(2) { width:14px; height:14px; color:#bcacd1; }
+.bm-swipe { cursor:pointer; }
+.bm-api { display:flex; align-items:center; gap:9px; padding-left:17px; border-left:1px solid #46344c; white-space:nowrap; font-size:11px; }
+.bm-signal { color:#31c347; font-size:18px; letter-spacing:1px; }
+.bm-health-note { color:#d7b979; font-size:12px; }
+.bm-shell button:disabled { opacity:.5; cursor:default; }
+.bm-shell[data-bridge-state="active"] .bm-state { color:#9eff83; border-color:#85e65d; background:linear-gradient(#30572b,#0b1b0d); box-shadow:0 0 9px #5fff381a; }
+.bm-shell[data-bridge-state="active"] .bm-state .bm-dot { background:#21dc2c; }
+.bm-shell[data-bridge-state="paused"] .bm-state { color:#ffe0a1; border-color:#d5ad61; background:#3c2d18; }
+.bm-shell[data-bridge-state="paused"] .bm-state .bm-dot { background:#edc46e; }
+.bm-shell[data-bridge-state="paused"] .bm-wave,.bm-shell[data-bridge-state="off"] .bm-wave { opacity:.25; }
+.bm-shell[data-bridge-state="reconnecting"] .bm-state,.bm-shell[data-bridge-state="error"] .bm-state { color:#ffc0ac; border-color:#d48b67; }
+@media(min-width:1101px) and (max-width:1380px) { .bm-matrix { gap:12px; grid-template-columns:minmax(0,1fr) minmax(0,1.05fr) minmax(0,1fr); } .bm-caller { left:12px; right:12px; bottom:17px; }.bm-alliance .bm-caller { right:12px; }.bm-main-badge { padding:5px; font-size:10px; }.bm-caller small { display:none; }.bm-setting { padding:0 9px; gap:7px; }.bm-settings h3 { padding-right:10px; gap:8px; } }
+@media(max-width:1100px) { .bm-matrix { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }.bm-center { grid-column:1/-1; grid-row:2; max-width:none; }.bm-guild { min-height:190px; }.bm-settings { flex-wrap:wrap; gap:14px 0; }.bm-settings h3 { flex-basis:100%; border:0; }.bm-setting { flex:1 1 28%; }.bm-api { padding:0 15px; }.bm-controls { max-width:500px; margin:auto; }.bm-controls .btn { min-height:40px; font-size:12px; } }
+@media(max-width:650px) { .bm-matrix { display:flex; flex-direction:column; gap:13px; }.bm-center { order:1; }.bm-alliance { order:2; }.bm-guild { min-height:190px; }.bm-setting { flex-basis:50%; padding:0 8px; font-size:11px; }.bm-ptt { border:0; }.bm-api { flex-basis:100%; justify-content:center; border:0; }.bm-settings { padding:14px 8px; }.bm-controls { display:grid; grid-template-columns:1fr 1fr; }.bm-controls .btn { min-height:44px; }.bm-caller,.bm-alliance .bm-caller { left:12px; right:12px; }.bm-guild-top { margin-left:35%; }.bm-main-badge { font-size:10px; padding:6px; }.bm-caller p > span { max-width:94px; }.sc-matrix-workspace .sc-console-tabs button { padding:10px 8px; } }
+@media(prefers-reduced-motion:reduce) { .bm-shell * { animation:none!important; transition:none!important; } }
+
+/* Bridge Control Matrix: below ~1500px the three-column layout clips relay counts, caller names and the
+   centre buttons. Stack the three panels (Insanity, Bridge, Alliance) instead; keep counts inside the card. */
+@media (max-width: 1500px) {
+  .bm-matrix { grid-template-columns: minmax(0, 1fr); }
+  .bm-caller p > span { max-width: 180px; }
+}
+@media (max-width: 760px) {
+  .bm-guild-top { margin: 24px 12px 0 34%; flex-wrap: wrap; }
+  .bm-alliance .bm-guild-top { margin: 24px 12px 0 26%; }
+  .bm-alliance .bm-relays { position: static; margin-left: auto; }
+  .bm-guild-top p { white-space: normal; }
+  .bm-guild { min-height: 0; padding-bottom: 12px; }
+  .bm-caller, .bm-alliance .bm-caller { position: relative; left: auto; right: auto; bottom: auto; margin: 14px 12px 0; }
+  .bm-caller p > span { max-width: 120px; }
+}

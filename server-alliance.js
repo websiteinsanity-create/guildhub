@@ -34,7 +34,7 @@ module.exports=function install({route,need,shotcaller,allianceGuildId,audit,can
  for(const action of ['start','stop','mute','pause','dedicated','additional-callers','bridge']){
   route('POST','/api/alliance/'+action,async({body,user})=>{
    let value;
-   if(action==='bridge'){need((canAdmin(user)?['start','end','mains','swipe']:['start','end','mains']).includes(body.action),403,'This bridge control is restricted to Insanity.');value={action:body.action,mainEnabled:body.mainEnabled,enabled:body.enabled};}
+   if(action==='bridge'){need((canAdmin(user)?['start','end','pause','resume','restart','mains','swipe']:['start','end','pause','resume','restart','mains']).includes(body.action),403,'This bridge control is restricted to Insanity.');value={action:body.action,mainEnabled:body.mainEnabled,enabled:body.enabled};}
    else if(action==='start'){need(Number.isInteger(body.count) && body.count>=1 && body.count<=12,400,'Choose 1 to 12 parties.');value={channelId:body.channelId,count:body.count,dedicatedCallerId:body.dedicatedCallerId || null};}
    else value={sessionId:body.sessionId,bridgeChoice:body.bridgeChoice,muted:body.muted,paused:body.paused,userIds:body.userIds};
    if((action==='start' && value.dedicatedCallerId) || ['dedicated','additional-callers'].includes(action)){
@@ -42,7 +42,7 @@ module.exports=function install({route,need,shotcaller,allianceGuildId,audit,can
     need(Array.isArray(ids) && ids.length<=(action==='additional-callers'?16:1) && ids.every(id=>callers.some(c=>c.id===id)),400,'Choose an authorised Alliance caller.');
    }
    const result=await bot('/session/'+action,'POST',value,{insanity:action==='bridge' && canAdmin(user)});
-   audit(user,'alliance.'+action,{type:'guild',id:allianceGuildId},`${user.name} changed Alliance ${action}.`);return result;
+   audit(user,action==='bridge'?'alliance.bridge.'+body.action:'alliance.'+action,{type:action==='bridge'?'bridge':'guild',id:action==='bridge'?result.id:allianceGuildId},`${user.name} changed Alliance ${action}${action==='bridge'?' '+body.action:''} for guild ${allianceGuildId}.`);return result;
   },opts);
  }
  route('GET','/api/alliance/permissions',({user})=>{admin(user);return permissions();},adminOpts);
@@ -54,5 +54,5 @@ module.exports=function install({route,need,shotcaller,allianceGuildId,audit,can
  },adminOpts);
  route('GET','/api/alliance-management/permissions',({user})=>{admin(user);return permissions();},adminOpts);
  route('PUT','/api/alliance-management/permissions',updatePermissions,adminOpts);
- route('POST','/api/alliance-management/bridge',async({body,user})=>{admin(user);need(['start','end','mains','swipe'].includes(body.action),400,'Unknown bridge action.');const result=await bot('/session/bridge','POST',{action:body.action,enabled:body.enabled,mainEnabled:body.mainEnabled},{insanity:true});audit(user,'alliance.bridge.'+body.action,{type:'guild',id:allianceGuildId},`${user.name} changed the Alliance Bridge.`);return result;},adminOpts);
+ route('POST','/api/alliance-management/bridge',async({body,user})=>{admin(user);need(['start','end','pause','resume','restart','mains','swipe'].includes(body.action),400,'Unknown bridge action.');const result=await bot('/session/bridge','POST',{action:body.action,enabled:body.enabled,mainEnabled:body.mainEnabled},{insanity:true});audit(user,'alliance.bridge.'+body.action,{type:'bridge',id:result.id},`${user.name} changed the Alliance Bridge (${body.action}) for guild ${allianceGuildId}.`);return result;},adminOpts);
 };
