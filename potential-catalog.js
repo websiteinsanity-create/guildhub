@@ -5,14 +5,15 @@ const slots = [
   ['head','Head','armor'],['cloak','Cloak','armor'],['chest','Chest','armor'],
   ['hands','Hands','armor'],['legs','Legs','armor'],['feet','Feet','armor'],
   ['necklace','Necklace','accessory'],['bracelet','Bracelet','accessory'],
-  ['ring1','Ring 1','accessory'],['ring2','Ring 2','accessory'],['belt','Belt','accessory']
-].map(([id,label,category])=>({id,label,category}));
+  ['ring1','Ring 1','accessory'],['ring2','Ring 2','accessory'],['belt','Belt','accessory'],
+  ['earring','Earring','accessory',false],['brooch','Brooch','accessory',false]
+].map(([id,label,category,allowUniversal])=>({id,label,category,...(allowUniversal===false?{allowUniversal:false}:{})}));
 const entries = catalog.entries;
 const lookup = new Map(entries.map(e=>[e.id,e]));
 if (lookup.size !== 192 || entries.some(e=>!e.name || !e.description || e.language!=='en')) throw Error('Invalid potential ability catalog.');
 function compatible(entry,slot,weapons) {
   if (!entry || !slot) return false;
-  if (entry.mainCategory!=='universal' && entry.mainCategory!==slot.category) return false;
+  if (entry.mainCategory!==slot.category && !(entry.mainCategory==='universal' && slot.allowUniversal!==false)) return false;
   const affinity = weapons;
   return !entry.weapons.length || entry.weapons.some(w=>affinity.includes(w));
 }

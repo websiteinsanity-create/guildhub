@@ -515,6 +515,8 @@ const gearPotentialIcons = {
  ring1:'<circle cx="20" cy="23" r="12"/><path d="m14 9 6-6 6 6-6 7Z"/>',
  ring2:'<circle cx="20" cy="23" r="12"/><path d="m14 9 6-6 6 6-6 7Z"/>',
  belt:'<path d="M3 14h34v14H3Z M15 11h10v20H15Z M19 20h11"/>',
+ earring:'<path d="M20 17v-4a6 6 0 1 0-6-6 M20 16l7 10-7 9-7-9Z"/>',
+ brooch:'<path d="m20 4 5 7 8 2-1 9 4 7-8 3-8 4-8-4-8-3 4-7-1-9 8-2Z M20 12l7 8-7 8-7-8Z"/>',
  weapon1:'<path d="m12 5 4 9-1 18-4 4-4-4-1-18Z M3 21h16 M23 14l7-5 7 5v12l-7 9-7-9Z"/>',
  weapon2:'<path d="m31 4 5 5-18 21-6-6Z M8 22l12 12 M11 29l-6 7 M3 33l5 5"/>'
 };
@@ -523,7 +525,7 @@ function gearPotentialIcon(slot) {
 }
 function gearPotentialCompatible(e,slot,p) {
  const ws=p.weapons;
- return (e.mainCategory==='universal' || e.mainCategory===slot.category) && (!e.weapons.length || e.weapons.some(w=>ws.includes(w)));
+ return (e.mainCategory===slot.category || (e.mainCategory==='universal' && slot.allowUniversal!==false)) && (!e.weapons.length || e.weapons.some(w=>ws.includes(w)));
 }
 function gearPotentialsHtml(t) {
  const p=t.potentials;if(!p)return '';

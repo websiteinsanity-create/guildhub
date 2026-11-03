@@ -28,9 +28,14 @@ ctx.thread={memberId:41,name:'Thorne',owner:'coach',buildKey:'main',potentials:{
 run("GEARTHREAD={id:'41',data:thread};route=()=>({page:'gearthreads',id:'41'})");
 test('main-page accordion shows all slots and full effects and remembers its state per build',()=>{
  let html=run('gearPotentialsHtml(thread)');
- assert(html.includes('>Potentials</span>'));assert(html.includes('1 / 13 slots assigned'));
+ assert(html.includes('>Potentials</span>'));assert(html.includes('1 / 15 slots assigned'));
  assert(html.includes('Boosts Guillotine Blade Damage by 15%.'));
- assert.equal((html.match(/data-act="gear-potential-open"/g)||[]).length,26);
+ assert.equal((html.match(/data-act="gear-potential-open"/g)||[]).length,30);
+ const row=html.split('class="gear-potential-accessories">')[1].split('</div>')[0];
+ for(const [id,label] of [['earring','Earring'],['brooch','Brooch']]){
+  assert(row.includes(`data-slot="${id}"`));
+  assert(html.includes(`aria-label="Edit ${label} potentials"`));
+ }
  assert(html.includes('src="/assets/potential-body.svg"'));assert(html.includes(' open>'));
  assert(html.includes('Active skill cores'));assert(html.includes('Other owned skill cores'));
  assert(html.indexOf('gear-combined-cores')>html.indexOf('>Potentials</span>'));
@@ -41,7 +46,7 @@ test('main-page accordion shows all slots and full effects and remembers its sta
 });
 test('legacy multiple assignments require review instead of appearing equipped',()=>{
  ctx.legacyThread={...ctx.thread,potentials:{...ctx.thread.potentials,assignments:{},legacyAssignments:{weapon2:['SkillSet_WP_Item_Gear_SW2_05_2','all_accuracy']}}};
- const html=run('gearPotentialsHtml(legacyThread)');assert(html.includes('0 / 13 slots assigned'));assert(html.includes('Previous selections need review'));
+ const html=run('gearPotentialsHtml(legacyThread)');assert(html.includes('0 / 15 slots assigned'));assert(html.includes('Previous selections need review'));
 });
 test('slot editor filters correctly and keeps complete descriptions and existing selections',()=>{
  let html='';ctx.show=s=>{html=s;};run('openDialog=show');
@@ -55,6 +60,11 @@ test('slot editor filters correctly and keeps complete descriptions and existing
  run("ACTIONS['gear-potential-open']({}, {slot:'head'})");
  assert(html.includes('Death Blow Lv +1'));assert(!html.includes('Willbreaker Lv +1'));
  assert(!html.includes('Guillotine Blade Enchant'));
+ for(const slot of ['earring','brooch']){
+  run(`ACTIONS['gear-potential-open']({}, {slot:'${slot}'})`);
+  assert(html.includes('Blood Devotion Lv +1'));assert(html.includes('No potential'));
+  for(const id of ['hp_max','SkillSet_WP_SW2_S_CounterAttack','SkillSet_WP_Item_Gear_SW2_05_2'])assert(!html.includes(`value="${id}"`));
+ }
 });
 test('saving uses the captured build and revision; switching builds prevents a stale submit',async()=>{
  let requests=[],closed=0,notices=[];

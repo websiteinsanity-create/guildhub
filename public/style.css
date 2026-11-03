@@ -2673,8 +2673,9 @@ dialog:has(.gear-image-viewer) {width:min(1440px,calc(100vw - 32px));max-height:
 .gear-potential-slot.slot-hands {left:23%;top:51%}
 .gear-potential-slot.slot-legs {left:23%;top:76%}
 .gear-potential-slot.slot-feet {right:23%;top:76%}
-.gear-potential-accessories {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;max-width:570px;margin:8px auto 0}
+.gear-potential-accessories {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;max-width:570px;margin:8px auto 0}
 .gear-potential-accessories .gear-potential-slot {position:static;width:100%;min-width:0;min-height:85px}
+@media(max-width:600px) {.gear-potential-accessories {grid-template-columns:repeat(4,minmax(0,1fr))}}
 .gear-potential-summary-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;align-items:start}
 .gear-potential-summary {display:flex;gap:9px;align-items:start;position:relative;width:100%;text-align:left;background:#15141b;border:1px solid var(--gear-border,#38303e);border-radius:8px;color:inherit;padding:11px 23px 11px 10px;cursor:pointer;font-family:inherit;min-height:84px}
 .gear-potential-summary:hover,.gear-potential-summary:focus-visible {border-color:#c7a76b;outline-color:#c7a76b}
