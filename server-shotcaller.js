@@ -707,9 +707,9 @@ module.exports = function install(ctx) {
   }, { officer: true });
 
   route('POST','/api/shotcaller/bridge',async({body,user})=>{
-    need(['start','end','mains','swipe'].includes(body.action),400,'Unknown bridge action.');
+    need(['start','end','pause','resume','restart','mains','swipe'].includes(body.action),400,'Unknown bridge action.');
     const result=await callSession('/bridge','POST',{action:body.action,mainEnabled:body.mainEnabled,enabled:body.enabled});invalidateSession();
-    audit(user,'shotcaller.bridge.'+body.action,{type:'guild'},JSON.stringify({by:user.name,action:body.action,mainEnabled:result.mainEnabled,swipe:result.swipe}));return result;
+    audit(user,'shotcaller.bridge.'+body.action,{type:'bridge',id:result.id},JSON.stringify({by:user.key || user.name,action:body.action,paused:result.paused,mainEnabled:result.mainEnabled,swipe:result.swipe}));return result;
   },{officer:true});
   route('GET','/api/admin/alliance-bridge',async()=>{const status=await callSession('');return status.bridge || null;},{officer:true});
   route('PUT','/api/admin/alliance-bridge',async({body,user})=>{

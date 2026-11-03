@@ -8,7 +8,7 @@ test('potential catalog preserves displayed values and all supplied categories',
  assert.equal(entries.filter(e=>e.kind==='skill-level').length,120);
  assert.equal(entries.find(e=>e.id==='all_double_attack').value,50);
  assert.equal(entries.find(e=>e.id==='skill_cooldown_modifier').displayValue,'+2.5%');
- assert.equal(slots.length,13);assert.equal(catalog.language,'en');
+ assert.equal(slots.length,15);assert.equal(catalog.language,'en');
 });
 test('category and weapon checks reject unknown, duplicate and mismatched selections',()=>{
  const ws=['Sword & Shield','Greatsword'],ench='SkillSet_WP_Item_Gear_SW2_05_2';
@@ -23,8 +23,9 @@ test('category and weapon checks reject unknown, duplicate and mismatched select
 });
 async function server(){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'guild-potentials-')),port=40000+Math.floor(Math.random()*20000);let proc;
- const boot=async()=>{proc=spawn(process.execPath,['server.js'],{cwd:path.join(__dirname,'..'),env:{...process.env,PORT:String(port),DATA_DIR:dir,MEMBER_PASSCODE:'m1',OFFICER_PASSCODE:'o1',DEMO_MODE:'1'},stdio:['ignore','pipe','inherit']});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Startup timeout')),10000);proc.stdout.on('data',d=>{if(String(d).includes('running')){clearTimeout(timer);resolve();}});proc.once('exit',()=>{clearTimeout(timer);reject(Error('Early exit'));});});};
- const halt=()=>new Promise(r=>{proc.once('exit',r);proc.kill();});await boot();
+ // Windows kills processes on SIGTERM rather than delivering the signal. Exercise the real graceful handler via IPC.
+ const boot=async()=>{proc=spawn(process.execPath,['-e',"process.on('message',msg=>{if(msg==='shutdown')process.emit('SIGTERM');});require('./server.js');"],{cwd:path.join(__dirname,'..'),env:{...process.env,PORT:String(port),DATA_DIR:dir,MEMBER_PASSCODE:'m1',OFFICER_PASSCODE:'o1',DEMO_MODE:'1'},stdio:['ignore','pipe','inherit','ipc']});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Startup timeout')),10000);proc.stdout.on('data',d=>{if(String(d).includes('running')){clearTimeout(timer);resolve();}});proc.once('exit',()=>{clearTimeout(timer);reject(Error('Early exit'));});});};
+ const halt=()=>new Promise(r=>{proc.once('exit',r);proc.send('shutdown');});await boot();
  const call=async(p,method='GET',body,token)=>{const r=await fetch(`http://localhost:${port}`+p,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body===undefined?undefined:JSON.stringify(body)});return{status:r.status,body:await r.json()};};
  const login=async(name,passcode)=>(await call('/api/login','POST',{name,passcode})).body.token;
  return{call,login,dir,restart:async(edit)=>{await halt();if(edit)edit(dir);await boot();},stop:async()=>{await halt();fs.rmSync(dir,{recursive:true,force:true});}};
@@ -63,9 +64,26 @@ test('API persists isolated build selections, protects writes, detects conflicts
  assert.equal((await write({slot:'weapon1',ids:[ench],revision:legacy.revision})).status,200);
  assert.deepEqual((await read()).assignments.weapon1,[ench]);assert.deepEqual((await read()).legacyAssignments.belt,['hp_max','all_armor']);
 
+ const accessory='SkillSet_WP_SW2_S_DamageReceive',replacement='SkillSet_WP_SW2_S_DefenseDebuffAttack';
+ for(const slot of ['earring','brooch']){
+  assert.equal((await read()).assignments[slot],undefined);
+  for(const invalid of [['hp_max'],[ench],['SkillSet_WP_SW2_S_CounterAttack'],[accessory,replacement]])assert.equal((await write({slot,ids:invalid,revision:(await read()).revision})).status,400);
+  assert.equal((await write({slot,ids:[accessory],revision:(await read()).revision})).status,200);
+  assert.deepEqual((await read()).assignments[slot],[accessory]);
+  assert.equal((await write({slot,ids:[replacement],revision:(await read()).revision})).status,200);
+ }
+ await s.restart();owner=await s.login('Ann','m1');officer=await s.login('Boss','o1');
+ for(const slot of ['earring','brooch']){
+  assert.deepEqual((await read()).assignments[slot],[replacement]);
+  assert.equal((await read(alt)).assignments[slot],undefined);
+  assert.equal((await write({slot,ids:[],revision:(await read()).revision})).status,200);
+ }
+ assert.deepEqual((await read()).assignments.weapon1,[ench]);
+
  assert.equal((await s.call(`/api/members/${id}/builds/${alt}`,'DELETE',undefined,officer)).status,200);
  await s.restart();
  const db=JSON.parse(fs.readFileSync(path.join(s.dir,'db.json'),'utf8'));
  assert(!db.gearPotentials[`${id}:${alt}`]);assert(db.gearPotentials[`${id}:main`]);
+ for(const slot of ['earring','brooch'])assert.equal(db.gearPotentials[`${id}:main`].assignments[slot],undefined);
  }finally{await s.stop();}
 });

@@ -67,3 +67,5 @@ test('Insanity admin context retains all five Portal pages and adds administrati
 test('partner context has no new administration forms or Insanity Swipe control',()=>{
  const h=ui();h.context.sample={active:false,sessionState:'inactive',parties:[],bridge};h.run("status=sample;applyPortalContext({mode:'partner',capabilities:{}});navigate('discord')");assert.equal(h.node('#return-to-guildhub').hidden,true);assert(!h.node('#voice').innerHTML.includes('Save Alliance Settings'));h.run("navigate('bridge')");assert(!h.node('#voice').innerHTML.includes('data-action="swipe"'));
 });
+
+test('partner setup and readiness do not depend on caller presence',()=>{const h=ui();h.context.sample={active:true,sessionState:'active',parties:[],bridge};h.run('status=sample;paint()');const html=h.node('#voice').innerHTML;assert(html.includes('Starting Voice Channel'));assert(html.includes('This channel becomes Party 1'));assert(h.run('available({ready:true,readyRelays:12,relays:12,callerId:"caller",mainAvailable:false})'));});
