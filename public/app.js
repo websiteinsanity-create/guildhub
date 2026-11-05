@@ -1284,7 +1284,7 @@ function pinSide(ev, showReminders = true) {
     </div>` : '';
   // This guild has fully swapped to voice-tracked attendance (Admin > Attendance) - there is no PIN for a
   // player to type in at all, so showing the PIN box here would just be confusing. Whether THIS event ever
-  // actually gets tracked depends on an officer starting Shotcaller for it (see beginVoiceTracking,
+  // voice tracking uses the active guild session at the configured time (see checkAutomaticAttendance,
   // server-shotcaller.js) - from a player's side there is nothing to do either way, so the message stays the
   // same regardless.
   if (ev.effectiveAttendanceMode === 'voice') {
@@ -1407,6 +1407,14 @@ ACTIONS['voicetrack-finish'] = (el, d) => act(() => api(`/api/events/${d.id}/voi
 // tracking" is switched off for this event, control by hand) when Shotcaller voice tracking actually starts
 // crediting attendance, and pick extra channels to track for this one event besides whatever Shotcaller
 // creates for it.
+function voiceAutomaticStatus(ev) {
+  const vt=ev.voiceTracking, failure=ev.voiceAutoStart?.status==='failed'?ev.voiceAutoStart:null;
+  const label=vt?.active?(vt.startSource==='manual'?'Manually started · Tracking active':'Tracking active')
+    :vt?.finishedAt && !vt.incomplete?'Tracking completed':failure?'Automatic start failed':ev.voiceTrackAuto!==false?'Scheduled':'';
+  const at=Date.parse(ev.start)+Number(ev.voiceTrackStartOffsetMinutes ?? S.settings.voiceTrackStartOffsetMinutes ?? 0)*60000;
+  return `${label?`<div class="muted small" role="status">${label}${label==='Scheduled'?' · '+esc(new Date(at).toLocaleString('en-GB',{timeZone:S.cfg.defaultTimezone || 'Europe/Berlin'})):''}</div>`:''}
+    ${failure?`<div class="att-sect att-warn" role="alert"><strong>Automatic tracking unavailable</strong><p>${esc(failure.reason)}</p><span class="muted small">${esc(new Date(failure.failedAt).toLocaleString('en-GB',{timeZone:S.cfg.defaultTimezone || 'Europe/Berlin'}))}</span></div>`:''}`;
+}
 function voiceTrackPanel(ev) {
   const auto = ev.voiceTrackAuto !== false;
   const { running, finished, checksDone, checksTotal } = voiceTrackStatus(ev);
@@ -1422,9 +1430,10 @@ function voiceTrackPanel(ev) {
       <input type="checkbox" data-act="voicetrack-auto" data-id="${ev.id}" ${auto ? 'checked' : ''}> Automatic tracking
     </label>
     <div class="muted small" style="margin:-2px 0 10px">${auto
-      ? 'Tracking starts on its own the moment Shotcaller is started for this event (posting its parties with "Also start Shotcaller" ticked).'
+      ? 'Automatic attendance tracking starts at the configured time when an active Shotcaller session and the required voice channels are available. The Shotcaller session does not need to be linked to this event.'
       : running ? 'Tracking is already running for this event.' : 'Automatic tracking is off for this event - Shotcaller can still be started as usual, but attendance is only tracked once you start it by hand below.'}</div>
-    ${!auto && !running ? `<button class="btn sm" data-act="voicetrack-start" data-id="${ev.id}">Start tracking now</button>` : ''}
+    ${voiceAutomaticStatus(ev)}
+    ${!running ? `<button class="btn sm" data-act="voicetrack-start" data-id="${ev.id}">Start tracking now</button>` : ''}
     ${running ? `<div class="muted small" style="margin:0 0 10px">${ev.voiceTracking?.gateAt>Date.now()?'Waiting for the configured tracking start time.':'Running - quick check '+(checksDone+1)+' of '+checksTotal+'.'} Anyone seen in any of these checks counts as attended.
         <button class="btn sm" data-act="voicetrack-finish" data-id="${ev.id}" style="margin-left:6px">Finish tracking now</button></div>` : ''}
     ${ev.voiceTracking?.lastError && running?`<div class="muted small" role="status">${esc(ev.voiceTracking.lastError)}</div>`:''}

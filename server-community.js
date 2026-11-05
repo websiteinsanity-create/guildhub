@@ -269,15 +269,9 @@ module.exports = function install(ctx) {
         // and needs this to still find each party's real channel (see snapshotVoiceSession's own comment).
         shotcallerApi.snapshotVoiceSession(ev, started, realRest,scPlan);
         save();
-        // In 'voice' attendance mode, this is normally the moment attendance tracking for this event actually
-        // begins - see beginVoiceTracking in server-shotcaller.js (a no-op in 'pin' mode either way). Unless an
-        // officer switched "automatic tracking" off for this one event (Voice channel tracking and Reminders on
-        // the event page) - then Shotcaller still starts here as asked, but nothing is tracked yet; they start
-        // it by hand later with "Start tracking now" once they're actually ready. Either way the snapshot just
-        // taken needs saving - beginVoiceTracking below already does its own save() when it runs, but the
-        // deferred (voiceTrackAuto off) case has nothing else to save it otherwise.
-        if (ev.voiceTrackAuto !== false) shotcallerApi.beginVoiceTracking(ev, started, realRest);
-        else save();
+        // Attendance belongs to its scheduled event, not this party post/session association.
+        // This is the same scheduler sweep used by tick(), never a direct start for ev.
+        await shotcallerApi.checkAutomaticAttendance();
       } catch (e) {
         shotcaller = { ok: false, error: e.message || 'Could not start Shotcaller.' };
         // e.message here is already the real reason (the bot's own rejection text, or what went wrong

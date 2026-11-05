@@ -1065,7 +1065,7 @@ function attVoiceControls(ev) {
         <input type="checkbox" data-act="att-auto-toggle" data-id="${ev.id}" ${auto ? 'checked' : ''}> Automatic tracking
       </label>
       <div class="muted small" style="margin:4px 0 0">${auto
-        ? 'Starts on its own the moment Shotcaller is started for this event. Switching this off also switches it off on the event\'s own page, and the other way round.'
+        ? 'Automatic attendance tracking starts at the configured time when an active Shotcaller session and the required voice channels are available. The Shotcaller session does not need to be linked to this event.'
         : 'Off - start tracking by hand below, and add any extra channels to watch first if you need to.'}</div>
       <div class="att-reveal ${auto ? '' : 'att-reveal-open'}">
         <div class="field" style="margin-top:12px"><label>Extra channels tracked for this event</label>
@@ -1076,6 +1076,7 @@ function attVoiceControls(ev) {
         </div>
       </div>
     </div>
+    ${voiceAutomaticStatus(ev)}
     ${running && vt && vt.presenceUnsupported ? `<div class="att-sect att-warn">⚠ This Shotcaller bot build only reports how many people are in each channel, not who - nobody can be credited for attendance until the bot reports per-user voice presence. Party management (start/stop/mute/dedicated) still works fine either way.</div>` : ''}
     ${vt?.incomplete?'<div class="att-sect att-warn">Tracking incomplete. Review attendance or run Track again; missing players are not finalized as no-shows.</div>':''}
     ${vt?.lastError && running?`<div class="att-sect att-warn">${esc(vt.lastError)}</div>`:''}

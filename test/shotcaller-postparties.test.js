@@ -208,7 +208,7 @@ withServer('combined post replaces an active bridged session with Keep and binds
   const stop=s.bot.calls.find(c=>c.url.endsWith('/session/stop'));assert.deepEqual(stop.body,{sessionId:oldId,bridgeChoice:'keep'});
   assert.equal(oldPost.deleted,true);assert.equal(s.fake.state.posts.length,2);
   const saved=(await s.call('/api/state','GET',null,s.officer)).body.events.find(e=>e.id===ev.id);
-  assert.equal(saved.voiceSessionSnapshot.sessionBinding,'id:'+replacement.sessionId);assert.equal(saved.voiceTracking.sessionBinding,'id:'+replacement.sessionId);assert.equal(saved.voiceTracking.active,true);assert.equal(saved.voiceTracking.partyChannels.length,2);
+  assert.equal(saved.voiceSessionSnapshot.sessionBinding,'id:'+replacement.sessionId);assert.equal(saved.voiceTracking,undefined,'posting parties must not start a future event before its configured tracking time');
 });
 
 withServer('failed preflight with an active bridge preserves the previous post and session without a replacement',async s=>{

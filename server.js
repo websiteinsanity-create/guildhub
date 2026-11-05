@@ -181,6 +181,7 @@ if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE,
 // done - that pile-up is what "nearly crashed the server". Fixed by only ever marking the data dirty here and
 // actually writing it out a short moment later, asynchronously, so a whole burst of changes within that window
 // collapses into one disk write instead of one per request, and no request ever blocks on disk I/O at all.
+let afterPersist = () => {};
 let dirty = false, writing = false, flushTimer = null, flushInFlight = null, shuttingDown = false;
 const SAVE_DEBOUNCE_MS = Number(process.env.SAVE_DEBOUNCE_MS || 200);
 function scheduleFlush() {
@@ -212,6 +213,7 @@ function flush() {
     if(revision!==dataRevision || source!==db){dirty=true;return;}
     await fs.promises.writeFile(tmp,snapshot);
     await fs.promises.rename(tmp, DB_FILE);
+    if (!dirty) afterPersist();
   } catch (e) {
     console.error('save failed, will retry:', e);
     dirty = true;                                // don't silently lose the change - try again on the next flush
@@ -811,6 +813,8 @@ function pickEvent(b, ex) {
     // own - an officer has to hit "Start tracking now" by hand once they're ready, so early arrivals getting
     // Shotcaller running ahead of time never silently starts the clock on attendance too.
     voiceTrackAuto: b.voiceTrackAuto === undefined ? (ex ? ex.voiceTrackAuto !== false : true) : b.voiceTrackAuto === true || b.voiceTrackAuto === 'true',
+    // Switching automatic tracking back on after an automatic failure re-arms it (see checkAutomaticAttendance).
+    voiceTrackAutoChangedAt: ex && ex.voiceTrackAuto === false && (b.voiceTrackAuto === true || b.voiceTrackAuto === 'true') ? Date.now() : (ex ? ex.voiceTrackAutoChangedAt : undefined),
     // Extra voice channels (besides whatever Shotcaller creates for THIS event) that count toward its own
     // attendance - same idea as the guild-wide Admin > Events list, but scoped to one event, for a channel that
     // only matters for this particular night rather than always.
@@ -841,7 +845,7 @@ function applyPresetRule(ev) {
   if (p) ev.parties = normParties(clone(p.parties));
 }
 route('POST', '/api/events', ({ body, user }) => {
-  const ev = { id: newId(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceTracked: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], loaOverride: [], ...pickEvent(body) };
+  const ev = { id: newId(), createdAt: Date.now(), createdBy: user.key, rsvps: {}, attended: [], autoAttended: false, attendanceTracked: false, attendanceUndo: null, parties: [], pin: null, pinEntries: {}, remindersSent: {}, reminderLog: [], loaOverride: [], ...pickEvent(body) };
   applyPresetRule(ev);
   db.events.push(ev);
   audit.log(user, 'event.create', { type: 'event', id: ev.id, name: ev.title }, `${user.name} created the event "${ev.title}" (${ev.type}, ${ev.start}).`);
@@ -1465,57 +1469,132 @@ async function deletePreviousScheduleMessages(old) {
 // event for a day that has already started posting just gets its own additional message, appended after the
 // ones already there). Used by both the automatic daily tick and the officer's manual "Post now" button, so
 // pressing "Post now" after the automatic post already went out catches up rather than duplicating anything.
-async function ensureScheduleMessage(day) {
-  const st = db.settings.dailySchedulePost;
-  if (!st.channelId) return { ok: false, error: 'Pick a channel first.' };
-  const sameContext = st.current && st.current.gameDay === day && st.current.channelId === st.channelId;
-  // A genuinely new game day starting in the SAME channel (not just a channel change - that already clears
-  // `current` to null itself, in the admin settings route, with nothing left here to delete) - clear out
-  // yesterday's whole block first.
-  if (!sameContext && st.current && st.current.channelId === st.channelId) await deletePreviousScheduleMessages(st.current);
-  const cur = sameContext ? st.current : { gameDay: day, channelId: st.channelId, bannerMessageId: null, events: {} };
-  let error = null;
-
-  if (!cur.bannerMessageId) {
-    const b = await discord.postMessage(st.channelId, {
-      content: `📅 **Today's schedule — ${dayLabel(day)}**`, mentionRoleIds: st.mentionRoleIds,
-      ...(DAILY_SCHEDULE_BANNER ? { file: { name: 'daily-schedule.png', type: 'image/png', buffer: DAILY_SCHEDULE_BANNER } } : {}),
-    });
-    if (b.ok) cur.bannerMessageId = b.id; else error = b.error;   // a failed banner never blocks the event messages below - retried on the next call instead
-  }
-
-  for (const ev of scheduleDayEvents(day)) {
-    const { content, components } = buildEventMessage(ev);
-    const existingId = cur.events[ev.id];
-    if (existingId) {
-      const r = await discord.editMessage(st.channelId, existingId, { content, components });
-      if (r.ok) continue;
-      // The tracked message is gone (deleted by hand?) - fall through and post a fresh one instead of staying stuck.
-    }
-    const r2 = await discord.postMessage(st.channelId, { content, components });
-    if (r2.ok) cur.events[ev.id] = r2.id; else error = r2.error;
-  }
-
-  st.current = cur;
-  st.lastPostedDay = day;
+// All publication and refresh work shares one queue. Post-now, scheduler and event changes
+// cannot race each other into duplicate messages or overwrite a newer edit with old data.
+let scheduleQueue=Promise.resolve(),scheduleSyncTimer=null;
+const compareScheduleMessageIds=(a,b)=>/^\d+$/.test(a) && /^\d+$/.test(b)?(BigInt(a)<BigInt(b)?-1:BigInt(a)>BigInt(b)?1:0):a.localeCompare(b,undefined,{numeric:true});
+const scheduleNonce=(cur,key)=>crypto.createHash('sha256').update(cur.gameDay+':'+cur.channelId+':'+key).digest('hex').slice(0,24);
+function scheduleLocked(fn){const work=scheduleQueue.then(fn);scheduleQueue=work.catch(()=>{});return work;}
+function scheduleFingerprint(day){return JSON.stringify(scheduleDayEvents(day).map(ev=>[ev.id,buildEventMessage(ev)]));}
+async function persistScheduleState(){
   save();
-  return error ? { ok: false, error } : { ok: true };
+  if(flushTimer){clearTimeout(flushTimer);flushTimer=null;}
+  if(flushInFlight)await flushInFlight;
+  while(dirty && !shuttingDown){await flush();if(dirty)throw Error('Could not persist Daily Schedule state; Discord update deferred.');}
 }
+function ensureScheduleMessage(day){return scheduleLocked(()=>updateScheduleBlock(day,false));}
+async function updateScheduleBlock(day,existingOnly){
+  const st=db.settings.dailySchedulePost;
+  if(day!==gameDay(Date.now()))return {ok:true};
+  if(!st.channelId)return {ok:false,error:'Pick a channel first.'};
+  const same=st.current && st.current.gameDay===day && st.current.channelId===st.channelId;
+  if(existingOnly && !same)return {ok:true}; // mutations never publish an unposted day
+  if(!same && st.current?.channelId===st.channelId)await deletePreviousScheduleMessages(st.current);
+  const cur=same?st.current:{gameDay:day,channelId:st.channelId,bannerMessageId:null,events:{}};
+  st.current=cur;cur.events ||= {};cur.eventFingerprints ||= {};cur.replacements ||= {};
+  const fingerprint=scheduleFingerprint(day);
+  const events=scheduleDayEvents(day).map(ev=>({id:ev.id,...buildEventMessage(ev)}));
+  const current=()=>db.settings.dailySchedulePost===st && st.current===cur && st.channelId===cur.channelId && day===gameDay(Date.now());
+  // Persist identity/nonce context BEFORE sends so restart recovery reuses it.
+  await persistScheduleState();
+  let bannerError=null;
+  try{
+    if(cur.bannerMessageId && current()){
+      const roles=(st.mentionRoleIds || []).filter(discord.isSnowflake || (()=>true));
+      const content=(roles.length?roles.map(id=>'<@&'+id+'>').join(' ')+'\n':'')+`📅 **Today's schedule — ${dayLabel(day)}**`;
+      const r=await discord.editMessage(cur.channelId,cur.bannerMessageId,{content});
+      if(!r.ok){
+        if(!r.missingMessage)bannerError=r.error;
+        else {cur.bannerMessageId=null;cur.bannerReplacement=(cur.bannerReplacement || 0)+1;await persistScheduleState();}
+      }
+    }
+    if(!cur.bannerMessageId && current()){
+      const r=await discord.postMessage(cur.channelId,{content:`📅 **Today's schedule — ${dayLabel(day)}**`,mentionRoleIds:cur.bannerReplacement?[]:st.mentionRoleIds,
+        nonce:scheduleNonce(cur,'banner:'+(cur.bannerReplacement || 0)),...(DAILY_SCHEDULE_BANNER?{file:{name:'daily-schedule.png',type:'image/png',buffer:DAILY_SCHEDULE_BANNER}}:{})});
+      if(!r.ok)bannerError=r.error;else {cur.bannerMessageId=r.id;await persistScheduleState();}
+    }
+    const wanted=new Set(events.map(ev=>String(ev.id)));
+    for(const [id,messageId] of Object.entries(cur.events)){
+      if(!current())return {ok:true};
+      if(wanted.has(id))continue;
+      const r=await discord.deleteMessage(cur.channelId,messageId);
+      if(!r.ok)throw Error(r.error);
+      delete cur.messageFingerprints?.[messageId];delete cur.events[id];delete cur.eventFingerprints[id];cur.replacements[id]=(cur.replacements[id] || 0)+1;await persistScheduleState();
+    }
+    cur.messageFingerprints ||= Object.fromEntries(Object.entries(cur.events).map(([id,messageId])=>[messageId,cur.eventFingerprints[id]]));
+    // Keep the existing per-event message format, but reuse the chronological message
+    // slots when event times/order change. Discord cannot move a message in-place.
+    // Adding an event appends only the missing slot; deleting removes only its slot.
+    for(const ev of events){
+      if(!current())return {ok:true};
+      if(cur.events[ev.id])continue;
+      const payload={content:ev.content,components:ev.components};
+      const r=await discord.postMessage(cur.channelId,{...payload,nonce:scheduleNonce(cur,'event:'+ev.id+':'+(cur.replacements[ev.id] || 0))});
+      if(!r.ok)throw Error(r.error);cur.events[ev.id]=r.id;cur.messageFingerprints[r.id]=JSON.stringify(payload);await persistScheduleState();
+    }
+    const slots=Object.values(cur.events).sort(compareScheduleMessageIds);
+    cur.events=Object.fromEntries(events.map((ev,i)=>[ev.id,slots[i]]));
+    await persistScheduleState();
+    for(const ev of events){
+      if(!current())return {ok:true};
+      const payload={content:ev.content,components:ev.components},key=JSON.stringify(payload),messageId=cur.events[ev.id];
+      if(cur.messageFingerprints[messageId]===key){cur.eventFingerprints[ev.id]=key;continue;}
+      const r=await discord.editMessage(cur.channelId,messageId,payload);
+      if(r.ok){cur.messageFingerprints[messageId]=key;cur.eventFingerprints[ev.id]=key;continue;}
+      if(!r.missingMessage)throw Error(r.error);
+      // Replace only a confirmed deleted message, never a timeout/403/5xx.
+      delete cur.events[ev.id];delete cur.messageFingerprints[messageId];cur.replacements[ev.id]=(cur.replacements[ev.id] || 0)+1;
+      await persistScheduleState();
+      const replacement=await discord.postMessage(cur.channelId,{...payload,nonce:scheduleNonce(cur,'event:'+ev.id+':'+cur.replacements[ev.id])});
+      if(!replacement.ok)throw Error(replacement.error);
+      cur.events[ev.id]=replacement.id;cur.messageFingerprints[replacement.id]=key;cur.eventFingerprints[ev.id]=key;await persistScheduleState();
+      // A replacement is appended by Discord; reconcile the order again next pass.
+      cur.syncFingerprint=null;
+    }
+    if(bannerError)throw Error(bannerError); // retain event updates even if only the decorative banner failed
+    if(current()){
+      cur.syncFingerprint=JSON.stringify(events.map(e=>cur.events[e.id]))===JSON.stringify(events.map(e=>cur.events[e.id]).sort(compareScheduleMessageIds))?fingerprint:null;cur.syncError=null;cur.syncRetryAt=null;cur.syncFailures=0;
+      st.lastPostedDay=day;save();
+    }
+    return {ok:true};
+  }catch(error){
+    if(current()){cur.syncError=String(error.message || error);cur.syncFailures=(cur.syncFailures || 0)+1;
+      cur.syncRetryAt=Date.now()+Math.min(30000,1000*2**Math.min(cur.syncFailures-1,5));save();}
+    console.error('[daily schedule] synchronization failed:',error.message || error);
+    return {ok:false,error:String(error.message || error)};
+  }
+}
+function queueScheduleSync(){
+  const st=db.settings.dailySchedulePost,cur=st.current,day=gameDay(Date.now());
+  if(shuttingDown || !cur || cur.gameDay!==day || cur.channelId!==st.channelId)return;
+  if(!cur.syncError && cur.syncFingerprint===scheduleFingerprint(day))return;
+  if(scheduleSyncTimer)return;
+  const delay=Math.max(Number(process.env.DAILY_SCHEDULE_SYNC_MS || 250),(cur.syncRetryAt || 0)-Date.now());
+  scheduleSyncTimer=setTimeout(()=>{scheduleSyncTimer=null;
+    scheduleLocked(()=>{
+      const current=db.settings.dailySchedulePost.current;
+      if(!current || current.gameDay!==day || !current.syncError && current.syncFingerprint===scheduleFingerprint(day))return;
+      return updateScheduleBlock(day,true);
+    }).catch(e=>console.error('[daily schedule] synchronization:',e));
+  },delay);scheduleSyncTimer.unref?.();
+}
+// Every persisted mutation path is covered, including recurring-event materialization,
+// deletes, imports, RSVP and edits. The stored published fingerprint is a durable outbox:
+// on restart a mismatch is rediscovered even if an in-memory debounce was lost.
+afterPersist=queueScheduleSync;
 // After a button click updates ev.rsvps, only THAT event's own message needs to change - every other event
 // already has its own separate message, untouched by this. A click on a stale button from a past day's post
 // (today's post has since replaced it in `current`) is a no-op here: the RSVP itself was already saved by the
 // caller either way, just without a live refresh of that old, no-longer-"current" message.
 async function refreshScheduleMessage(day, eventId) {
-  const st = db.settings.dailySchedulePost;
-  if (!st.channelId || !st.current || st.current.gameDay !== day || st.current.channelId !== st.channelId) return;
-  const messageId = st.current.events[eventId];
-  const ev = findEvent(eventId);
-  if (!messageId || !ev) return;
-  const { content, components } = buildEventMessage(ev);
-  const r = await discord.editMessage(st.channelId, messageId, { content, components });
-  if (!r.ok) console.error('[daily schedule] refresh failed:', r.error);
+  if(day!==gameDay(Date.now()))return;
+  // Caller has persisted the RSVP. Use the same serialized latest-state sync path.
+  if(flushTimer){clearTimeout(flushTimer);flushTimer=null;}
+  if(dirty)await flush();
+  return scheduleLocked(()=>updateScheduleBlock(day,true));
 }
 async function dailyScheduleTick() {
+  queueScheduleSync(); // also recover pending work while automatic publication is disabled
   const st = db.settings.dailySchedulePost;
   if (!st.enabled || !st.channelId) return;
   const now = Date.now(), day = gameDay(now);

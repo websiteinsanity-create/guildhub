@@ -503,8 +503,8 @@ withServer('automatic tracking retains the event-specific future gate over the g
   assert.equal(post.status, 200, JSON.stringify(post.body));
   await new Promise(resolve => setTimeout(resolve, 450));
   const waiting = await attendedOf(s, ev.id);
-  assert.equal(waiting.voiceTracking.active, true);
-  assert.equal(waiting.voiceTracking.gateAt, Date.parse(ev.start) + 10 * 60000);
-  assert.equal(waiting.voiceTracking.checksDone, 0);
+  assert.equal(waiting.voiceTracking, undefined, 'the scheduled run is not created before its gate');
+  assert.equal(waiting.voiceAutoStart, undefined);
+  assert.equal(waiting.voiceTrackAuto,true);
   assert.deepEqual(waiting.attended, []);
 });

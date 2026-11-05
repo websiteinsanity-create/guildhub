@@ -437,11 +437,13 @@ withServer('an older Shotcaller bot build that only reports headcounts (no per-u
   assert.equal(r.status, 200, JSON.stringify(r.body));
 
   const started = await attendedOf(s, ev.id);
-  assert.equal(started.voiceTracking.presenceUnsupported, true, 'Guild Hall should recognize this bot build has no per-user presence data at all');
+  assert.equal(started.voiceTracking, undefined, 'a bot without per-user presence cannot start a valid automatic track');
+  assert.equal(started.voiceTrackAuto,false);
+  assert.match(started.voiceAutoStart.reason,/per-user presence/);
 
   const live = await s.call(`/api/events/${ev.id}/voice-track/live`, 'GET', null, s.officer);
   assert.equal(live.status, 200, JSON.stringify(live.body));
-  assert.equal(live.body.presenceUnsupported, true, 'the dashboard card reads this flag to show its warning banner');
+  assert.notEqual(live.body.running,true,'no invalid track is running');
 
   // Even with people "connected" (headcount only, no ids for Guild Hall to match against), nobody can be
   // credited - there is nothing to compare a member's Discord id against.
@@ -451,7 +453,7 @@ withServer('an older Shotcaller bot build that only reports headcounts (no per-u
   assert.equal(finalEv.attended.length, 0, 'with no per-user ids at all from the bot, nobody can be matched to a member - this is the gap the warning exists to explain');
 
   const audit = (await s.call('/api/admin/audit', 'GET', null, s.officer)).body;
-  assert.ok(audit.entries.some((row) => row.action === 'event.voicetrack.unsupported'), 'an audit log entry should explain why attendance is not being credited');
+  assert.ok(audit.entries.some((row) => row.action === 'event.voicetrack.auto-failed'), 'an audit log entry should explain why attendance is not being credited');
 }, {}, { legacyNoPresence: true });
 
 // Performance: while an event is being voice-tracked, THREE independent things ask the bot "what is the
