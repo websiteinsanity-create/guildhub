@@ -3,7 +3,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const sourcePath=path.join(__dirname,'../server-shotcaller.js');
 const raw=fs.readFileSync(sourcePath,'utf8');
-const source=raw.replace('return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan };','return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan, _test:{runCheckSafe,pollVoiceTest,checkTimers,getVoiceTest:()=>voiceTest} };');
+const source=raw.replace('return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan, checkAutomaticAttendance };','return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan, _test:{runCheckSafe,pollVoiceTest,checkTimers,getVoiceTest:()=>voiceTest} };');
 assert.notEqual(source,raw,'Only expose internals for observation; do not alter their logic.');
 const NOW=Date.parse('2026-10-28T12:00:00Z'),user={key:'officer',name:'Officer'};
 const status=(owner=null,channel='old-channel',sessionId='session-original')=>({active:true,sessionId,parties:[{index:1,channelId:channel,name:'Party 1',connectedStates:owner?[{id:owner,mute:false,deaf:false}]:[]}],dedicated:[],additionalCallers:[]});
@@ -35,7 +35,7 @@ test('three valid empty snapshots finalize tracked attendance even with zero att
 });
 test('watchdog restart honors the future tracking gate',async()=>{
  const ev=event();ev.start=new Date(NOW+3600000).toISOString();const db=dbFor(ev),a=harness(db);a.api.beginVoiceTracking(ev,status('alice'),[]);await flush();
- const b=harness(db,async()=>status('alice'));await b.tickHooks[0]();await flush();assert.equal(ev.voiceTracking.checksDone,0);assert.equal(ev.voiceTracking.sessionSeen.length,0);assert.equal([...b.timers.values()][0].ms,3600000);
+ const b=harness(db,async()=>status('alice'));for(const hook of b.tickHooks)await hook();await flush();assert.equal(ev.voiceTracking.checksDone,0);assert.equal(ev.voiceTracking.sessionSeen.length,0);assert.equal([...b.timers.values()][0].ms,3600000);
  b.clock.now=Date.parse(ev.start);[...b.timers.values()][0].fn();await flush();assert.equal(ev.voiceTracking.checksDone,1);
 });
 test('Track again owns a fresh run; pending old success and counters cannot contaminate it',async()=>{

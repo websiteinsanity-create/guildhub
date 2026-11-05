@@ -250,7 +250,7 @@ module.exports = function install(ctx) {
     const partyChannels=(snap && snap.sessionBinding===sessionIdentity(started))?snap.partyChannels:computePartyChannels(ev,started,realRest);
     // Validate the new run fully before touching another event's active tracking.
     need(sessionIdentity(started),409,'Shotcaller did not report a session identity or voice channels.');
-    for(const other of db().events)if(other.id!==ev.id && other.voiceTracking?.active)finalizeTrack(other,null,{reason:'another-event',incomplete:other.voiceTracking.checksDone<VOICE_CHECKS_TOTAL});
+    need(!ev.voiceTracking?.active,409,'Tracking is already running for this event.');
     clearCheckTimer(ev.id);
     const offsetMs=(Number(ev.voiceTrackStartOffsetMinutes ?? db().settings.voiceTrackStartOffsetMinutes)||0)*60000;
     const startedAt=Date.now();
@@ -258,7 +258,7 @@ module.exports = function install(ctx) {
     // Only automatic starts use the event's configured time and offset.
     // Persist the gate so later checks and recovery retain the same decision.
     const gateAt=manual ? startedAt : Date.parse(ev.start)+offsetMs;
-    ev.voiceTracking={runId:randomUUID(),sessionBinding:sessionIdentity(started),legacyIdentity:!started.sessionId,gateAt,active:true,partyChannels,seen:{},sessionSeen:[],channels:[],checksDone:0,startedAt,finishedAt:null};
+    ev.voiceTracking={runId:randomUUID(),sessionBinding:sessionIdentity(started),legacyIdentity:!started.sessionId,gateAt,startSource:manual ? 'manual' : 'automatic',active:true,partyChannels,seen:{},sessionSeen:[],channels:[],checksDone:0,startedAt,finishedAt:null};
 
     if (presenceUnsupported(started)) {
       ev.voiceTracking.presenceUnsupported = true;
@@ -271,6 +271,68 @@ module.exports = function install(ctx) {
 
   }
 
+  // Scheduler-owned automatic starts. Session/event association is deliberately irrelevant.
+  const trackingStarts = new Set();
+  const trackingBootAt = Date.now();
+  // Automatic starts only happen close to the scheduled time; later ones would credit the wrong people.
+  const AUTO_TRACK_WINDOW_MS = Number(process.env.VOICE_AUTO_TRACK_WINDOW_MS || 15 * 60000);
+  async function withTrackingStart(id, fn) {
+    id=String(id);need(!trackingStarts.has(id),409,'An attendance start is already in progress.');
+    trackingStarts.add(id);try{return await fn();}finally{trackingStarts.delete(id);}
+  }
+  const scheduledTrackingAt = ev => Date.parse(ev.start)+(Number(ev.voiceTrackStartOffsetMinutes ?? db().settings.voiceTrackStartOffsetMinutes)||0)*60000;
+  async function validateTrackingChannels(ev,status) {
+    need(status?.active,409,'No active Shotcaller session was detected at the scheduled tracking time. Automatic tracking has been disabled for this event. You can still start tracking manually.');
+    need(!['starting','stopping'].includes(sessionState(status)),409,'Shotcaller is still starting or stopping; the required voice channels are not ready.');
+    need(status.diagnostics?.mainBot?.gatewayReady!==false,409,'Discord gateway is unavailable; voice presence cannot be verified.');
+    need(Array.isArray(status.parties) && status.parties.length>0 && status.parties.every(p=>p.channelId && (Array.isArray(p.connectedStates) || Array.isArray(p.connectedUserIds)) && (!p.voiceState || p.voiceState==='ready') && p.gatewayReady!==false && p.connectionIssue!==true && !status.diagnostics?.relays?.some(r=>r.channelId===p.channelId && (r.gatewayReady===false || r.voiceState && r.voiceState!=='ready'))),409,'Required Shotcaller voice channels are unavailable or do not report per-user presence.');
+    const extras=[...new Set([...(db().settings.voiceTrackExtraChannelIds || []),...(ev.voiceTrackExtraChannelIds || [])])];
+    if(extras.length){
+      const r=await callBot('/voice-presence?channels='+extras.map(encodeURIComponent).join(','));
+      need(extras.every(id=>r.channels?.filter(c=>c.channelId===id && c.found===true && Array.isArray(c.connectedStates)).length===1),409,'One or more configured extra voice channels are unavailable. Check the selected channels and Discord access.');
+    }
+  }
+  function failAutomaticStart(ev,at,code,reason) {
+    ev.voiceTrackAuto=false;
+    ev.voiceAutoStart={...ev.voiceAutoStart,status:'failed',scheduledAt:at,failedAt:Date.now(),code,reason};
+    audit({name:'Guild Hall'},'event.voicetrack.auto-failed',{type:'event',id:ev.id,name:ev.title},'Automatic attendance tracking unavailable for "'+ev.title+'": '+reason);
+    save(); // No attendance or previous tracking data is changed on this path.
+  }
+  async function checkAutomaticAttendance() {
+    for(const candidate of [...db().events]) {
+      const at=scheduledTrackingAt(candidate),now=Date.now();
+      if(ctx.effectiveAttendanceMode(candidate)!=='voice' || candidate.voiceTrackAuto===false || !Number.isFinite(at) || now<at || candidate.voiceTracking || candidate.attendanceTracked || trackingStarts.has(String(candidate.id)))continue;
+      // An attempted/failed start is never retried by a late Shotcaller start or restart.
+      // A failure turns voiceTrackAuto off; an officer switching it back on is an explicit request for a new attempt.
+      if(candidate.voiceAutoStart?.status==='failed' && candidate.voiceTrackAuto!==false && candidate.voiceAutoStart.failedAt<(candidate.voiceTrackAutoChangedAt || 0))delete candidate.voiceAutoStart;
+      if(candidate.voiceAutoStart?.status){
+        if(candidate.voiceAutoStart.status==='checking')failAutomaticStart(candidate,at,'interrupted','The application restarted during the automatic start. Start tracking manually.');
+        continue;
+      }
+      // Events entered after their tracking time (retroactive records) are never auto-tracked: the people in
+      // voice now did not attend that past event. Old history is left untouched instead of being flagged.
+      // (Ad-hoc events created at or shortly after their start time still track normally.)
+      if(candidate.createdAt-at>AUTO_TRACK_WINDOW_MS || at<trackingBootAt-AUTO_TRACK_WINDOW_MS)continue;
+      const missedOffline=at<trackingBootAt && !(candidate.createdAt>=trackingBootAt);
+      if(missedOffline || now-at>AUTO_TRACK_WINDOW_MS){
+        failAutomaticStart(candidate,at,'missed-time',missedOffline?'The scheduled tracking time passed while GuildHub was offline. Start tracking manually.':'The scheduled tracking time passed too long ago for an automatic start. Start tracking manually.');continue;
+      }
+      await withTrackingStart(candidate.id,async()=>{
+        const ev=findEvent(candidate.id);if(!ev || ev.voiceTrackAuto===false || ev.voiceTracking)return;
+        ev.voiceAutoStart={status:'checking',scheduledAt:at,attemptedAt:Date.now()};save();
+        try {
+          const status=await callSession(''); // fresh read, scoped to this guild, never a cached event session
+          await validateTrackingChannels(ev,status);
+          if(findEvent(ev.id)!==ev || ev.voiceTrackAuto===false || ctx.effectiveAttendanceMode(ev)!=='voice' || ev.attendanceTracked || scheduledTrackingAt(ev)!==at){if(findEvent(ev.id)===ev){delete ev.voiceAutoStart;save();}return;}
+          beginVoiceTracking(ev,status,(ev.parties || []).slice(1).filter(p=>!partyIsPlaceholder(p)));
+          ev.voiceAutoStart.status='started';ev.voiceAutoStart.startedAt=Date.now();
+          audit({name:'Guild Hall'},'event.voicetrack.auto-start',{type:'event',id:ev.id,name:ev.title},'Automatically started scheduled voice attendance for "'+ev.title+'" using the active guild session.');save();
+        }catch(error){if(findEvent(ev.id)===ev)failAutomaticStart(ev,at,'prerequisites-unavailable',error.message || 'Voice presence could not be verified.');}
+      });
+    }
+  }
+  tickHooks.push(checkAutomaticAttendance);
+
   // The manual counterpart to the automatic start above - for when an officer switched "automatic tracking"
   // off for this event (Voice channel tracking and Reminders on the event page) and wants to begin crediting
   // sightings right now instead, on their own call, rather than the moment Shotcaller happens to start. Reuses
@@ -279,18 +341,20 @@ module.exports = function install(ctx) {
   // is running right now and hand it to the same function. Requires a Shotcaller session to actually be active
   // already (started separately, e.g. by posting this event's parties with "Also start Shotcaller" ticked but
   // automatic tracking off, or from the Shotcaller page) - this never starts a session of its own.
-  route('POST', '/api/events/:id/voice-track/start', async ({ user, params }) => {
+  route('POST', '/api/events/:id/voice-track/start', async ({ user, params }) => withTrackingStart(params.id, async () => {
     const ev = findEvent(params.id);
     need(ev, 404, 'Event not found.');
     need(ctx.effectiveAttendanceMode(ev) === 'voice', 400, 'This event is not using voice tracking.');
     need(!ev.voiceTracking?.active,409,'Tracking is already running. Use Track again to restart it.');
     const status = await callSession('');
     need(status && status.active, 409, 'Shotcaller is not running right now - start it first, then come back and start tracking.');
+    await validateTrackingChannels(ev, status);
+    need(findEvent(ev.id)===ev && !ev.voiceTracking?.active,409,'Event or tracking changed during startup. Refresh and retry.');
     const realRest = (ev.parties || []).slice(1).filter((p) => !partyIsPlaceholder(p));
     beginVoiceTracking(ev, status, realRest, { manual: true });
     audit(user, 'event.voicetrack.start', { type: 'event', id: ev.id, name: ev.title }, `${user.name} manually started voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
-  }, { officer: true });
+  }), { officer: true });
 
   // "Track again" on the event page's voice panel: wipes this event's attendance all the way back to before
   // it was EVER tracked (not just whatever voice tracking itself credited - any hand correction an officer made
@@ -300,12 +364,15 @@ module.exports = function install(ctx) {
   // even for an event only voice tracking ever touched. Clears that snapshot afterwards so the fresh pass gets
   // its own, and beginVoiceTracking's own full replace of ev.voiceTracking naturally discards the old sighting
   // data (the "seen" popup log included) for the new pass to start building from scratch.
-  route('POST', '/api/events/:id/voice-track/restart', async ({ user, params }) => {
+  route('POST', '/api/events/:id/voice-track/restart', async ({ user, params }) => withTrackingStart(params.id, async () => {
     const ev = findEvent(params.id);
     need(ev, 404, 'Event not found.');
     need(ctx.effectiveAttendanceMode(ev) === 'voice', 400, 'This event is not using voice tracking.');
     const status = await callSession('');
     need(status && status.active, 409, 'Shotcaller is not running right now - start it first, then come back and start tracking.');
+    await validateTrackingChannels(ev, status);
+    need(findEvent(ev.id)===ev,409,'Event was removed during startup.');
+    cancelVoiceTracking(ev,'manual-restart');
     const undo = ev.attendanceUndo;
     ev.attended = undo ? [...undo.attended] : [];
     ev.autoAttended = undo ? undo.autoAttended : false;
@@ -315,7 +382,7 @@ module.exports = function install(ctx) {
     beginVoiceTracking(ev, status, realRest, { manual: true });
     audit(user, 'event.voicetrack.restart', { type: 'event', id: ev.id, name: ev.title }, `${user.name} reset and restarted voice-attendance tracking for "${ev.title}".`);
     return eventFor(ev, user);
-  }, { officer: true });
+  }), { officer: true });
 
   // Lets an officer finish a track by hand before its 3 checks run out on their own - the main way to move on
   // to the next event in a back-to-back lineup right away, on a Shotcaller session that stays up the whole
@@ -733,5 +800,5 @@ module.exports = function install(ctx) {
 
   // Exposed to server.js, which passes it on to server-features.js/server-community.js (as ctx.shotcallerApi) -
   // see server-community.js's post-parties route, the only other caller of startSession and of beginVoiceTracking.
-  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan };
+  return { configured, checkCandidates, startSession, beginVoiceTracking, snapshotVoiceSession, cancelVoiceTracking, preflightSession, capturePartyPlan, checkAutomaticAttendance };
 };

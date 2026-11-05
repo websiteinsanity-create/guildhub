@@ -185,6 +185,25 @@ test('a bad click (unknown event, closed sign-ups, no character) replies ephemer
   assert.match(r2.body.data.content, /could not find your character/i);
 });
 
+test('persisted HTTP calendar mutations synchronize only the already-published current day', async () => {
+  await call('/api/admin/discord/daily-schedule/post-now','POST',{},'A');
+  const wait=async predicate=>{for(let i=0;i<30;i++){const found=predicate();if(found)return found;await sleep(100);}throw Error('schedule mutation did not synchronize');};
+  const ev=(await call('/api/events','POST',{title:'Sync integration original',type:'Other',start:inMinutes(30),reminders:false},'A')).body;
+  const message=await wait(()=>eventPosts().find(p=>p.content.includes('Sync integration original')));
+  const edited=await call('/api/events/'+ev.id,'PUT',{title:'Sync integration renamed',type:ev.type,start:inMinutes(45)},'A');assert.equal(edited.status,200);
+  await wait(()=>message.content.includes('Sync integration renamed'));
+  assert(message.content.includes('<t:'+Math.floor(Date.parse(edited.body.start)/1000)+':t>'));
+  const bannerId=bannerPosts()[0].id;
+  const tomorrow=new Date(Date.now()+86400000).toISOString();
+  await call('/api/events/'+ev.id,'PUT',{type:ev.type,start:tomorrow},'A');await wait(()=>message.deleted);
+  const count=schedulePosts().length;
+  await call('/api/events/'+ev.id,'PUT',{type:ev.type,start:tomorrow,title:'Tomorrow must stay unposted'},'A');await sleep(700);assert.equal(schedulePosts().length,count);
+  await call('/api/events/'+ev.id,'PUT',{type:ev.type,start:inMinutes(50),title:'Moved into today'},'A');
+  const back=await wait(()=>eventPosts().find(p=>p.content.includes('Moved into today')));
+  await call('/api/events/'+ev.id,'DELETE',null,'A');await wait(()=>back.deleted);
+  assert.equal(bannerPosts()[0].id,bannerId,'calendar changes preserve the current banner');
+});
+
 test('changing the channel clears the tracked live messages, so the next post goes out fresh rather than editing messages in the old channel', async () => {
   const GENERAL_CHANNEL = '800000000000000002';
   const before = (await state('A')).settings;
