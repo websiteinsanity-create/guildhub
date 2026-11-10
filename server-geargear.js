@@ -445,6 +445,24 @@ module.exports = function install(ctx) {
     if(D.gearPotentials)delete D.gearPotentials[potentialKey(memberId,key)];
   }
   ctx.gearDropBuild = (memberId, buildId) => dropBuildData(memberId, String(buildId));
+  // Hotfix 1.46.2.1 (GH-01): may this signed-in user download a private gear-thread image (screenshot, its
+  // preview, or a folder attachment)? Exactly the rule for opening that build's thread (canAccessBuild).
+  // One file can be referenced by several rows (same picture uploaded twice): any accessible reference is enough.
+  // 200 = allowed, 403 = referenced but not for this user, 404 = not referenced by any existing thread.
+  ctx.gearMediaAccess = (user, name) => {
+    const D = db();
+    const refs = D.gearScreens.filter((r) => screenImages(r).includes(name) || Object.values(r.previews || {}).includes(name))
+      .concat(D.gearFolder.filter((r) => r.image === name));
+    let referenced = false;
+    for (const r of refs) {
+      const m = findMember(r.memberId);
+      const b = m && buildsOf(m).find((x) => x.key === rowKey(r));
+      if (!b) continue;
+      referenced = true;
+      if (canAccessBuild(user, m, b)) return 200;
+    }
+    return referenced ? 403 : 404;
+  };
   hooks.memberDeleted.push((m) => {
     for (const b of buildsOf(m)) dropBuildData(m.id, b.key);
     const D = db();

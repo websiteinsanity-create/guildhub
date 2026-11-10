@@ -185,7 +185,7 @@ withServer('the app version from package.json is exposed over /api/config, so of
   const cfg = (await call('/api/config')).body;
   const pkgVersion = require('../package.json').version;
   assert.equal(cfg.version, pkgVersion);
-  assert.match(cfg.version, /^\d+\.\d+\.\d+$/);
+  assert.match(cfg.version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/);   // semver, including a hotfix suffix such as 1.46.2-hotfix.1
 });
 
 withServer('loot entries have a type (skillcore, item, shard) that is validated and editable', async ({ call, member, officer }) => {
