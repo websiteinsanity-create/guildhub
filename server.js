@@ -288,6 +288,22 @@ function readToken(token) {
     return u;
   } catch { return null; }
 }
+// Hotfix 1.46.2.1 (GH-01): private gear-thread uploads need the same session and the same rights as
+// GET /api/gearthreads/:id - signed in (401 otherwise), not an applicant or Alliance session, and allowed to open the
+// build the image belongs to (403 otherwise; 404 when no thread references the file). Mirrors the /api/ checks below.
+const PRIVATE_UPLOAD = /^(gearshot|gearthumb|gearfolder)-/;
+function privateUploadStatus(req, name) {
+  let user = null;
+  try { user = readToken((req.headers.authorization || '').replace(/^Bearer /, '') || cookieOf(req, SESSION_COOKIE)); } catch { user = null; }
+  if (!user) return 401;
+  if (user.role === 'alliance') return 403;                       // Alliance sessions never reach gear threads
+  if (user.support) user.role = 'officer';                        // read-only support may read gear threads (support-read-policy.js)
+  if (user.key && db.users[user.key]) user.coach = !!db.users[user.key].coach;
+  else if (!discord.loginEnabled) user.coach = db.settings.coachUserIds.includes(user.key);
+  if (user.role === 'applicant' && db.users[user.key] && db.users[user.key].accepted) user.role = 'member';
+  if (user.role === 'applicant') return 403;
+  return typeof featuresCtx.gearMediaAccess === 'function' ? featuresCtx.gearMediaAccess(user, name) : 403;
+}
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a)).digest();
   const hb = crypto.createHash('sha256').update(String(b)).digest();
@@ -2051,12 +2067,19 @@ http.createServer(async (req, res) => {
     }
   }
 
-  // uploaded images (guild icon, background). File names are content hashes, so they can be cached forever.
+  // uploaded images. Guild icon, background and event artwork are public (the login screen shows them); file names
+  // are content hashes, so those can be cached forever. Gear-thread images (gearshot-, gearthumb-, gearfolder-) are
+  // private since hotfix 1.46.2.1: only for someone who may open that build's gear thread, never cached.
   const up = url.pathname.match(/^\/uploads\/([a-z]+-[a-f0-9]{12}\.(png|jpg|gif|webp))$/);
   if (up) {
+    const priv = PRIVATE_UPLOAD.test(up[1]);
+    if (priv) {
+      const status = privateUploadStatus(req, up[1]);
+      if (status !== 200) { res.writeHead(status, { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(); }
+    }
     const f = path.join(UPLOAD_DIR, up[1]);
-    if (!fs.existsSync(f)) { res.writeHead(404); return res.end(); }
-    res.writeHead(200, { 'Content-Type': { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[up[2]], 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" });
+    if (!fs.existsSync(f)) { res.writeHead(404, priv ? { 'Cache-Control': 'private, no-store' } : {}); return res.end(); }
+    res.writeHead(200, { 'Content-Type': { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[up[2]], 'Cache-Control': priv ? 'private, no-store' : 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" });
     return fs.createReadStream(f).pipe(res);
   }
 

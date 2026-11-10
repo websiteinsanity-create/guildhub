@@ -147,10 +147,10 @@ test('gallery append, ordering, individual deletion and shared files stay build-
  assert.equal((await call(url,'PUT',{order:[second.id]},'student')).status,409);
  assert.equal((await call(url,'PUT',{removeId:second.id},'other')).status,403);
  r=await call(url,'PUT',{removeId:first.id},'student');assert.deepEqual(shot(r).images.map(x=>x.id),[second.id]);
- assert.equal((await fetch(base+first.image)).status,200,'alternate build still references same image');
+ assert.equal((await fetch(base+first.image,{headers:{Cookie:sessions.student}})).status,200,'alternate build still references same image');   // 1.46.2.1: private images need the owner's session
  assert.equal((await call(url,'PUT',{image:'bad',append:true},'student')).status,400);
  r=await call(`/api/gearthreads/${charId}`, 'GET', null, 'student');assert.equal(shot(r).images.length,1);
- r=await call(url,'PUT',{removeId:second.id},'student');assert.equal(shot(r).images.length,0);assert.equal((await fetch(base+second.image)).status,404);
+ r=await call(url,'PUT',{removeId:second.id},'student');assert.equal(shot(r).images.length,0);assert.equal((await fetch(base+second.image,{headers:{Cookie:sessions.student}})).status,404);
 });
 
 test('old data without a build tag counts as the main build, and deleting a build removes its thread', async () => {
