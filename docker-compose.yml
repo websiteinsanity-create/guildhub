@@ -60,7 +60,7 @@ services:
       - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY:-}
     volumes:
       - /opt/persistent_volume/guildhub/data:/data
-      - /opt/persistent_volume/guildhub/data/GUILDHUB_LEDGER_DIR:/app/security-ledger
+      - /opt/persistent_volume/guildhub/GUILDHUB_LEDGER:/app/security-ledger
     # Lets this container resolve host.docker.internal, needed to reach the Shotcaller bot when it runs with
     # network_mode: host (a normal bridge-networked service otherwise cannot see a host-networked one by name).
     # Harmless to leave in even if Shotcaller is not set up.
