@@ -24,6 +24,9 @@ services:
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     environment:
+      - NODE_ENV=production
+      - GUILDHUB_LEDGER_DIR=/app/security-ledger
+      - GUILDHUB_LEDGER_BOOTSTRAP=${GUILDHUB_LEDGER_BOOTSTRAP:-}
       # Where players open the app in their browser. No slash at the end. Use https:// once it is on the internet.
       - PUBLIC_URL=${PUBLIC_URL:-http://localhost:3000}
       - PORT=${PORT:-3000}
@@ -58,7 +61,20 @@ services:
       # app's Interactions Endpoint URL to https://<your PUBLIC_URL>/discord/interactions - see README.md
       # "Discord setup".
       - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY:-}
+      # Hotfix 1.46.2.2 - session and proxy security (see PATCH_NOTES_1.46.2.2.md). All optional; unset = safest default.
+      # Proxies whose X-Forwarded-For / CF-Connecting-IP may be believed (IPs or CIDRs, comma separated), e.g. the
+      # reverse proxy's address on the Docker network. Unset = only the TCP peer address is used.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      # Optional: cf-connecting-ip to take the client IP from Cloudflare's header (only from a TRUSTED_PROXIES peer).
+      - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-}
+      # Minutes Discord-role-based officer/coach rights stay valid without a successful role check (default 60).
+      - ROLE_MAX_STALE_MINUTES=${ROLE_MAX_STALE_MINUTES:-}
+      # Minutes an earlier positive Alliance partner check may be reused while Discord errors (default 30).
+      - ALLIANCE_VERIFY_MAX_STALE_MINUTES=${ALLIANCE_VERIFY_MAX_STALE_MINUTES:-}
+      # After restoring an older /data backup: ISO time; every session issued before it is refused. Leave empty otherwise.
+      - SESSIONS_VALID_AFTER=${SESSIONS_VALID_AFTER:-}
     volumes:
+      - /opt/persistent_volume/guildhub/GUILDHUB_LEDGER:/app/security-ledger
       - /opt/persistent_volume/guildhub/data:/data
     # Lets this container resolve host.docker.internal, needed to reach the Shotcaller bot when it runs with
     # network_mode: host (a normal bridge-networked service otherwise cannot see a host-networked one by name).
