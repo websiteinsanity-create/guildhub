@@ -1,0 +1,717 @@
+{
+  "guildName": "Our Guild",
+  "tagline": "Throne and Liberty",
+  "guildCap": 70,
+  "leadershipRanks": [
+    "Guild Master",
+    "Officer"
+  ],
+  "defaultTimezone": "Europe/Berlin",
+  "timezones": [
+    "UTC",
+    "Europe/Amsterdam",
+    "Europe/Andorra",
+    "Europe/Astrakhan",
+    "Europe/Athens",
+    "Europe/Belgrade",
+    "Europe/Berlin",
+    "Europe/Bratislava",
+    "Europe/Brussels",
+    "Europe/Bucharest",
+    "Europe/Budapest",
+    "Europe/Busingen",
+    "Europe/Chisinau",
+    "Europe/Copenhagen",
+    "Europe/Dublin",
+    "Europe/Gibraltar",
+    "Europe/Guernsey",
+    "Europe/Helsinki",
+    "Europe/Isle_of_Man",
+    "Europe/Istanbul",
+    "Europe/Jersey",
+    "Europe/Kaliningrad",
+    "Europe/Kiev",
+    "Europe/Kirov",
+    "Europe/Lisbon",
+    "Europe/Ljubljana",
+    "Europe/London",
+    "Europe/Luxembourg",
+    "Europe/Madrid",
+    "Europe/Malta",
+    "Europe/Mariehamn",
+    "Europe/Minsk",
+    "Europe/Monaco",
+    "Europe/Moscow",
+    "Europe/Oslo",
+    "Europe/Paris",
+    "Europe/Podgorica",
+    "Europe/Prague",
+    "Europe/Riga",
+    "Europe/Rome",
+    "Europe/Samara",
+    "Europe/San_Marino",
+    "Europe/Sarajevo",
+    "Europe/Saratov",
+    "Europe/Simferopol",
+    "Europe/Skopje",
+    "Europe/Sofia",
+    "Europe/Stockholm",
+    "Europe/Tallinn",
+    "Europe/Tirane",
+    "Europe/Ulyanovsk",
+    "Europe/Vaduz",
+    "Europe/Vatican",
+    "Europe/Vienna",
+    "Europe/Vilnius",
+    "Europe/Volgograd",
+    "Europe/Warsaw",
+    "Europe/Zagreb",
+    "Europe/Zurich",
+    "Asia/Aden",
+    "Asia/Almaty",
+    "Asia/Amman",
+    "Asia/Anadyr",
+    "Asia/Aqtau",
+    "Asia/Aqtobe",
+    "Asia/Ashgabat",
+    "Asia/Atyrau",
+    "Asia/Baghdad",
+    "Asia/Bahrain",
+    "Asia/Baku",
+    "Asia/Bangkok",
+    "Asia/Barnaul",
+    "Asia/Beirut",
+    "Asia/Bishkek",
+    "Asia/Brunei",
+    "Asia/Calcutta",
+    "Asia/Chita",
+    "Asia/Colombo",
+    "Asia/Damascus",
+    "Asia/Dhaka",
+    "Asia/Dili",
+    "Asia/Dubai",
+    "Asia/Dushanbe",
+    "Asia/Famagusta",
+    "Asia/Gaza",
+    "Asia/Hebron",
+    "Asia/Hong_Kong",
+    "Asia/Hovd",
+    "Asia/Irkutsk",
+    "Asia/Jakarta",
+    "Asia/Jayapura",
+    "Asia/Jerusalem",
+    "Asia/Kabul",
+    "Asia/Kamchatka",
+    "Asia/Karachi",
+    "Asia/Katmandu",
+    "Asia/Khandyga",
+    "Asia/Krasnoyarsk",
+    "Asia/Kuala_Lumpur",
+    "Asia/Kuching",
+    "Asia/Kuwait",
+    "Asia/Macau",
+    "Asia/Magadan",
+    "Asia/Makassar",
+    "Asia/Manila",
+    "Asia/Muscat",
+    "Asia/Nicosia",
+    "Asia/Novokuznetsk",
+    "Asia/Novosibirsk",
+    "Asia/Omsk",
+    "Asia/Oral",
+    "Asia/Phnom_Penh",
+    "Asia/Pontianak",
+    "Asia/Pyongyang",
+    "Asia/Qatar",
+    "Asia/Qostanay",
+    "Asia/Qyzylorda",
+    "Asia/Rangoon",
+    "Asia/Riyadh",
+    "Asia/Saigon",
+    "Asia/Sakhalin",
+    "Asia/Samarkand",
+    "Asia/Seoul",
+    "Asia/Shanghai",
+    "Asia/Singapore",
+    "Asia/Srednekolymsk",
+    "Asia/Taipei",
+    "Asia/Tashkent",
+    "Asia/Tbilisi",
+    "Asia/Tehran",
+    "Asia/Thimphu",
+    "Asia/Tokyo",
+    "Asia/Tomsk",
+    "Asia/Ulaanbaatar",
+    "Asia/Urumqi",
+    "Asia/Ust-Nera",
+    "Asia/Vientiane",
+    "Asia/Vladivostok",
+    "Asia/Yakutsk",
+    "Asia/Yekaterinburg",
+    "Asia/Yerevan",
+    "America/New_York",
+    "America/Chicago",
+    "America/Los_Angeles",
+    "Australia/Sydney"
+  ],
+  "recurrenceHorizonDays": 42,
+  "lootWindowDays": 14,
+  "lootThresholdPercent": 60,
+  "lootBands": {
+    "redMax": 59,
+    "orangeMax": 80
+  },
+  "lootItemDays": 7,
+  "lootTypes": [
+    "Skillcore",
+    "Item",
+    "Shard",
+    "Lucent"
+  ],
+  "lootDefaultType": "Item",
+  "buildModes": [
+    "PvE",
+    "PvP"
+  ],
+  "requestKinds": [
+    "Lucent",
+    "Item"
+  ],
+  "approvalGroups": [
+    {
+      "key": "name",
+      "label": "Character name",
+      "default": false
+    },
+    {
+      "key": "role",
+      "label": "Role (Tank, Healer, DPS)",
+      "default": true
+    },
+    {
+      "key": "weapons",
+      "label": "Weapons, class and PvE/PvP mode",
+      "default": true
+    },
+    {
+      "key": "gearScore",
+      "label": "Gear score",
+      "default": false
+    },
+    {
+      "key": "level",
+      "label": "Watermark",
+      "default": false
+    },
+    {
+      "key": "specialization",
+      "label": "Specialization",
+      "default": false
+    },
+    {
+      "key": "questlog",
+      "label": "Questlog links",
+      "default": false
+    },
+    {
+      "key": "builds",
+      "label": "Extra builds (PvE / PvP)",
+      "default": true
+    },
+    {
+      "key": "profile",
+      "label": "Player profile (about me, availability, notes)",
+      "default": false
+    },
+    {
+      "key": "newCharacter",
+      "label": "Adding a new character",
+      "default": false
+    }
+  ],
+  "sections": [
+    {
+      "key": "member",
+      "label": "Member page"
+    },
+    {
+      "key": "loot",
+      "label": "Loot page"
+    },
+    {
+      "key": "parties",
+      "label": "Parties page (and the parties on events)"
+    },
+    {
+      "key": "points",
+      "label": "Points / Attendance page"
+    },
+    {
+      "key": "requests",
+      "label": "Requests page (Lucent and items)"
+    },
+    {
+      "key": "lootpanel",
+      "label": "Dashboard: Qualified for loot"
+    },
+    {
+      "key": "leadership",
+      "label": "Dashboard: Leadership tasks"
+    },
+    {
+      "key": "vods",
+      "label": "VODs page"
+    }
+  ],
+  "partySize": 6,
+  "weekStartsOn": 1,
+  "roles": [
+    "Tank",
+    "Healer",
+    "DPS"
+  ],
+  "weapons": [
+    "Sword & Shield",
+    "Greatsword",
+    "Daggers",
+    "Crossbow",
+    "Longbow",
+    "Staff",
+    "Wand & Tome",
+    "Spear",
+    "Orb",
+    "Gauntlet"
+  ],
+  "classes": [
+    {
+      "name": "Battleweaver",
+      "weapons": [
+        "Staff",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Berserker",
+      "weapons": [
+        "Sword & Shield",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Cavalier",
+      "weapons": [
+        "Spear",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Crusader",
+      "weapons": [
+        "Greatsword",
+        "Sword & Shield"
+      ]
+    },
+    {
+      "name": "Darkblighter",
+      "weapons": [
+        "Daggers",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Disciple",
+      "weapons": [
+        "Staff",
+        "Sword & Shield"
+      ]
+    },
+    {
+      "name": "Eradicator",
+      "weapons": [
+        "Spear",
+        "Staff"
+      ]
+    },
+    {
+      "name": "Fury",
+      "weapons": [
+        "Crossbow",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Gladiator",
+      "weapons": [
+        "Spear",
+        "Greatsword"
+      ]
+    },
+    {
+      "name": "Impaler",
+      "weapons": [
+        "Spear",
+        "Longbow"
+      ]
+    },
+    {
+      "name": "Infiltrator",
+      "weapons": [
+        "Longbow",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Invocator",
+      "weapons": [
+        "Staff",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Liberator",
+      "weapons": [
+        "Staff",
+        "Longbow"
+      ]
+    },
+    {
+      "name": "Outrider",
+      "weapons": [
+        "Greatsword",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Paladin",
+      "weapons": [
+        "Greatsword",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Raider",
+      "weapons": [
+        "Sword & Shield",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Ranger",
+      "weapons": [
+        "Longbow",
+        "Greatsword"
+      ]
+    },
+    {
+      "name": "Ravager",
+      "weapons": [
+        "Greatsword",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Scorpion",
+      "weapons": [
+        "Daggers",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Scout",
+      "weapons": [
+        "Longbow",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Seeker",
+      "weapons": [
+        "Longbow",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Sentinel",
+      "weapons": [
+        "Staff",
+        "Greatsword"
+      ]
+    },
+    {
+      "name": "Shadowdancer",
+      "weapons": [
+        "Spear",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Spellblade",
+      "weapons": [
+        "Staff",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Steelheart",
+      "weapons": [
+        "Spear",
+        "Sword & Shield"
+      ]
+    },
+    {
+      "name": "Templar",
+      "weapons": [
+        "Sword & Shield",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Voidlance",
+      "weapons": [
+        "Spear",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Warden",
+      "weapons": [
+        "Longbow",
+        "Sword & Shield"
+      ]
+    },
+    {
+      "name": "Lunarch",
+      "weapons": [
+        "Orb",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Justicar",
+      "weapons": [
+        "Orb",
+        "Greatsword"
+      ]
+    },
+    {
+      "name": "Scryer",
+      "weapons": [
+        "Orb",
+        "Longbow"
+      ]
+    },
+    {
+      "name": "Enigma",
+      "weapons": [
+        "Orb",
+        "Staff"
+      ]
+    },
+    {
+      "name": "Polaris",
+      "weapons": [
+        "Orb",
+        "Spear"
+      ]
+    },
+    {
+      "name": "Guardian",
+      "weapons": [
+        "Orb",
+        "Sword & Shield"
+      ]
+    },
+    {
+      "name": "Oracle",
+      "weapons": [
+        "Orb",
+        "Wand & Tome"
+      ]
+    },
+    {
+      "name": "Crucifix",
+      "weapons": [
+        "Orb",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Mauler",
+      "weapons": [
+        "Gauntlet",
+        "Greatsword"
+      ]
+    },
+    {
+      "name": "Soulcrusher",
+      "weapons": [
+        "Gauntlet",
+        "Orb"
+      ]
+    },
+    {
+      "name": "Archon",
+      "weapons": [
+        "Gauntlet",
+        "Staff"
+      ]
+    },
+    {
+      "name": "Destroyer",
+      "weapons": [
+        "Gauntlet",
+        "Spear"
+      ]
+    },
+    {
+      "name": "Mobilist",
+      "weapons": [
+        "Gauntlet",
+        "Longbow"
+      ]
+    },
+    {
+      "name": "Predator",
+      "weapons": [
+        "Gauntlet",
+        "Daggers"
+      ]
+    },
+    {
+      "name": "Shrike",
+      "weapons": [
+        "Gauntlet",
+        "Crossbow"
+      ]
+    },
+    {
+      "name": "Bastion",
+      "weapons": [
+        "Gauntlet",
+        "Sword & Shield"
+      ]
+    },
+    {
+      "name": "Mystic",
+      "weapons": [
+        "Gauntlet",
+        "Wand & Tome"
+      ]
+    }
+  ],
+  "ranks": [
+    "Guild Master",
+    "Officer",
+    "Veteran",
+    "Member",
+    "Recruit"
+  ],
+  "eventTypes": [
+    {
+      "name": "Archboss",
+      "points": 5,
+      "mandatory": true
+    },
+    {
+      "name": "Boonstone",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Riftstone",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Castle Siege",
+      "points": 10,
+      "mandatory": true
+    },
+    {
+      "name": "Dungeon",
+      "points": 2,
+      "mandatory": false
+    },
+    {
+      "name": "Guild Contract",
+      "points": 1,
+      "mandatory": false
+    },
+    {
+      "name": "Wargames",
+      "points": 4,
+      "mandatory": false
+    },
+    {
+      "name": "Tax delivery",
+      "points": 1,
+      "mandatory": false
+    },
+    {
+      "name": "Guild bosses",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "PvE-Raid",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Interserver Boonstone",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Interserver Riftstone",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Worldboss (Conflict)",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Worldboss (Peace)",
+      "points": 3,
+      "mandatory": false
+    },
+    {
+      "name": "Other",
+      "points": 0,
+      "mandatory": false
+    }
+  ],
+  "pointReasons": [
+    "Loot spent",
+    "Manual bonus",
+    "Correction",
+    "Decay"
+  ],
+  "lootReasons": [
+    "Loot council",
+    "Attendance win",
+    "Donation",
+    "Buyout"
+  ],
+  "lootPurposes": [
+    "PvE",
+    "PvP",
+    "Alt build"
+  ],
+  "defaultRank": "Member",
+  "vodTypes": [
+    "Wargame",
+    "BG",
+    "Siege",
+    "Stonefight",
+    "GvG Boss",
+    "Testing"
+  ],
+  "vodTypesWithEnemy": [
+    "Wargame",
+    "Stonefight",
+    "GvG Boss"
+  ]
+}

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 580" fill="none">
+<defs><linearGradient id="metal" x1="80" x2="230" y2="500" gradientUnits="userSpaceOnUse"><stop stop-color="#606374"/><stop offset=".43" stop-color="#272a38"/><stop offset=".55" stop-color="#4a4e60"/><stop offset="1" stop-color="#181b25"/></linearGradient><linearGradient id="gold"><stop stop-color="#e0c080"/><stop offset="1" stop-color="#796441"/></linearGradient><radialGradient id="halo"><stop stop-color="#807048" stop-opacity=".17"/><stop offset="1" stop-color="#807048" stop-opacity="0"/></radialGradient></defs>
+<ellipse cx="150" cy="300" rx="145" ry="270" fill="url(#halo)"/>
+<g fill="url(#metal)" stroke="#797587" stroke-width="1.2" stroke-linejoin="round">
+<path d="M118 117 89 148 86 337 64 474 111 458 150 492 189 458 236 474 214 337 211 148 182 117Z" fill="#181a24" stroke="#373440"/>
+<path d="m129 101 21 8 21-8 13 30-34 25-34-25Z"/>
+<path d="m123 48 27-27 27 27 6 43-19 28h-28l-19-28Z"/>
+<path d="m150 25-7 42 7 44 7-44Z" fill="#96919a"/>
+<path d="m121 59 22 12-6 12-17-9m59-15-22 12 6 12 17-9" fill="#10131a" stroke="url(#gold)"/>
+<path d="m116 126-24-9-31 13-14 27 32 26 32-18 14-18m59-21 24-9 31 13 14 27-32 26-32-18-14-18"/>
+<path d="m89 124-18 16-11 17 23 12 27-19m101-26 18 16 11 17-23 12-27-19" stroke="url(#gold)"/>
+<path d="m112 139 38 18 38-18 9 61-21 43h-52l-21-43Z"/>
+<path d="m112 151 38 23 38-23-12 44-26 27-26-27Z" stroke="url(#gold)"/>
+<path d="m150 159-8 35 8 25 8-25Z" fill="url(#gold)"/>
+<path d="m122 226 28 8 28-8 3 18-31 13-31-13Zm-3 26 31 11 31-11 4 21-35 13-35-13Z"/>
+<path d="m115 276 35 13 35-13 7 22-42 15-42-15Z" stroke="url(#gold)"/>
+<path d="m107 300 43 18-13 51-45-17Zm86 0-43 18 13 51 45-17Z"/>
+<path d="m102 318 35 15m61-15-35 15" stroke="url(#gold)"/>
+<path d="m68 177 27 6-8 54-25 2-9-23Zm164 0-27 6 8 54 25 2 9-23Z"/>
+<path d="m62 233 25 9-12 48-24-7-4-20Zm176 0-25 9 12 48 24-7 4-20Z" stroke="url(#gold)"/>
+<path d="m51 281 24 9-7 27-17 6-11-15Zm198 0-24 9 7 27 17 6 11-15Z"/>
+<path d="m99 355 35 15-9 70-28 3-13-31Zm102 0-35 15 9 70 28 3 13-31Z"/>
+<path d="m94 431 31 3 5 23-19 23-25-22Zm112 0-31 3-5 23 19 23 25-22Z" stroke="url(#gold)"/>
+<path d="m89 467 26 13 7 53-18 9-25-9Zm122 0-26 13-7 53 18 9 25-9Z"/>
+<path d="m78 528 28 9 7 19-6 6H61l-2-11Zm144 0-28 9-7 19 6 6h46l2-11Z" stroke="url(#gold)"/>
+</g><path d="M150 113v23m-45 29-6 34m96-34 6 34M111 377l-6 40m84-40 6 40" stroke="#b99a61" stroke-opacity=".6"/>
+</svg>

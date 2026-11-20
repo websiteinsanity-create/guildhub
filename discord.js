@@ -1,0 +1,279 @@
+// Discord integration for Guild Hall (no dependencies, uses Node's built-in fetch and crypto).
+//
+//  1. "Sign in with Discord" (OAuth2). Only members of your Discord server can sign in; their Discord roles
+//     decide who is an officer.
+//  2. Direct messages from a bot: attendance PINs and "you have not answered" reminders.
+//  3. Reminder DM buttons answer inside Discord itself (a Message Component interaction), handled by
+//     verifyInteraction() below plus the /discord/interactions route in server.js.
+//
+// Everything is configured with environment variables, see README.md ("Discord setup").
+
+const crypto = require('crypto');
+const csv = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isSnowflake = (v) => /^\d{15,25}$/.test(String(v));
+
+// Discord's interaction signatures are plain Ed25519 over (timestamp + rawBody), verified with the
+// application's Public Key (Developer Portal > General Information). Node's crypto can verify Ed25519
+// natively since v12 - it just wants the raw 32-byte key wrapped in its fixed SPKI/DER header, which is
+// always the same 12 bytes for every Ed25519 key, so no real ASN.1 parsing is needed. No npm dependency
+// (discord-interactions or tweetnacl, which most examples reach for) required for this.
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+function ed25519PublicKey(hex) {
+  const raw = Buffer.from(hex, 'hex');
+  if (raw.length !== 32) return null;
+  try { return crypto.createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, raw]), format: 'der', type: 'spki' }); }
+  catch { return null; }
+}
+
+function createDiscord(env = process.env) {
+  const cfg = {
+    clientId: env.DISCORD_CLIENT_ID || '',
+    clientSecret: env.DISCORD_CLIENT_SECRET || '',
+    botToken: env.DISCORD_BOT_TOKEN || '',
+    guildId: env.DISCORD_GUILD_ID || '',                  // your Discord server; only its members may sign in
+    memberRoleId: env.DISCORD_MEMBER_ROLE_ID || '',       // optional: also require this role
+    officerRoleIds: csv(env.DISCORD_OFFICER_ROLE_IDS),    // members with one of these roles are officers
+    officerUserIds: csv(env.DISCORD_OFFICER_USER_IDS),    // or list Discord user IDs directly
+    publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''), // where this app is reachable, e.g. https://guild.example.com
+    publicKey: env.DISCORD_PUBLIC_KEY || '',              // Developer Portal > General Information - verifies reminder-button clicks
+    apiBase: (env.DISCORD_API_BASE || 'https://discord.com/api/v10').replace(/\/+$/, ''),
+    authorizeUrl: env.DISCORD_AUTHORIZE_URL || 'https://discord.com/oauth2/authorize',
+    dmDelayMs: Number(env.DISCORD_DM_DELAY_MS ?? 600),    // pause between DMs so Discord's rate limit is respected
+  };
+  // A guild id is required: without it anybody with a Discord account could sign in.
+  // DEMO_MODE=1 (used by start-demo) switches Discord off completely, so the demo works even when a .env file exists.
+  const demo = env.DEMO_MODE === '1';
+  const loginEnabled = !demo && !!(cfg.clientId && cfg.clientSecret && cfg.publicUrl && cfg.guildId);
+  const botEnabled = !demo && !!cfg.botToken;
+  const redirectUri = () => `${cfg.publicUrl}/auth/discord/callback`;
+
+  const authorizeUrl = (state) => {
+    const q = new URLSearchParams({
+      client_id: cfg.clientId, redirect_uri: redirectUri(), response_type: 'code',
+      scope: 'identify guilds.members.read', state, prompt: 'none',
+    });
+    return `${cfg.authorizeUrl}?${q}`;
+  };
+
+  async function api(pathname, { method = 'GET', token, bot, body, form } = {}) {
+    const headers = { 'User-Agent': 'DiscordBot (guild-hall, 1.0)' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+    if (bot) headers.Authorization = 'Bot ' + cfg.botToken;
+    let payload;
+    if (form) { headers['Content-Type'] = 'application/x-www-form-urlencoded'; payload = new URLSearchParams(form).toString(); }
+    else if (body) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+    const res = await fetch(cfg.apiBase + pathname, { method, headers, body: payload, signal: AbortSignal.timeout(10000) });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, ok: res.ok, data, retryAfter: Number(res.headers.get('retry-after') || data.retry_after || 0) };
+  }
+
+  // Turns the ?code=... from Discord into a person. Somebody who is not in the Discord server (or lacks the member role) comes back with
+  // role "applicant": the caller decides whether applicants may sign in at all.
+  async function resolveUser(code,alliance=false,access=null) {
+    const tok = await api('/oauth2/token', {
+      method: 'POST',
+      form: { client_id: cfg.clientId, client_secret: cfg.clientSecret, grant_type: 'authorization_code', code, redirect_uri: redirectUri() },
+    });
+    if (!tok.ok || !tok.data.access_token) throw new Error('Discord did not accept the sign-in. Please try again.');
+    const me = await api('/users/@me', { token: tok.data.access_token });
+    if (!me.ok || !me.data.id) throw new Error('Could not read your Discord profile.');
+    const targetGuild=alliance?env.ALLIANCE_GUILD_ID:cfg.guildId;
+    if(alliance && access?.enabled===false)throw Error('Alliance portal access is disabled.');
+    if(alliance && (!targetGuild || targetGuild===cfg.guildId))throw Error('Alliance login is not configured.');
+    const mem = await api(`/users/@me/guilds/${targetGuild}/member`, { token: tok.data.access_token });
+    const inGuild = mem.ok, roles = inGuild ? (mem.data.roles || []) : [];
+    if(alliance){
+      const allowedUsers=access?.officerUserIds ?? (env.ALLIANCE_OFFICER_USER_IDS || '').split(',').map(x=>x.trim());
+      const allowedRoles=access?.officerRoleIds ?? (env.ALLIANCE_OFFICER_ROLE_IDS || '').split(',').map(x=>x.trim());
+      if(!inGuild || !(allowedUsers.includes(me.data.id) || roles.some(id=>allowedRoles.includes(id))))throw Error('Alliance officer access is required.');
+      return {id:me.data.id,name:String(mem.data.nick || me.data.global_name || me.data.username).slice(0,40),role:'alliance',guildId:targetGuild,roles};
+    }
+    const officer = cfg.officerUserIds.includes(me.data.id) || roles.some((r) => cfg.officerRoleIds.includes(r));
+    const member = officer || (inGuild && (!cfg.memberRoleId || roles.includes(cfg.memberRoleId)));
+    return {
+      id: me.data.id,
+      username: me.data.username || '',
+      name: String((mem.ok && mem.data.nick) || me.data.global_name || me.data.username || 'Player').slice(0, 40),
+      avatar: me.data.avatar || '',
+      inGuild, roles,
+      role: officer ? 'officer' : member ? 'member' : 'applicant',
+      whyNot: member ? '' : inGuild ? 'You do not have the member role on our Discord server yet.' : 'You are not a member of our Discord server, so you cannot sign in.',
+    };
+  }
+
+  // ---- direct messages (sent one after another, never in parallel) ----
+  const dmChannels = new Map();
+  let chain = Promise.resolve();
+  const enqueue = (fn) => { const p = chain.then(fn, fn); chain = p.then(() => sleep(cfg.dmDelayMs), () => sleep(cfg.dmDelayMs)); return p; };
+
+  // Up to 5 link buttons as one row. A LINK-style button (style 5) just opens its url when tapped - Discord
+  // handles that entirely on the user's device, no interaction is ever sent back to the bot, so this needs
+  // nothing beyond the plain REST calls this file already makes (no Gateway connection, no interactions
+  // endpoint - a real limitation of a bot with no public, always-on server to receive those).
+  const linkButtons = (buttons) => [{ type: 1, components: buttons.slice(0, 5).map((b) => ({ type: 2, style: 5, label: b.label, url: b.url })) }];
+
+  // Real (non-link) buttons: a click is POSTed by Discord to /discord/interactions instead of just opening a
+  // url on the player's own device, so the bot can answer right there - no website ever opens. Unlike
+  // linkButtons, there is no token to embed: Discord's own signed interaction payload already says exactly
+  // who clicked (interaction.user.id in a DM), so a custom_id only needs to carry whatever the receiving route
+  // needs to make sense of the click (an event id, a test id, ...) plus the choice itself.
+  // buttons: [{ label, style (1-4, default 3/green), customId }], up to 5, one row.
+  const actionButtons = (buttons) => [{ type: 1, components: buttons.slice(0, 5).map((b) => ({ type: 2, style: b.style || 3, label: b.label, custom_id: b.customId })) }];
+  const rsvpButtons = (eventId) => actionButtons([
+    { label: '✅ Can come', style: 3, customId: `rsvp:${eventId}:yes` },
+    { label: "❌ Can't come", style: 4, customId: `rsvp:${eventId}:no` },
+  ]);
+
+  // signatureHex/timestamp come from the X-Signature-Ed25519 / X-Signature-Timestamp headers Discord sends
+  // with every interaction request; rawBody must be the exact, unparsed request body bytes - verifying
+  // against a re-serialized JSON.stringify(JSON.parse(body)) would fail for most real payloads (key order,
+  // whitespace), which is why server.js must collect the raw bytes for this route instead of using the
+  // ordinary JSON-eager body reader.
+  function verifyInteraction(signatureHex, timestamp, rawBody) {
+    if (!cfg.publicKey || !signatureHex || !timestamp) return false;
+    const key = ed25519PublicKey(cfg.publicKey);
+    if (!key) return false;
+    try {
+      const message = Buffer.concat([Buffer.from(String(timestamp)), Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody)]);
+      return crypto.verify(null, message, key, Buffer.from(signatureHex, 'hex'));
+    } catch { return false; }
+  }
+
+  // file (optional): { name, type, buffer } - same shape postMessage() already uses for channel pictures. A DM
+  // with a file has to go through the same multipart upload Discord needs for any attachment, so this branch
+  // uses a raw fetch with FormData instead of the plain-JSON api() helper, exactly like postMessage() does.
+  // components (optional): an action-row array, normally built with linkButtons() above.
+  async function deliver(userId, content, file, components) {
+    if (!botEnabled) return { ok: false, dry: true, error: 'No bot token set (DISCORD_BOT_TOKEN), so nothing was sent.' };
+    if (!isSnowflake(userId)) return { ok: false, error: 'This player has no Discord account linked.' };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let ch = dmChannels.get(userId);
+      if (!ch) {
+        const r = await api('/users/@me/channels', { method: 'POST', bot: true, body: { recipient_id: String(userId) } });
+        if (r.status === 429 && attempt === 0) { await sleep(Math.min(10, r.retryAfter || 1) * 1000); continue; }
+        if (!r.ok || !r.data.id) return { ok: false, error: (r.data && r.data.message) || `Discord said ${r.status}` };
+        ch = r.data.id; dmChannels.set(userId, ch);
+      }
+      let m;
+      if (file) {
+        const fd = new FormData();
+        fd.append('payload_json', JSON.stringify({ content, allowed_mentions: { parse: [] }, attachments: [{ id: 0, filename: file.name }], ...(components ? { components } : {}) }));
+        fd.append('files[0]', new Blob([file.buffer], { type: file.type || 'application/octet-stream' }), file.name);
+        const res = await fetch(`${cfg.apiBase}/channels/${ch}/messages`, { method: 'POST', headers: { Authorization: 'Bot ' + cfg.botToken, 'User-Agent': 'DiscordBot (guild-hall, 1.0)' }, body: fd, signal: AbortSignal.timeout(20000) });
+        const data = await res.json().catch(() => ({}));
+        m = { status: res.status, ok: res.ok, data, retryAfter: Number(res.headers.get('retry-after') || data.retry_after || 0) };
+      } else {
+        m = await api(`/channels/${ch}/messages`, { method: 'POST', bot: true, body: { content, allowed_mentions: { parse: [] }, ...(components ? { components } : {}) } });
+      }
+      if (m.status === 429 && attempt === 0) { await sleep(Math.min(10, m.retryAfter || 1) * 1000); continue; }
+      if (m.ok) return { ok: true };
+      const msg = m.data && m.data.code === 50007 ? 'Cannot message this player (their DMs are closed, or they share no server with the bot).' : (m.data && m.data.message) || `Discord said ${m.status}`;
+      return { ok: false, error: msg };
+    }
+    return { ok: false, error: 'Discord is rate limiting the bot. Try again in a minute.' };
+  }
+  const sendDM = (userId, content, file, components) => enqueue(() => deliver(userId, content, file, components).catch((e) => ({ ok: false, error: String(e.message || e) })));
+
+  // ---- posting a message with a picture into a channel ----
+  const FRIENDLY = {
+    50013: 'The bot is missing permission in that channel (it needs View Channel, Send Messages and Attach Files).',
+    50001: 'The bot cannot see that channel. Give its role access to the channel.',
+    10003: 'That channel does not exist (any more).',
+    10004: 'The bot is not in that Discord server.',
+    30046: 'Discord says too many messages were sent. Try again in a minute.',
+  };
+  const explain = (r) => (r.data && FRIENDLY[r.data.code]) || (r.status === 401 ? 'Discord did not accept the bot token.' : (r.data && r.data.message) || `Discord said ${r.status}`);
+  // mentionRoleIds (optional): Discord role ids to @-mention, using Discord's own mention syntax <@&id>.
+  // allowed_mentions explicitly whitelists only those role ids, so free-typed text (the announcement text field,
+  // an event title) can never accidentally ping @everyone/@here or an unrelated role/user.
+  async function postMessage(channelId, { content, file, mentionRoleIds, components, nonce }) {
+    if (!botEnabled) return { ok: false, dry: true, error: 'No bot token set (DISCORD_BOT_TOKEN), so nothing was sent.' };
+    if (!isSnowflake(channelId)) return { ok: false, error: 'Pick a channel first.' };
+    const roles = (mentionRoleIds || []).filter(isSnowflake);
+    const full = roles.length ? `${roles.map((id) => `<@&${id}>`).join(' ')}\n${content}` : content;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const fd = new FormData();
+      fd.append('payload_json', JSON.stringify({ content: full, ...(nonce ? {nonce,enforce_nonce:true} : {}), allowed_mentions: { parse: [], roles }, ...(file ? { attachments: [{ id: 0, filename: file.name }] } : {}), ...(components ? { components } : {}) }));
+      if (file) fd.append('files[0]', new Blob([file.buffer], { type: file.type || 'application/octet-stream' }), file.name);
+      const res = await fetch(`${cfg.apiBase}/channels/${channelId}/messages`, { method: 'POST', headers: { Authorization: 'Bot ' + cfg.botToken, 'User-Agent': 'DiscordBot (guild-hall, 1.0)' }, body: fd, signal: AbortSignal.timeout(20000) });
+      const data = await res.json().catch(() => ({}));
+      const r = { status: res.status, ok: res.ok, data, retryAfter: Number(res.headers.get('retry-after') || data.retry_after || 0) };
+      if (r.status === 429 && attempt === 0) { await sleep(Math.min(10, r.retryAfter || 1) * 1000); continue; }
+      return r.ok ? { ok: true, id: data.id } : { ok: false, error: explain(r) };
+    }
+    return { ok: false, error: 'Discord is rate limiting the bot. Try again in a minute.' };
+  }
+  // Deletes a message the bot itself posted earlier (used to remove an outdated party announcement before
+  // posting the new one). A message that is already gone (manually deleted, or too old) counts as success:
+  // the end state - "that message is not there" - is what the caller actually wants.
+  async function deleteMessage(channelId, messageId) {
+    if (!botEnabled || !isSnowflake(channelId) || !isSnowflake(messageId)) return { ok: false, error: 'Nothing to delete.' };
+    const r = await api(`/channels/${channelId}/messages/${messageId}`, { method: 'DELETE', bot: true });
+    return r.ok || r.status === 404 ? { ok: true } : { ok: false, error: explain(r) };
+  }
+  // Rewrites a message the bot itself posted earlier, in place - used to refresh the shared daily schedule
+  // post's live per-event counts after someone answers one of its buttons, without reposting (which would
+  // bump it to the bottom of the channel and lose everyone's place) or losing the still-live buttons on every
+  // OTHER event in that same message. A message that no longer exists (deleted by hand) is reported back as
+  // a plain error, not treated as success like deleteMessage above - the caller needs to know its tracked
+  // "current" message is gone so it can post a fresh one instead of silently going stale forever.
+  async function editMessage(channelId, messageId, { content, components }) {
+    if (!botEnabled || !isSnowflake(channelId) || !isSnowflake(messageId)) return { ok: false, error: 'Nothing to edit.' };
+    const r = await api(`/channels/${channelId}/messages/${messageId}`, { method: 'PATCH', bot: true, body: { content, allowed_mentions: { parse: [] }, ...(components !== undefined ? { components } : {}) } });
+    return r.ok ? { ok: true } : { ok: false, status: r.status, code: r.data?.code, missingMessage: r.status === 404 && r.data?.code === 10008, error: r.status === 404 ? 'That message no longer exists (deleted?).' : explain(r) };
+  }
+  async function listChannels() {
+    if (!botEnabled) return { ok: false, error: 'No bot token set.' };
+    const r = await api(`/guilds/${cfg.guildId}/channels`, { bot: true });
+    if (!r.ok) return { ok: false, error: (r.data && r.data.code === 10004) || r.status === 404 ? 'The bot is not in your Discord server yet. Use the invite link below.' : explain(r) };
+    // Discord can answer 200 with something that is not a list (an HTML page from a proxy, an empty body that
+    // api() turns into {}) - treat that as an error, never let it throw out of the route.
+    if (!Array.isArray(r.data)) return { ok: false, error: 'Discord sent back something unexpected when listing channels. Try again in a moment.' };
+    return { ok: true, channels: r.data.filter((c) => c.type === 0 || c.type === 5).sort((a, b) => (a.position || 0) - (b.position || 0)).map((c) => ({ id: c.id, name: c.name })) };
+  }
+  async function botInfo() {
+    if (!botEnabled) return { ok: false, error: 'No bot token set.' };
+    const r = await api('/users/@me', { bot: true });
+    return r.ok ? { ok: true, id: r.data.id, name: r.data.username } : { ok: false, error: explain(r) };
+  }
+  async function guildInfo() {
+    if (!botEnabled || !cfg.guildId) return { ok: false, error: 'No bot token or server id set.' };
+    const r = await api(`/guilds/${cfg.guildId}`, { bot: true });
+    return r.ok ? { ok: true, name: r.data.name } : { ok: false, error: r.status === 404 || (r.data && r.data.code === 10004) ? 'The bot is not in your Discord server yet.' : explain(r) };
+  }
+  // Gives an accepted applicant the member role. Needs the "Manage Roles" permission and a bot role that sits above the member role.
+  async function addRole(userId) {
+    if (!botEnabled || !cfg.memberRoleId) return { ok: false, error: 'No member role configured.' };
+    const r = await api(`/guilds/${cfg.guildId}/members/${userId}/roles/${cfg.memberRoleId}`, { method: 'PUT', bot: true });
+    return r.ok || r.status === 204 ? { ok: true } : { ok: false, error: r.status === 403 ? 'The bot may not give roles: it needs the "Manage Roles" permission and its own role must be above the member role.' : explain(r) };
+  }
+  // ---- lookups used by check-discord.js (and safe to call any time) ----
+  // Do the Client ID and Client Secret belong together? (Discord answers "invalid_client" when they do not.)
+  async function checkClientSecret() {
+    const r = await api('/oauth2/token', { method: 'POST', form: { client_id: cfg.clientId, client_secret: cfg.clientSecret, grant_type: 'client_credentials', scope: 'identify' } });
+    return r.ok ? { ok: true } : { ok: false, status: r.status, error: (r.data && (r.data.error || r.data.message)) || `Discord said ${r.status}` };
+  }
+  async function listRoles() {
+    const r = await api(`/guilds/${cfg.guildId}/roles`, { bot: true });
+    if (r.ok && !Array.isArray(r.data)) return { ok: false, error: 'Discord sent back something unexpected when listing roles. Try again in a moment.' };
+    return r.ok ? { ok: true, roles: r.data.map((x) => ({ id: x.id, name: x.name, position: x.position || 0 })) } : { ok: false, error: explain(r) };
+  }
+  async function botMember(botId) {
+    const r = await api(`/guilds/${cfg.guildId}/members/${botId}`, { bot: true });
+    return r.ok ? { ok: true, roles: r.data.roles || [] } : { ok: false, error: explain(r) };
+  }
+  async function lookupUser(id) {
+    const r = await api(`/users/${id}`, { bot: true });
+    return r.ok ? { ok: true, name: r.data.global_name || r.data.username } : { ok: false, status: r.status, error: explain(r) };
+  }
+
+  // A link that adds the bot to the server with exactly the permissions it needs (view channels, send messages, attach files).
+  const inviteUrl = (withRoles) => (cfg.clientId ? `https://discord.com/oauth2/authorize?client_id=${cfg.clientId}&scope=bot&permissions=${35840 + (withRoles ? 268435456 : 0)}${cfg.guildId ? '&guild_id=' + cfg.guildId : ''}` : '');
+
+  const avatarUrl = (u) => (u && u.avatar && isSnowflake(u.id) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '');
+
+  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, editMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons, rsvpButtons, actionButtons, verifyInteraction };
+}
+
+module.exports = { createDiscord, isSnowflake };

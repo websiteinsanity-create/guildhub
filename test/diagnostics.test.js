@@ -1,0 +1,2 @@
+const {test}=require('node:test'),assert=require('node:assert/strict');
+test('diagnostic buffer is bounded and contains no database secrets',()=>{const d=require('../server-diagnostics')();for(let i=0;i<500;i++)d.record('GET','/api/state',i%2?200:500,i);const r=d.snapshot({members:[],events:[],secret:'DO_NOT_EXPORT'},'test');assert.equal(r.api.recent.length,200);assert.equal(r.api.total,500);assert.equal(r.api.serverErrors,250);assert(!JSON.stringify(r).includes('DO_NOT_EXPORT'));});
