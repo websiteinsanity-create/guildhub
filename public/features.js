@@ -1652,30 +1652,24 @@ VIEWS.merc = (id) => {
 ACTIONS['merc-edit-toggle'] = () => { UI.mercEditing = !UI.mercEditing; render(); };
 FORMS['merc-signup'] = (f, fd, id) => act(async () => { await api('/api/merc-signup/' + id, 'POST', fd); UI.mercInfoFor = null; UI.mercEditing = false; }, 'Joined. The officers can see you in the party board now.');
 
-// A guest class coach: someone outside the guild entirely, here only to review VODs for one class. Reached by
-// an invite link from Admin, the same trust model as a mercenary's event link - the link itself is the gate,
-// there is no separate approval step once someone has it.
+// A guest class coach: someone outside the guild entirely, here only to review VODs for one class. B04 (hotfix.3):
+// joining needs a personal, single-use invitation from an officer; the class is set by that invitation and only an
+// officer can change it afterwards.
 VIEWS['guest-coach'] = () => {
-  const head = `<div class="page-head"><div><h1>Guest class coach</h1><div class="muted">Signed in as ${esc(S.user.name)}. This does not make you a guild member - you only get access to VODs for the class below.</div></div></div>`;
-  const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  const head = `<div class="page-head"><div><h1>Guest class coach</h1><div class="muted">Signed in as ${esc(S.user.name)}. This does not make you a guild member - you only get access to VODs for your class.</div></div></div>`;
   if (S.isCoach && S.myGuestCoachClass) {
     return `${head}<div class="panel"><h3>You're coaching ${esc(S.myGuestCoachClass)} players</h3>
-      <div class="muted small" style="margin:-4px 0 10px">You can see their VODs and leave coaching points on them. Switch to a different class any time below.</div>
-      <form data-form="guest-coach-join">
-        <div class="field"><label for="gc-class">Class</label><select id="gc-class" name="class">${opts(classes, S.myGuestCoachClass)}</select></div>
-        <div class="link-row"><a href="#/vods" class="btn sm">Go to VODs</a><button class="btn primary">Switch class</button></div>
-      </form>
+      <div class="muted small" style="margin:-4px 0 10px">You can see their VODs, add coaching points and drawings, and write review notes. To coach a different class, ask an officer.</div>
+      <div class="link-row"><a href="#/vods" class="btn sm primary">Go to VODs</a></div>
     </div>`;
   }
-  return `${head}<div class="panel"><h3>Pick the class you are coaching</h3>
-    <div class="muted small" style="margin:-4px 0 10px">You will be able to see and review VODs from anyone currently playing this class. You can switch classes later from this same page.</div>
-    <form data-form="guest-coach-join">
-      <div class="field"><label for="gc-class">Class</label><select id="gc-class" name="class" required>${opts(classes, '', 'Pick a class')}</select></div>
-      <div class="link-row"><button class="btn primary">Join as a guest coach</button></div>
-    </form>
+  return `${head}<div class="panel"><h3>You need an invitation</h3>
+    <div class="muted small" style="margin:-4px 0 10px">Guest coaches join through a personal invitation link from one of our officers. Open the link you were sent and sign in with Discord.</div>
   </div>`;
 };
-FORMS['guest-coach-join'] = (f, fd) => act(() => api('/api/guest-coaches/join', 'POST', fd), 'Done');
+// Someone already signed in who opens an invitation link: the same Discord sign-in, started from here.
+VIEWS['guest-invite'] = () => `<div class="page-head"><div><h1>Guest coach invitation</h1></div></div><div class="panel"><p class="muted">Sign in with Discord through this invitation to become a guest coach. The invitation can be used once.</p>
+  <div class="link-row"><button class="btn primary" data-act="guest-invite-start">Continue with Discord</button></div><p class="muted small" id="login-err"></p></div>`;
 
 /* ================= Admin: the Discord bot, the channel for party pictures, applications ================= */
 UI.dcheck = null;

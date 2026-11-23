@@ -89,3 +89,10 @@ test('switching automatic tracking back on after a failure re-arms the next sche
  h.setStatus({active:true,sessionId:'s2',parties:[{index:1,channelId:'voice-1',connectedStates:[{id:'owner-1'}]}]});
  await h.advance(2);await h.tick();assert.equal(e.voiceTracking,undefined,'not before the new time');await h.advance(5000);await h.tick();assert.equal(e.voiceAutoStart.status,'started');assert.equal(e.voiceTracking.startSource,'automatic');
 });
+
+test('diagnosis of legacy voice fallback race: scheduler fails before late Shotcaller start, explicit manual tracking still succeeds',async()=>{
+ const h=harness();const e=h.event(91,{start:new Date(h.now-600000).toISOString(),createdAt:h.now,pinEnabled:false});
+ const active=structuredClone(h.status);h.setStatus({active:false});await h.tick();assert.equal(e.voiceTrackAuto,false);assert.equal(e.voiceAutoStart.status,'failed');
+ h.setStatus(active);await h.tick();assert.equal(e.voiceTracking,undefined,'late session start must not silently retry');
+ await h.manual(91);assert.equal(e.voiceTracking.startSource,'manual');await h.advance(10);await h.advance(10);assert.ok(e.attended.includes(1));
+});

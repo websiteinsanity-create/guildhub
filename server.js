@@ -21,7 +21,7 @@ try {
   }
 } catch { /* no .env file: fine */ }
 
-// Safety net: the HTTP server below is `http.createServer(async (req, res) => {...})` - Node never awaits the
+// Safety net: the HTTP server below is `const server = http.createServer(async (req, res) => {...})` - Node never awaits the
 // listener's own returned promise, so any exception that escapes it (anything outside the try/catch around
 // `/api/*` routes - static files, uploads, the Discord OAuth callback, etc) becomes an unhandled promise
 // rejection, and Node's default behaviour for one of those is to crash the entire process. With dozens of
@@ -42,6 +42,7 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), '
 
 const discord = createDiscord();
 
+
 // Shotcaller: a separate self-hosted Discord bot (live voice-session control). Both are empty by default, which
 // keeps the whole integration switched off - see server-shotcaller.js. The bot's own Discord server is read off
 // DISCORD_GUILD_ID above, not a second variable, since Guild Hall already knows it.
@@ -57,6 +58,7 @@ if (!discord.loginEnabled && (!process.env.MEMBER_PASSCODE || !process.env.OFFIC
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+{ const dataReal=fs.realpathSync(DATA_DIR),publicReal=fs.realpathSync(PUBLIC_DIR);if(dataReal===publicReal || dataReal.startsWith(publicReal+path.sep)){console.error('FATAL: DATA_DIR must not be publicly served.');process.exit(1);} }
 
 // ---------- storage ----------
 // Guild-wide settings. Officers change them in the app; config.json supplies the starting values.
@@ -171,8 +173,11 @@ const SETTING_DEFAULTS = {
   // new one the next guild-day - no server-side tick or stored "current pick" needed for that.
   quotes: { enabled: false, list: [] },
 };
+let securityLedger = null;
+const securityState = require('./security-state');
 let db = { nextId: 1, members: [], events: [], points: [], duties: [], presets: [], presetRules: [], loot: [], users: {}, series: [], profiles: {}, changes: [], requests: [], tags: [], playerTags: {}, prefs: {}, notices: [], noticeAcks: {}, leaves: [], warnings: [], explanations: [], applications: [], auditLog: [], infoBoard: { title: 'Info', categories: [] }, settings: { ...SETTING_DEFAULTS } };
 if (fs.existsSync(DB_FILE)) db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
+db.users=Object.assign(Object.create(null),db.users); // account keys never resolve through Object.prototype
 
 // Writing the whole db to disk on every single change used to be synchronous - fine one at a time, but with
 // dozens of players all doing something at once (everyone typing an attendance PIN in during the same minute,
@@ -201,7 +206,9 @@ function scheduleFlush() {
 // costing anything on every single save the server itself makes.
 const dbJson = () => JSON.stringify(db);
 function flush() {
-  flushTimer = null;
+  // One writer owns db.json.tmp; explicit schedule persistence may overlap a timer.
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (writing) return flushInFlight;
   if (!dirty || shuttingDown) return;
   dirty = false;
   writing = true;
@@ -215,6 +222,7 @@ function flush() {
     await fs.promises.rename(tmp, DB_FILE);
     if (!dirty) afterPersist();
   } catch (e) {
+    saveFailures++;
     console.error('save failed, will retry:', e);
     dirty = true;                                // don't silently lose the change - try again on the next flush
   } finally {
@@ -224,8 +232,8 @@ function flush() {
   })();
   return flushInFlight;
 }
-let dataRevision = 0;
-function save() { dataRevision++; dirty = true; scheduleFlush(); }
+let dataRevision = 0, saveFailures = 0;
+function save() { if (typeof securityLedger !== 'undefined' && securityLedger) securityLedger.syncPolicy(securityState.extract(db)); dataRevision++; dirty = true; scheduleFlush(); }
 // Only used right before the process actually exits (see shutdown() below), where "a moment later" is too late -
 // this finishes the write before Node is given the chance to quit, so a deploy/restart never drops the last
 // few changes that were still waiting out their debounce window.
@@ -245,6 +253,7 @@ async function shutdown(code) {
   // Let it finish before the final synchronous save, so it cannot overwrite newer data.
   if (flushInFlight) await flushInFlight;
   try { saveSync(); } catch (e) { console.error('final save failed:', e); }
+  if (typeof securityLedger !== 'undefined' && securityLedger) securityLedger.close();
   process.exit(code);
 }
 process.on('SIGTERM', () => shutdown(0));
@@ -257,50 +266,107 @@ if (!SECRET) {
   if (fs.existsSync(SECRET_FILE)) SECRET = fs.readFileSync(SECRET_FILE, 'utf8').trim();
   else {
     SECRET = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(SECRET_FILE, SECRET);
+    fs.writeFileSync(SECRET_FILE, SECRET, { mode: 0o600 });       // hotfix 1.46.2.2: new key files are owner-only (an existing file is never touched)
   }
 }
 const sign = (s) => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
 
-const supportAccess=require('./support-grants')(path.join(DATA_DIR,'support-grants.json'));
+// SEC-06: bootstrap/migration succeeds before any authenticated operation can run.
+try {
+  const configured = process.env.GUILDHUB_LEDGER_DIR;
+  if(process.env.NODE_ENV==='production' && (!configured || !configured.trim()))throw Error('GUILDHUB_LEDGER_DIR is required in production.');
+  if(configured && (!path.isAbsolute(configured) || configured!==configured.trim()))throw Error('GUILDHUB_LEDGER_DIR must be an explicit absolute path.');
+  const ledgerDir = path.resolve(configured || path.join(DATA_DIR,'security-ledger'));
+  const publicReal = fs.realpathSync(PUBLIC_DIR);
+  if (ledgerDir === publicReal || ledgerDir.startsWith(publicReal+path.sep) || path.resolve(DATA_DIR).startsWith(publicReal+path.sep)) throw Error('Security files cannot be inside the HTTP public directory.');
+  if (!configured) { fs.mkdirSync(ledgerDir,{recursive:true,mode:0o700}); console.warn('[security-ledger] local DATA_DIR fallback; externally persisted GUILDHUB_LEDGER_DIR is mandatory for production.'); }
+  const ledgerReal=fs.realpathSync(ledgerDir);if(ledgerReal===publicReal || ledgerReal.startsWith(publicReal+path.sep))throw Error('Ledger must not be publicly served.');
+  const mirror=path.join(DATA_DIR,'session-revocations.json');
+  const exists=fs.existsSync(path.join(ledgerDir,'key.json'));
+  const sessions=exists?{revoked:{},notBefore:{}}:securityState.legacySessions(mirror);
+  const supportFile=path.join(DATA_DIR,'support-grants.json');
+  const support=exists?{pending:null,session:null}:fs.existsSync(supportFile)?JSON.parse(fs.readFileSync(supportFile,'utf8')):{pending:null,session:null};
+  securityLedger=require('./security-ledger').openLedger({dir:ledgerDir,binding:path.join(DATA_DIR,'security-ledger-binding.json'),allowBootstrap:!configured || process.env.GUILDHUB_LEDGER_BOOTSTRAP==='acknowledge-current-state',recoverInitialization:process.env.GUILDHUB_LEDGER_RECOVER_INITIALIZATION==='acknowledge-never-initialized',migrateLegacyLock:process.env.GUILDHUB_LEDGER_MIGRATE_LOCK==='acknowledge-rc2-stopped',initial:{sessions,policy:securityState.extract(db),support,burned:{},migration:{kind:'observed-current-state',historicalCompleteness:'unknown'}}});
+  securityLedger.recoverImport(fs.existsSync(DB_FILE)?fs.readFileSync(DB_FILE):Buffer.alloc(0));
+  securityState.reconcile(db,securityLedger.policy());
+  securityLedger.syncPolicy(securityState.extract(db));
+  if (!exists && fs.existsSync(mirror)) fs.copyFileSync(mirror,path.join(DATA_DIR,'session-revocations.pre-ledger.json'),fs.constants.COPYFILE_EXCL);
+  if(fs.existsSync(mirror))fs.chmodSync(mirror,0o600);
+  if (fs.existsSync(path.join(DATA_DIR,'session-revocations.pre-ledger.json'))) fs.chmodSync(path.join(DATA_DIR,'session-revocations.pre-ledger.json'),0o600);
+  process.on('exit',()=>securityLedger?.close());
+} catch(error) { console.error('FATAL: '+error.message); process.exit(1); }
+const supportAccess=require('./support-grants')(path.join(DATA_DIR,'support-grants.json'),()=>Date.now(),{ledger:securityLedger});
 // Retired support password hashes have no role in one-time-code authentication.
 fs.rmSync(path.join(DATA_DIR,'support-access.json'),{force:true});
+// Hotfix 1.46.2.2 (F-A, F-B, F-D): a session token proves identity and session only (key, sid, iat). What the
+// person may do is decided live per request by access.js; sessions can be revoked server-side (session-guard.js);
+// malformed tokens are rejected by a strict format check before any crypto, and nothing in here can throw.
+const { createSessionGuard, parseTokenString, parseValidAfter } = require('./session-guard');
+let sessionGuard;
+try { sessionGuard = createSessionGuard({ ledger: securityLedger, file: path.join(DATA_DIR, 'session-revocations.json'), validAfter: parseValidAfter(process.env.SESSIONS_VALID_AFTER) }); }
+catch (e) { console.error(`FATAL: ${e.message}`); process.exit(1); }   // a session-security misconfiguration must stop the server, not be swallowed by the handler above
 function makeToken(user, days = 30) {
-  const body = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + days * 864e5 })).toString('base64url');
+  const { coach, allianceRoles, ...claims } = user;              // live-decided values are never put into a token any more
+  const key = claims.key || claims.name;
+  const body = Buffer.from(JSON.stringify({ ...claims, sid: crypto.randomBytes(16).toString('base64url'), iat: sessionGuard.nextIat(key), exp: Date.now() + days * 864e5 })).toString('base64url');
   return `${body}.${sign(body)}`;
 }
 const SESSION_COOKIE = 'gh_session';
 const cookieOf = (req, name) => (String(req.headers.cookie || '').split(';').map((s) => s.trim()).find((s) => s.startsWith(name + '=')) || '').slice(name.length + 1);
 const cookieHeader = (name, value, maxAgeSec) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${discord.cfg.publicUrl.startsWith('https') ? '; Secure' : ''}`;
-function readToken(token) {
-  if (!token) return null;
-  const [body, sig] = token.split('.');
-  if (!body || !sig) return null;
-  const expected = sign(body);
-  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+const tokenOf = (req) => { const b = String(req.headers.authorization || ''); return b.startsWith('Bearer ') ? b.slice(7) : cookieOf(req, SESSION_COOKIE); };
+// Signature, expiry and revocation only: { payload, sig } or null. Never throws.
+function verifyToken(token) {
   try {
-    const u = JSON.parse(Buffer.from(body, 'base64url').toString());
+    const t = parseTokenString(token);
+    if (!t) return null;
+    const expected = sign(t.body);
+    if (!crypto.timingSafeEqual(Buffer.from(t.sig, 'latin1'), Buffer.from(expected, 'latin1'))) return null;   // both exactly 43 ASCII chars (checked above)
+    const u = JSON.parse(Buffer.from(t.body, 'base64url').toString());
+    if (!u || typeof u !== 'object' || Array.isArray(u)) return null;
     if (!(u.exp > Date.now())) return null;
     if (discord.loginEnabled && !u.discord && !u.supportGrant) return null;      // old passcode sessions stop working once Discord is switched on
-    if(u.support && !supportAccess.valid(u))return null;
-    if (!u.key) u.key = u.name;                                // sessions from before Discord sign-in existed
-    u.readOnly=!!u.support;
-    return u;
+    if (u.support && !supportAccess.valid(u)) return null;
+    if (sessionGuard.isRevoked(u, t.sig)) return null;
+    return { payload: u, sig: t.sig };
   } catch { return null; }
 }
+// The request user, decided live (access.js), or null. Never throws.
+function readToken(token) {
+  const v = verifyToken(token);
+  if (!v) return null;
+  try { return access.resolve(v.payload); } catch { return null; }
+}
+const revokeUserSessions = (key, reason) => sessionGuard.revokeUser(key, reason);
+// B04 (hotfix.3): single-use, class-bound guest-coach invitations (guest-invites.js).
+const guestInvites = require('./guest-invites').createGuestInvites({ getDb: () => db, ledger: securityLedger, validAfter: sessionGuard.stats().validAfter || 0 });
+const inviteFailures = new Map();           // per-IP count of unusable invitation tokens (10 min window)
+const inviteAttemptsBlocked = (ip) => { const t = Date.now(), l = (inviteFailures.get(ip) || []).filter((x) => t - x < 10 * 60e3); inviteFailures.set(ip, l); if (inviteFailures.size > 5000) inviteFailures.clear(); return l.length >= 200; };   // a flood guard only: 256-bit tokens cannot be guessed, and a tight per-IP limit behind an untrusted proxy would let one person lock out every invitee
+const noteInviteFailure = (ip) => { const l = inviteFailures.get(ip) || []; l.push(Date.now()); inviteFailures.set(ip, l); };
+const usedOauthStates = new Map();          // OAuth state -> time first used (states live 10 min in the cookie)
+const INVITE_INVALID = 'This invitation link is not valid any more (it may have expired, been used or been revoked). Please ask an officer for a new one.';
+// Discord RSVP buttons act for a Discord account without a GuildHub session, so they get the same live decision: a
+// kicked player or someone no longer a member (left the Discord server, lost the member role) cannot answer. Accounts
+// that never signed in (no record) keep the previous behaviour: their active character decides.
+const buttonAccessOk = (clickerId) => { try { const d = access.decide(String(clickerId || '')); return !d || d.role !== 'applicant'; } catch { return false; } };
+// Hotfix 1.46.2.2 (F-F, SA-09..SA-11): full-origin CSRF check against PUBLIC_URL and proxy-aware client IPs that only
+// believe forwarding headers from an explicitly trusted proxy (TRUSTED_PROXIES). See request-guard.js.
+const requestGuard = require('./request-guard');
+const TRUSTED_PROXIES = requestGuard.parseTrusted(process.env.TRUSTED_PROXIES || '');
+const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || '').trim().toLowerCase();
+const sameOrigin = (req, publicUrl) => requestGuard.sameOrigin(req, publicUrl);
+// Exactly application/json (parameters such as charset allowed). A browser can send text/plain cross-site without a
+// preflight, and the old substring test also accepted "text/plain; x=application/json".
+const isJsonRequest = (req) => String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() === 'application/json';
 // Hotfix 1.46.2.1 (GH-01): private gear-thread uploads need the same session and the same rights as
 // GET /api/gearthreads/:id - signed in (401 otherwise), not an applicant or Alliance session, and allowed to open the
 // build the image belongs to (403 otherwise; 404 when no thread references the file). Mirrors the /api/ checks below.
+// Since 1.46.2.2 the user comes from the same live resolver as the API, so kicks, revocations and demotions apply here too.
 const PRIVATE_UPLOAD = /^(gearshot|gearthumb|gearfolder)-/;
 function privateUploadStatus(req, name) {
-  let user = null;
-  try { user = readToken((req.headers.authorization || '').replace(/^Bearer /, '') || cookieOf(req, SESSION_COOKIE)); } catch { user = null; }
+  const user = readToken(tokenOf(req));
   if (!user) return 401;
   if (user.role === 'alliance') return 403;                       // Alliance sessions never reach gear threads
-  if (user.support) user.role = 'officer';                        // read-only support may read gear threads (support-read-policy.js)
-  if (user.key && db.users[user.key]) user.coach = !!db.users[user.key].coach;
-  else if (!discord.loginEnabled) user.coach = db.settings.coachUserIds.includes(user.key);
-  if (user.role === 'applicant' && db.users[user.key] && db.users[user.key].accepted) user.role = 'member';
   if (user.role === 'applicant') return 403;
   return typeof featuresCtx.gearMediaAccess === 'function' ? featuresCtx.gearMediaAccess(user, name) : 403;
 }
@@ -320,7 +386,63 @@ function tooManyFailures(ip) {
 
 // ---------- helpers ----------
 const isOfficer = (u) => u.role === 'officer';
-const alliancePolicy=require('./alliance-policy')({getDb:()=>db,discord});
+const ROLE_MAX_STALE_MS = (Number(process.env.ROLE_MAX_STALE_MINUTES) > 0 ? Number(process.env.ROLE_MAX_STALE_MINUTES) : 60) * 60e3;
+let roleRefresh = null;                                 // set up further down (role-refresh.js) when the Discord bot can read the guild
+const rolesFresh = (key) => {
+  if (roleRefresh) return roleRefresh.isFresh(key);
+  const last = Date.parse(db.users[key]?.lastLogin || '');            // no refresh running: only as fresh as the last sign-in
+  return Number.isFinite(last) && Date.now() - last <= ROLE_MAX_STALE_MS;
+};
+const access = require('./access').createAccess({ getDb: () => db, discord, isFresh: (key) => rolesFresh(key) });
+// LOA fix (1.46.2-hotfix.4): `active` on a character is the ACTIVITY classification ("Inactive" in the roster - set by
+// the player or an officer for a break, a leave of absence, or someone who left). Attendance, reminders and events use
+// it; a player's own content must not. The character that stands for a player's VODs, Gear Thread and coaching class
+// is their active one or else - while the live resolver still counts them as a guild member (not kicked, not gone) -
+// their approved, non-mercenary character. Removed players (kicked, or no longer a member) and mercenaries never
+// qualify - whatever their Active checkbox says.
+function isCurrentGuildMember(owner) {
+  if (!discord.loginEnabled) return true;                 // passcode/demo mode has no removal other than deleting the character
+  const d = access.decide(String(owner || ''));
+  return !!d && !d.kicked && d.role !== 'applicant';
+}
+function contentCharacterOf(owner) {
+  if (!isCurrentGuildMember(owner)) return null;        // kicked or departed: no character carries content any more, Active or not
+  const chars = db.members.filter((m) => m.owner === owner && !m.securityQuarantined && !m.mercenary && !m.pendingApproval);
+  return chars.find((m) => m.active) || chars[0] || null;
+}
+const isContentCharacter = (m) => !!m && contentCharacterOf(m.owner) === m;
+// Keeps the stored display fields (role/applicant/coach in db.users, used for rosters and officer notifications)
+// in line with the live decision. Authorization itself never reads them.
+function syncStoredRole(key) {
+  const rec = db.users[key], d = access.decide(key);
+  if (!rec || !d) return false;
+  const changed = rec.role !== d.role || !!rec.coach !== !!d.coach || !!rec.applicant !== (d.role === 'applicant');
+  if (changed) { rec.role = d.role; rec.coach = d.coach; rec.applicant = d.role === 'applicant'; }
+  return changed;
+}
+const alliancePolicy=require('./alliance-policy')({getDb:()=>db,discord,isOfficerKey:(key)=>access.isOfficerKey(key)});   // hotfix 1.46.2.2: live officer status, never the session's
+// Hotfix 1.46.2.2 (F-A2, SA-02): Discord roles of everyone who signed in within the last 30 days are re-read about
+// every 10 minutes by the bot. Losing officer status this way ends all of that person's sessions (D-2). Discord
+// errors never change stored roles; role-derived privileges lapse after ROLE_MAX_STALE_MINUTES without a successful
+// check (see access.js) and come back with the next success.
+if (discord.loginEnabled && discord.botEnabled && discord.cfg.guildId) {
+  const officerRoleSet = () => new Set([...(discord.cfg.officerRoleIds || []), ...((db.settings && db.settings.officerRoleIds) || []).map(String)]);
+  roleRefresh = require('./role-refresh').createRoleRefresh({
+    discord, getDb: () => db, save, maxStaleMs: ROLE_MAX_STALE_MS,
+    intervalMs: Math.max(250, Number(process.env.ROLE_REFRESH_INTERVAL_MS || 600000)),
+    onChange: (key, before) => {
+      const wasOfficer = !db.users[key]?.kicked && (access.officerById(key) || (before.discordRoles || []).some((r) => officerRoleSet().has(String(r))));
+      const changed = syncStoredRole(key);
+      if (wasOfficer && !access.isOfficerKey(key)) revokeUserSessions(key, 'officer role removed in Discord');
+      if (changed) save();
+    },
+  });
+  roleRefresh.start();
+  // First pass shortly after start-up, so role-based officers are not suspended for a whole interval after a restart.
+  const first = setTimeout(() => roleRefresh.tick(), Math.min(5000, Number(process.env.ROLE_REFRESH_INTERVAL_MS || 600000)));
+  if (first.unref) first.unref();
+}
+alliancePolicy.diagnose().then((d) => { if (d.reason !== 'not_configured') console.log(`Alliance partner check: ${d.reason}${d.reason === 'bot_no_access' ? ' - the bot cannot read members of the Alliance Discord server, so every Alliance partner request is refused (fail-closed). Add the bot to that server.' : ''}`); }).catch(() => {});
 const isCoach = (u) => !!u.coach || isOfficer(u);   // officers can do anything a coach can
 const LEADERSHIP = config.leadershipRanks || ['Guild Master', 'Officer'];
 const DUTY_STATUSES = ['todo', 'doing', 'done'];
@@ -340,11 +462,12 @@ const findMember = (id) => db.members.find((m) => m.id === Number(id));
 const findEvent = (id) => db.events.find((e) => e.id === Number(id));
 const hooks = { memberDeleted: [], skipReminder: [] };                 // features register cleanup here
 const tickHooks = [];                               // and periodic jobs here
-const canEditMember = (u, m) => isOfficer(u) || m.owner === u.key;   // owner = Discord user id (or the display name in demo mode)
+const canEditMember = (u, m) => isOfficer(u) || (!m.securityQuarantined && m.owner === u.key);   // owner = Discord user id (or the display name in demo mode)
 
 // Parties are stored as [{ name, members: [memberId] }]. Older data stored bare id arrays; convert on load.
 const dropFromParty = (p, id) => { const builds = { ...(p.builds || {}) }; delete builds[id]; return { ...p, members: p.members.filter((x) => x !== id), leader: p.leader === id ? null : p.leader, builds }; };
-function normParties(arr) {
+function normParties(arr, source = db) {
+  const findMember = id => source.members.find(m => m.id === Number(id));
   if (!Array.isArray(arr)) return [];
   const seen = new Set(),voiceKeys=new Set();
   return arr.slice(0, 20).map((p, i) => {
@@ -402,14 +525,21 @@ function normParties(arr) {
 // Single source of truth for "is this party a placeholder right now" - mirrored in public/app.js's copy of the
 // same function (keep both in sync; each is commented to point at the other).
 function partyIsPlaceholder(p) { return p.placeholderOverride ? p.placeholder : p.members.length === 0; }
+const normalizeBackupParties = normParties;
 // Brings data written by older versions up to date. Runs on start and after a backup is restored.
-function migrate() {
+function migrate(target = db) {
+  const db = target;
+  const newId = () => db.nextId++;
+  const normParties = arr => normalizeBackupParties(arr, db);
   db.duties = db.duties || [];
   db.presets = db.presets || [];
   db.loot = db.loot || [];
   db.users = db.users || {};
   db.presetRules = db.presetRules || [];
-  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers', 'guestCoaches', 'gearChat', 'gearScreens', 'gearFolder']) db[k] = db[k] || [];
+  for (const k of ['series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog', 'coachLinks', 'vods', 'vodScreenshots', 'vodMarkers', 'guestCoaches', 'gearChat', 'gearScreens', 'gearFolder', 'guestCoachInvites']) db[k] = db[k] || [];
+  // B04 (hotfix.3): guest coaches from the old public self-enrolment link keep their access (owner decision) and are
+  // marked so officers can review them in Admin. Idempotent; nothing else about the record changes.
+  for (const g of db.guestCoaches) if (g && typeof g === 'object' && !g.via) g.via = 'legacy';
   for (const k of ['profiles', 'playerTags', 'prefs', 'noticeAcks', 'gearSkills', 'gearLinks', 'gearPotentials']) db[k] = db[k] || {};
   // Gear Threads' screenshot topics: officer-managed from here on (Admin > Gear Threads), but seeded once
   // with these four so a freshly-installed guild starts with something sensible already in place.
@@ -636,7 +766,7 @@ const route = (method, pattern, handler, { auth = true, officer = false, applica
 };
 
 // ---------- audit log: records who changed what, across this file and the feature modules ----------
-const audit = require('./server-audit')({ route, need, clean, newId, save, isOfficer, get db() { return db; } });
+const audit = require('./server-audit')({ securityLedger, route, need, clean, newId, save, isOfficer, get db() { return db; } });
 
 route('GET','/api/admin/support-access',({user})=>{need(!user.support,403,'A regular administrator must manage support access.');return supportAccess.status();},{officer:true});
 route('POST','/api/admin/support-access/generate',async({user})=>{
@@ -738,9 +868,9 @@ function deleteMemberCascade(m) {
 // a fresh application from them clears the flag - see /api/applications/:id.
 route('POST', '/api/admin/kick', ({ body, user }) => {
   need(discord.loginEnabled, 400, 'Kicking a specific player only makes sense with Discord sign-in, which this server is not using.');
-  const owner = clean(body.ownerKey, 40);
-  need(owner, 400, 'Pick a player.');
-  need(db.users[owner], 404, 'That player has never signed in with Discord.');
+  const owner = body.ownerKey;
+  need(typeof owner==='string' && /^\d{15,25}$/.test(owner), 400, 'Pick a valid Discord player ID.');
+  need(Object.hasOwn(db.users,owner) && db.users[owner] && typeof db.users[owner]==='object', 404, 'That player has never signed in with Discord.');
   need(owner !== user.key, 400, 'You cannot kick yourself.');
   const reason = clean(body.reason, 300);
   const chars = db.members.filter((m) => m.owner === owner && m.active);
@@ -750,6 +880,7 @@ route('POST', '/api/admin/kick', ({ body, user }) => {
   db.users[owner].kickedBy = user.name;
   db.users[owner].kickReason = reason;
   save();
+  revokeUserSessions(owner, 'kick');            // hotfix 1.46.2.2 (SA-01, SA-03): every existing session of the kicked player ends now
   audit.log(user, 'player.kick', { type: 'player', id: owner, name: db.users[owner].name }, `${user.name} kicked ${db.users[owner].name}${reason ? ` (${reason})` : ''}. They can no longer sign in normally and will be sent to re-apply.`);
   return { ok: true };
 }, { officer: true });
@@ -1286,21 +1417,34 @@ route('DELETE', '/api/duties/:id', ({ user, params }) => {
   return { ok: true };
 });
 
-// Backup / restore
-route('GET', '/api/export', () => db, { officer: true });
-// Everything the app stores. A backup contains all of it, and restoring one brings all of it back.
-const DB_LISTS = ['members', 'events', 'points', 'duties', 'presets', 'presetRules', 'loot', 'series', 'changes', 'requests', 'tags', 'notices', 'leaves', 'warnings', 'explanations', 'applications', 'auditLog'];
-const DB_MAPS = ['users', 'profiles', 'playerTags', 'prefs', 'noticeAcks'];
-route('POST', '/api/import', ({ body }) => {
-  need(body && Array.isArray(body.members) && Array.isArray(body.events) && Array.isArray(body.points), 400, 'Not a valid export file.');
-  const fresh = { nextId: body.nextId || 1, settings: { ...SETTING_DEFAULTS, ...(body.settings || {}) }, infoBoard: body.infoBoard };
-  for (const k of DB_LISTS) fresh[k] = Array.isArray(body[k]) ? body[k] : [];
-  for (const k of DB_MAPS) fresh[k] = body[k] && typeof body[k] === 'object' && !Array.isArray(body[k]) ? body[k] : {};
-  db = fresh;
-  migrate();
-  const maxId = Math.max(0, ...DB_LISTS.flatMap((k) => db[k]).map((x) => x.id || 0));
-  db.nextId = Math.max(db.nextId, maxId + 1);
-  save();
+// Backup / restore: validate and migrate off to the side; publish only after durable replacement.
+const backup = require('./backup');
+route('GET', '/api/export', () => backup.exportDatabase(db, pkg.version), { officer: true });
+route('GET','/api/admin/security-ledger',({user})=>{need(!user.support,403,'A regular administrator is required.');return securityLedger.capacity();},{officer:true});
+route('POST', '/api/import', async ({ body, user, reauthorize }) => {
+  const candidate = backup.prepareDatabase(body, SETTING_DEFAULTS, migrate);
+  candidate.users=Object.assign(Object.create(null),candidate.users);
+  // Drain the single existing writer before the synchronous commit. Recheck authority
+  // after the await, including logout/kick/support restrictions that changed meanwhile.
+  if (flushInFlight) await flushInFlight;
+  await reauthorize();
+  need(!shuttingDown, 409, 'The server is shutting down. Retry after restart.');
+  const reconciliation=securityState.prepareImport(candidate,securityLedger);
+  const operationId=crypto.randomUUID();
+  const item={id:candidate.nextId++,at:new Date().toISOString(),byKey:user.key,byName:user.name,action:'security.backup.import',targetType:'guild',targetId:'',targetName:'Database',description:'Restored application data; authoritative ledger grants retained; pending invitations invalidated.',before:null,after:{pendingInvalidated:reconciliation.invalidated}};
+  candidate.auditLog.push(item);
+  const restrictivePolicy=securityLedger.policy();
+  for(const inv of restrictivePolicy.guestCoachInvites || [])if(inv.status==='pending'){delete inv.tokenHash;inv.status='revoked';inv.revokedAt=new Date().toISOString();inv.invalidationReason='backup import';}
+  securityLedger.append('import.prepare',{policy:securityState.extract(candidate),restrictivePolicy,burned:reconciliation.burned,operationId,databaseDigest:require('./security-ledger').digest(JSON.stringify(candidate)),actor:user.key,pendingInvalidated:reconciliation.invalidated});
+  try { backup.commitDatabase(DB_FILE, candidate); }
+  catch(error) { securityLedger.append('import.abort',{operationId});securityLedger.append('audit',{operationId,action:'backup.import.failed',actor:user.key});throw error; }
+  db = candidate;
+  securityLedger.append('import.commit',{operationId});
+  securityLedger.append('audit',{operationId,action:'backup.import.completed',actor:user.key});
+  dataRevision++;
+  dirty = false;
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  try { afterPersist(); } catch (error) { console.error('Backup committed; background synchronization needs retry:', error.message); }
   return { ok: true };
 }, { officer: true });
 
@@ -1496,7 +1640,12 @@ async function persistScheduleState(){
   save();
   if(flushTimer){clearTimeout(flushTimer);flushTimer=null;}
   if(flushInFlight)await flushInFlight;
-  while(dirty && !shuttingDown){await flush();if(dirty)throw Error('Could not persist Daily Schedule state; Discord update deferred.');}
+  // A successful write can become dirty again when another request saves. That is
+  // not an I/O failure: drain the next revision rather than losing the sync job.
+  for(let attempts=0;dirty && !shuttingDown;attempts++){
+    const failures=saveFailures;await flush();
+    if(saveFailures!==failures || attempts>=50)throw Error('Could not persist Daily Schedule state; Discord update deferred.');
+  }
 }
 function ensureScheduleMessage(day){return scheduleLocked(()=>updateScheduleBlock(day,false));}
 async function updateScheduleBlock(day,existingOnly){
@@ -1512,9 +1661,9 @@ async function updateScheduleBlock(day,existingOnly){
   const events=scheduleDayEvents(day).map(ev=>({id:ev.id,...buildEventMessage(ev)}));
   const current=()=>db.settings.dailySchedulePost===st && st.current===cur && st.channelId===cur.channelId && day===gameDay(Date.now());
   // Persist identity/nonce context BEFORE sends so restart recovery reuses it.
-  await persistScheduleState();
   let bannerError=null;
   try{
+    await persistScheduleState();
     if(cur.bannerMessageId && current()){
       const roles=(st.mentionRoleIds || []).filter(discord.isSnowflake || (()=>true));
       const content=(roles.length?roles.map(id=>'<@&'+id+'>').join(' ')+'\n':'')+`📅 **Today's schedule — ${dayLabel(day)}**`;
@@ -1792,7 +1941,7 @@ route('POST', '/api/admin/link-owner', ({ body, user }) => {
   return { moved: n };
 }, { officer: true });
 
-require('./server-alliance')({route,need,shotcaller:{url:SHOTCALLER_URL,apiKey:SHOTCALLER_API_KEY,guildId:discord.cfg.guildId},allianceGuildId:process.env.ALLIANCE_GUILD_ID,audit:audit.log,canAdmin:alliancePolicy.canAdmin,access:alliancePolicy.access,getDb:()=>db,save});
+require('./server-alliance')({route,need,shotcaller:{url:SHOTCALLER_URL,apiKey:SHOTCALLER_API_KEY,guildId:discord.cfg.guildId},allianceGuildId:process.env.ALLIANCE_GUILD_ID,audit:audit.log,canAdmin:alliancePolicy.canAdmin,access:alliancePolicy.access,getDb:()=>db,save,verifyPartner:alliancePolicy.verifyPartner,partnerMessage:alliancePolicy.partnerMessage});
 // ---------- Shotcaller control panel (officer-only proxy to the separate Shotcaller bot's HTTP API) ----------
 // Required before server-features/server-community below, which need its returned helpers (shotcallerApi) to
 // let "Post to Discord" also start a session - see server-community.js's post-parties route.
@@ -1812,6 +1961,11 @@ const featuresCtx = {
   canManageAlliance:alliancePolicy.canAdmin, route, need, HttpError, clean, num, newId, save, config, discord, isOfficer, isCoach, canEditMember, findMember, findEvent, normParties, applyPresetRule,
   eventFor, safeEqual, pickMember, pickEvent, pickOwner, cleanUrl, cleanLinks, syncAttendancePoints, setAttended, dropFromParty, hooks, tickHooks, clone, appUrl, nameOfOwner,
   LOOT_TYPES, LOOT_DEFAULT_TYPE, SETTING_DEFAULTS, UPLOAD_DIR, publicBranding, audit: audit.log, shotcallerApi, partyIsPlaceholder,
+  // hotfix 1.46.2.2: live authorization helpers (access.js) and session revocation (session-guard.js)
+  isActiveCoach: access.isActiveCoach, isOfficerKey: access.isOfficerKey, officerKeys: access.officerKeys, revokeUserSessions, syncStoredRole,
+  guestInvites, saveSync, publicUrl: () => discord.cfg.publicUrl,
+  contentCharacterOf, isContentCharacter, isCurrentGuildMember,
+  allianceDiagnose: () => alliancePolicy.diagnose(), roleRefreshStats: () => (roleRefresh ? { running: true, maxStaleMinutes: ROLE_MAX_STALE_MS / 60e3, ...roleRefresh.stats() } : { running: false }),
   get db() { return db; },
 };
 require('./server-features')(featuresCtx);
@@ -1859,14 +2013,15 @@ const send = (res, status, data, headers = {}) => {
   else{res.writeHead(status,h);res.end(body);}
 };
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  try { securityLedger.check(); } catch { res.writeHead(503,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:'Security state is unavailable. Contact an administrator.'}));return; }
   res.supportState=url.pathname==='/api/state';
   const requestStart=performance.now();let diagnosticRoute=null;
   res.once('finish',()=>{if(diagnosticRoute)diagnostics.record(req.method,diagnosticRoute,res.statusCode,performance.now()-requestStart);});
-  res.supportRead=!!readToken((req.headers.authorization || '').replace(/^Bearer /,'') || cookieOf(req,SESSION_COOKIE))?.support;
+  try{res.supportRead=!!readToken(tokenOf(req))?.support;}catch{res.supportRead=false;}
   res.guildGzip=(req.headers['accept-encoding'] || '').split(',').some(s=>{const [name,...opts]=s.trim().split(';');return name==='gzip' && !opts.some(o=>/^\s*q=0(?:\.0*)?\s*$/.test(o));});
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const ip = requestGuard.clientIp(req, { trustedProxies: TRUSTED_PROXIES, header: CLIENT_IP_HEADER });   // SA-11: X-Forwarded-For only from TRUSTED_PROXIES
 
   // Health check for Docker / a load balancer: no auth, no DB access, just "the process is alive and serving".
   if (url.pathname === '/health' && req.method === 'GET') {
@@ -1881,40 +2036,62 @@ http.createServer(async (req, res) => {
     // ?merc=1 (from a mercenary-signup link) is remembered the same way the CSRF state is, across the trip to
     // Discord and back, so the callback below can let this one sign-in through even if general guild
     // applications are switched off - joining for one event as a mercenary is a different thing from applying.
-    // ?guestcoach=1 (from the guest-coach invite link in Admin) works the same way, for someone outside the
-    // guild who is only ever there to review VODs for one class, never a member in any other sense.
-    const cookies = [cookieHeader('gh_oauth', state, 600)];
+    // B04 (hotfix.3): the old public ?guestcoach=1 link is ignored - becoming a guest coach needs a single-use
+    // invitation (POST /auth/discord/invite below). An existing guest coach simply signs in here.
+    const cookies = [cookieHeader('gh_oauth', state, 600), cookieHeader('gh_guestcoach', '', 0)];
     if (url.searchParams.get('merc') === '1') cookies.push(cookieHeader('gh_merc', '1', 600));
     cookies.push(cookieHeader('gh_alliance',url.searchParams.get('alliance')==='1'?'1':'',url.searchParams.get('alliance')==='1'?600:0));
-    if (url.searchParams.get('guestcoach') === '1') cookies.push(cookieHeader('gh_guestcoach', '1', 600));
     res.writeHead(302, { Location: discord.authorizeUrl(state), 'Set-Cookie': cookies });
     return res.end();
+  }
+  // B04 (hotfix.3): start a Discord sign-in through a guest-coach invitation. The token comes from the page's URL
+  // fragment in a same-origin JSON POST (never in a URL); it is checked and bound to a fresh OAuth state on the server.
+  // Nothing is consumed here - only the callback, after Discord has proven who signs in, redeems it.
+  if (url.pathname === '/auth/discord/invite' && req.method === 'POST') {
+    try {
+      if (!discord.loginEnabled) return send(res, 400, { error: 'Discord sign-in is not set up on this server.' });
+      if (!isJsonRequest(req) || !sameOrigin(req, discord.cfg.publicUrl)) return send(res, 403, { error: 'Cross-site request blocked.' });
+      if (inviteAttemptsBlocked(ip)) return send(res, 429, { error: 'Too many attempts. Try again in a few minutes.' });
+      const body = await readBody(req).catch(() => null);        // same limit as every route; the strict token format refuses anything else with a clean 400
+      const token = body && typeof body.token === 'string' ? body.token : '';
+      const state = crypto.randomBytes(16).toString('hex');
+      if (!guestInvites.begin(token, state)) { noteInviteFailure(ip); return send(res, 400, { error: INVITE_INVALID }); }
+      return send(res, 200, { location: discord.authorizeUrl(state) }, { 'Set-Cookie': [cookieHeader('gh_oauth', state, 600), cookieHeader('gh_merc', '', 0), cookieHeader('gh_alliance', '', 0), cookieHeader('gh_guestcoach', '', 0)] });
+    } catch { return send(res, 400, { error: INVITE_INVALID }); }
   }
   if (url.pathname === '/auth/discord/callback' && req.method === 'GET') {
     const fail = (msg) => { res.writeHead(302, { Location: '/?loginError=' + encodeURIComponent(msg), 'Set-Cookie': [cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0),cookieHeader('gh_alliance','',0)] }); res.end(); };
     try {
       if (!discord.loginEnabled) return fail('Discord sign-in is not set up on this server.');
-      if (url.searchParams.get('error')) return fail('Discord sign-in was cancelled.');
       const state = url.searchParams.get('state'), code = url.searchParams.get('code');
-      if (!state || !code || !safeEqual(state, cookieOf(req, 'gh_oauth'))) return fail('The sign-in link expired. Please try again.');
+      // B04 hardening: every OAuth state is good for exactly one callback - including a cancelled one - and any
+      // invitation bound to it is taken now, before any early return (a replay of the state then gets nothing).
+      const stateMatches = !!state && safeEqual(state, cookieOf(req, 'gh_oauth'));
+      const firstUse = stateMatches && !usedOauthStates.has(state);
+      if (stateMatches) usedOauthStates.set(state, Date.now());
+      if (usedOauthStates.size > 5000) { const cut = Date.now() - 15 * 60e3; for (const [k, t] of usedOauthStates) if (t < cut) usedOauthStates.delete(k); }
+      // B04: an invitation bound to this exact OAuth state (server side), taken exactly once - a replayed callback,
+      // a second tab or a restart finds nothing here and is an ordinary sign-in.
+      const pendingInvite = firstUse ? guestInvites.takePending(state) : null;
+      if (url.searchParams.get('error')) return fail('Discord sign-in was cancelled.');
+      if (!stateMatches || !code || !firstUse) return fail('The sign-in link expired. Please try again.');
       const merc = cookieOf(req, 'gh_merc') === '1';
-      const guestCoachLink = cookieOf(req, 'gh_guestcoach') === '1';
       const alliance=cookieOf(req,'gh_alliance')==='1';
       const u = await discord.resolveUser(code,alliance,alliance?alliancePolicy.access():null);
       if(alliance){
-        const token=makeToken({key:u.id,name:u.name,role:'alliance',allianceGuildId:u.guildId,allianceRoles:u.roles,discord:true},8/24);
+        const token=makeToken({key:u.id,name:u.name,role:'alliance',allianceGuildId:u.guildId,discord:true},8/24);   // partner roles are re-checked live (alliance-policy.verifyPartner), never read from the token
         res.writeHead(302,{Location:'/alliance.html','Set-Cookie':[cookieHeader(SESSION_COOKIE,token,8*3600),cookieHeader('gh_alliance','',0),cookieHeader('gh_oauth','',0)]});return res.end();
       }
       const known = db.users[u.id];
       // A guest coach is never a guild member, in any sense - whether they arrived just now via the invite
       // link or are signing back in afterwards, they always land as an applicant with nothing beyond coaching
       // access for their chosen class (picked once they land on the guest-coach page - see /api/guest-coaches).
-      const isGuestCoach = db.guestCoaches.some((g) => g.discordId === u.id);
+      let isGuestCoach = db.guestCoaches.some((g) => g.discordId === u.id);
       // A kicked player is sent to the application page like anyone new, regardless of their Discord role or
       // having been accepted before - overrides everything else below. Accepting a fresh application from
       // them clears this (see /api/applications/:id), which is the only way back in.
       if (known && known.kicked) { u.role = 'applicant'; u.whyNot = 'You were removed from the guild. You can send a new application below.'; }
-      else if (u.role === 'applicant' && known && known.accepted) u.role = 'member';           // accepted earlier: in, even if they never joined the Discord server
+      else if (u.role === 'applicant' && u.inGuild && known && known.accepted) u.role = 'member'; // acceptance never overrides a confirmed Discord departure
       // Officer status can also be granted in Admin > Officers, without editing .env or restarting the server -
       // by a specific Discord role (on top of DISCORD_OFFICER_ROLE_IDS) or a specific player directly.
       const kicked = known && known.kicked;
@@ -1923,15 +2100,36 @@ http.createServer(async (req, res) => {
       // A coach is a separate, narrower flag, not a role - someone can be a normal member and a coach, or an
       // officer and a coach, at the same time. Neither this nor officer status above can override a kick -
       // being in either list from before does not let a kicked player back in through the side door.
+      // B04: redeem an invitation only now that Discord has proven the identity, for an eligible account: outside
+      // the guild (applicant), not kicked, not already a guest coach. Check-and-set is synchronous; a refusal or a
+      // lost race consumes nothing. The grant is bound to u.id from Discord, never to anything the client sent.
+      let redeemed = null;
+      if (pendingInvite) {
+        if (kicked) return fail('This invitation cannot be used with this Discord account.');
+        if (isGuestCoach) return fail('You are already a guest coach. The invitation was not used - an officer can change your class.');
+        if (u.role !== 'applicant') return fail('You are already a member of the guild, so the guest-coach invitation was not used.');
+        const r = guestInvites.redeem(pendingInvite, { id: u.id, name: u.name });
+        if (!r.ok) return fail(INVITE_INVALID);
+        redeemed = r.invite;
+        db.guestCoaches.push({ id: newId(), discordId: u.id, name: u.name, avatar: u.avatar || '', addedAt: new Date().toISOString(), via: 'invite', inviteId: redeemed.id, invitedBy: redeemed.createdBy, invitedByName: redeemed.createdByName || '' });
+        db.coachLinks = db.coachLinks.filter((l) => l.coach !== u.id);
+        db.coachLinks.push({ id: newId(), coach: u.id, class: redeemed.class, linkedAt: new Date().toISOString() });
+        isGuestCoach = true;
+      }
       const isCoach = !kicked && (coachUserIds.includes(u.id) || (u.roles || []).some((r) => coachRoleIds.includes(r)) || isGuestCoach);
-      if (u.role === 'applicant' && !merc && !guestCoachLink && !isGuestCoach && !db.settings.applications.enabled) return fail(u.whyNot);
+      if (u.role === 'applicant' && !merc && !(isGuestCoach && !kicked) && !db.settings.applications.enabled) return fail(u.whyNot);   // a kicked guest coach is not let through
       db.users[u.id] = { ...(known || {}), id: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, inGuild: u.inGuild, applicant: u.role === 'applicant', coach: isCoach, discordRoles: Array.isArray(u.roles) ? u.roles : (known?.discordRoles || []), lastLogin: new Date().toISOString() };
+      if (roleRefresh) roleRefresh.markFresh?.(u.id);
       save();
+      if (redeemed) {
+        saveSync();                                     // the single use is on disk before the session is handed out
+        audit.log({ key: u.id, name: u.name }, 'guestcoach.invite.redeem', { type: 'player', id: u.id, name: u.name }, `${u.name} (Discord ${u.id}) redeemed guest-coach invitation #${redeemed.id} from ${redeemed.createdByName || 'an officer'} and became a guest coach for ${redeemed.class} players.`);
+      }
       // 30 days, matching passcode-mode sessions (makeToken's own default just below) - there is no reason a
       // Discord sign-in should need redoing 4x more often than a passcode one. A short-lived Discord session
       // was the actual cause of players having to re-authorize with Discord every time they opened the site on
       // the same device after as little as a week away.
-      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, coach: isCoach, discord: true }, 30);
+      const token = makeToken({ key: u.id, name: u.name, username: u.username, avatar: u.avatar, role: u.role, discord: true }, 30);   // role kept for display only; never trusted
       res.writeHead(302, { Location: '/', 'Set-Cookie': [cookieHeader(SESSION_COOKIE, token, 30 * 86400), cookieHeader('gh_oauth', '', 0), cookieHeader('gh_merc', '', 0), cookieHeader('gh_guestcoach', '', 0),cookieHeader('gh_alliance','',0)] });
       return res.end();
     } catch (e) { return fail(e.message || 'Sign-in failed.'); }
@@ -1959,6 +2157,7 @@ http.createServer(async (req, res) => {
         const ev = findEvent(eventId);
         if (!ev) return update('This event could not be found (it may have been deleted).');
         const clickerId = (interaction.user || interaction.member?.user || {}).id;
+        if (!buttonAccessOk(clickerId)) return update('You are not a guild member right now, so you cannot answer this. Please open the site.');   // hotfix 1.46.2.2 (B05)
         const m = db.members.find((x) => x.owner === clickerId && x.active);
         if (!m) return update('We could not find your character for this. Please open the site to answer instead.');
         if (Date.now() >= closeAt(ev)) return update(`Sign-ups for **${ev.title}** are already closed.`);
@@ -1981,6 +2180,7 @@ http.createServer(async (req, res) => {
         const ev = findEvent(eventId);
         if (!ev) return ephemeral('This event could not be found (it may have been deleted).');
         const clickerId = (interaction.user || interaction.member?.user || {}).id;
+        if (!buttonAccessOk(clickerId)) return ephemeral('You are not a guild member right now, so you cannot answer this. Please open the site.');   // hotfix 1.46.2.2 (B05)
         const m = db.members.find((x) => x.owner === clickerId && x.active);
         if (!m) return ephemeral('We could not find your character for this. Please open the site to answer instead.');
         if (Date.now() >= closeAt(ev)) return ephemeral(`Sign-ups for **${ev.title}** are already closed.`);
@@ -2012,7 +2212,12 @@ http.createServer(async (req, res) => {
     }
     return;
   }
+  // Hotfix 1.46.2.2 (SA-05, SA-09, D-2): logout is a same-origin JSON request and revokes this one session
+  // server-side (only this device); other devices of the same person stay signed in.
   if (url.pathname === '/api/logout' && req.method === 'POST') {
+    if (!isJsonRequest(req) || !sameOrigin(req, discord.cfg.publicUrl)) return send(res, 403, { error: 'Cross-site request blocked.' });
+    const v = verifyToken(tokenOf(req));
+    if (v) { try { sessionGuard.revokeToken(v.sig, v.payload.exp); } catch (e) { console.error('logout: could not record the revocation:', e.code || e.message); return send(res, 500, { error: 'Server error.' }); } }
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(SESSION_COOKIE, '', 0) });
   }
 
@@ -2023,41 +2228,40 @@ http.createServer(async (req, res) => {
       diagnosticRoute=String(r.re); // route pattern only: no query strings, IDs, tokens or request bodies
       const m = url.pathname.match(r.re);
       const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-      let user = null;
-      if (r.auth) {
-        const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
-        user = readToken(bearer || cookieOf(req, SESSION_COOKIE));
+      // Hotfix 1.46.2.2 (Phase D finding B06/B06b): the whole authorization decision runs once before the request body
+      // is read (reject early) and again after it, right before the handler, so a request that was opened before a
+      // kick, an officer removal or a logout cannot finish with the rights its session had back then.
+      const authorize = async () => {
+        const bearer = String(req.headers.authorization || '').startsWith('Bearer ') ? String(req.headers.authorization).slice(7) : '';
+        const user = readToken(tokenOf(req));                   // live role/coach/kick decision (access.js) - never the token's own claims
         need(user, 401, 'Please sign in.');
         if(user.role==='alliance'){
-          need(alliancePolicy.canPartner(user,process.env.ALLIANCE_GUILD_ID),403,'Alliance access is disabled.');
+          // Hotfix 1.46.2.2 (SA-07): route scope first (no Discord call for anything else), then a live check of the
+          // partner's membership and roles in the partner Discord server against the current allowlist.
           need(r.alliance===true,403,'Alliance access is limited to Alliance voice controls.');
+          const partnerCheck=await alliancePolicy.verifyPartner(user);
+          need(alliancePolicy.canPartner(user,process.env.ALLIANCE_GUILD_ID,partnerCheck),403,alliancePolicy.partnerMessage(partnerCheck.reason));
         }
         if(user.support){need(supportAccess.valid(user),403,'Support access is disabled.');user.role='officer';}
         if(user.support)need(require('./support-read-policy')(req.method,url.pathname),403,'Support access is read-only. This operation is not permitted.');
         if(r.alliance)need(user.role==='alliance' || alliancePolicy.canAdmin(user),403,'Alliance officer or Insanity administrator access is required.');
         if(r.allianceAdmin)need(alliancePolicy.canAdmin(user),403,'Insanity administrator access is required.');
-        // Keep session flags in sync with the persisted user record. Admin coach assignments can
-        // change while someone is already signed in, so the signed session must not retain a stale
-        // `coach` value until the next Discord login.
-        if (user.key && db.users[user.key]) {
-          user.coach = !!db.users[user.key].coach;
-        } else if (!discord.loginEnabled) {
-          // Passcode mode has no persisted db.users record to re-check against (sign-in never writes one),
-          // so the setting itself is the live source of truth here instead.
-          user.coach = db.settings.coachUserIds.includes(user.key);
-        }
-        // Somebody whose application was accepted since they signed in is a member from now on, without signing in again.
-        if (user.role === 'applicant' && db.users[user.key] && db.users[user.key].accepted) user.role = 'member';
+        // Role, coach status, kicks and accepted applications are already decided live by access.js (hotfix 1.46.2.2):
+        // a kicked player stays an applicant even if accepted before (SA-04); an accepted applicant is a member at once.
         if (!bearer && req.method !== 'GET') {           // cookie sessions: block requests that other websites could trigger
-          need(/application\/json/i.test(req.headers['content-type'] || ''), 415, 'Send JSON.');
-          need(!req.headers.origin || (() => { try { return new URL(req.headers.origin).host === req.headers.host; } catch { return false; } })(), 403, 'Cross-site request blocked.');
+          need(isJsonRequest(req), 415, 'Send JSON.');
+          need(sameOrigin(req, discord.cfg.publicUrl), 403, 'Cross-site request blocked.');   // full scheme+host+port origin (SA-10)
         }
         need(!r.officer || isOfficer(user), 403, 'Officers only.');
         need(user.role !== 'applicant' || r.applicant, 403, 'Your application has to be accepted first.');       // applicants can reach nothing but the application
-      }
-      if(url.pathname==='/api/support/login'){need(/application\/json/i.test(req.headers['content-type'] || ''),415,'Send JSON.');need(!req.headers.origin || (()=>{try{return new URL(req.headers.origin).host===req.headers.host;}catch{return false;}})(),403,'Cross-site request blocked.');}
-      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || url.pathname === '/api/events/artwork' || /\/post-parties$/.test(url.pathname) || /^\/api\/gearthreads\/[^/]+\/(screens\/[^/]+|folder)$/.test(url.pathname) ? 9e6 : 2e6);
-      const out = await r.handler({ body, user, params, ip, query: Object.fromEntries(url.searchParams) });
+        return user;
+      };
+      let user = r.auth ? await authorize() : null;
+      if(url.pathname==='/api/support/login'){need(isJsonRequest(req),415,'Send JSON.');need(sameOrigin(req, discord.cfg.publicUrl),403,'Cross-site request blocked.');}
+      const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req, url.pathname === '/api/import' ? 32e6 : url.pathname === '/api/admin/upload' || url.pathname === '/api/events/artwork' || /\/post-parties$/.test(url.pathname) || /^\/api\/gearthreads\/[^/]+\/(screens\/[^/]+|folder)$/.test(url.pathname) ? 9e6 : 2e6);
+      if (r.auth) user = await authorize();             // re-decided after the body arrived (see authorize above)
+      const out = await r.handler({ body, user, params, ip, reauthorize: authorize, query: Object.fromEntries(url.searchParams) });
+      securityLedger.check();
       if(url.pathname==='/api/support/login')return send(res,200,{ok:true},{'Set-Cookie':cookieHeader(SESSION_COOKIE,makeToken(out.supportLoginUser,2/24),7200)});
       return send(res, 200, out, url.pathname === '/api/export'
         ? { 'Content-Disposition': 'attachment; filename="guild-backup.json"' } : {});
@@ -2107,7 +2311,7 @@ http.createServer(async (req, res) => {
   const stream=fs.createReadStream(file);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());
   if(compress){const zip=zlib.createGzip({level:4});zip.on('error',()=>res.destroy());res.on('close',()=>zip.destroy());stream.pipe(zip).pipe(res);}else stream.pipe(res);
 }).listen(...(HOST ? [PORT, HOST] : [PORT]), () => {
-  console.log(`Guild Hall running on http://${HOST || 'localhost'}:${PORT}`);
+  console.log(`Guild Hall running on http://${HOST || 'localhost'}:${server.address().port}`);
   console.log(discord.loginEnabled ? `Sign-in: Discord (redirect URI ${discord.redirectUri()})` : 'Sign-in: shared passcodes (demo mode)');
   console.log(discord.botEnabled ? 'Discord bot: on (PINs and reminders are sent as direct messages)' : 'Discord bot: off (PINs and reminders are only written to this log)');
 });

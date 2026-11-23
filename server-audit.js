@@ -16,6 +16,7 @@ module.exports = function install(ctx) {
   // small and avoids storing more of a player's data than the one change actually needed.
   function log(user, action, target, description, before, after) {
     try {
+      if(ctx.securityLedger && /^(?:guestcoach\.|coach\.|officers?\.|player\.kick|application\.accept|alliance\.permissions|support\.)/.test(action))ctx.securityLedger.append('audit',{action,actor:user?.key || '',target:target || {},description:clean(description,400)});
       const D = db();
       D.auditLog = D.auditLog || [];
       D.auditLog.push({

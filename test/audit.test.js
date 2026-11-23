@@ -8,7 +8,7 @@ const path = require('node:path');
 
 async function startServer() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-audit-'));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
     env: { ...process.env, PORT: String(port), DATA_DIR: dir, MEMBER_PASSCODE: 'm1', OFFICER_PASSCODE: 'o1' },

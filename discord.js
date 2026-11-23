@@ -268,12 +268,46 @@ function createDiscord(env = process.env) {
     return r.ok ? { ok: true, name: r.data.global_name || r.data.username } : { ok: false, status: r.status, error: explain(r) };
   }
 
+  // ---- authoritative member lookup with the bot token (role refresh, Alliance partner verification) ----
+  // Never throws. Result kinds:
+  //   { ok:true, roles, nick }                      200 with a roles array
+  //   { ok:false, kind:'not_member' }               404 code 10007 (Unknown Member): authoritative "not in that guild"
+  //   { ok:false, kind:'no_access', status }        401 / 403 / 404 code 10004: bad token or bot not in that guild
+  //   { ok:false, kind:'rate_limited', retryAfter } 429 (seconds)
+  //   { ok:false, kind:'error' }                    timeout, 5xx, network, malformed answer, any other status
+  //   { ok:false, kind:'no_bot' }                   no bot token configured (nothing was sent)
+  //   { ok:false, kind:'invalid' }                  guild or user id is not a snowflake (nothing was sent)
+  // Callers must treat every kind other than ok / not_member as "unknown" and never change stored data on it.
+  const memberTimeoutMs = Number(env.DISCORD_MEMBER_TIMEOUT_MS) > 0 ? Number(env.DISCORD_MEMBER_TIMEOUT_MS) : 10000;
+  async function guildMember(guildId, userId) {
+    if (!botEnabled) return { ok: false, kind: 'no_bot' };
+    if (!isSnowflake(guildId) || !isSnowflake(userId)) return { ok: false, kind: 'invalid' };
+    try {
+      const res = await fetch(`${cfg.apiBase}/guilds/${guildId}/members/${userId}`, { headers: { 'User-Agent': 'DiscordBot (guild-hall, 1.0)', Authorization: 'Bot ' + cfg.botToken }, signal: AbortSignal.timeout(memberTimeoutMs) });
+      const data = await res.json().catch(() => null);
+      const code = data && typeof data === 'object' ? data.code : undefined;
+      if (res.status === 200) {
+        if (!data || typeof data !== 'object' || !Array.isArray(data.roles)) return { ok: false, kind: 'error' };
+        return { ok: true, roles: data.roles.map(String).filter(isSnowflake), nick: typeof data.nick === 'string' ? data.nick : null };
+      }
+      if (res.status === 404 && code === 10007) return { ok: false, kind: 'not_member' };
+      if (res.status === 401 || res.status === 403 || (res.status === 404 && code === 10004)) return { ok: false, kind: 'no_access', status: res.status };
+      if (res.status === 429) {
+        const ra = Number(res.headers.get('retry-after') || (data && data.retry_after) || 1);
+        return { ok: false, kind: 'rate_limited', retryAfter: Number.isFinite(ra) && ra > 0 ? ra : 1 };
+      }
+      return { ok: false, kind: 'error', status: res.status };
+    } catch {
+      return { ok: false, kind: 'error' };
+    }
+  }
+
   // A link that adds the bot to the server with exactly the permissions it needs (view channels, send messages, attach files).
   const inviteUrl = (withRoles) => (cfg.clientId ? `https://discord.com/oauth2/authorize?client_id=${cfg.clientId}&scope=bot&permissions=${35840 + (withRoles ? 268435456 : 0)}${cfg.guildId ? '&guild_id=' + cfg.guildId : ''}` : '');
 
   const avatarUrl = (u) => (u && u.avatar && isSnowflake(u.id) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : '');
 
-  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, editMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, lookupUser, avatarUrl, isSnowflake, linkButtons, rsvpButtons, actionButtons, verifyInteraction };
+  return { cfg, loginEnabled, botEnabled, redirectUri, authorizeUrl, resolveUser, sendDM, postMessage, deleteMessage, editMessage, listChannels, botInfo, guildInfo, addRole, inviteUrl, checkClientSecret, listRoles, botMember, guildMember, lookupUser, avatarUrl, isSnowflake, linkButtons, rsvpButtons, actionButtons, verifyInteraction };
 }
 
 module.exports = { createDiscord, isSnowflake };

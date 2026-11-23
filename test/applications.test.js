@@ -15,7 +15,7 @@ const sessions = {};
 before(async () => {
   fake = await startFakeDiscord();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-apps-'));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   base = `http://localhost:${port}`;
   proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
@@ -87,7 +87,9 @@ test('accepting hands out the member role to somebody in the server; a missing p
   assert.equal(r2.roleResult, undefined);
   await new Promise((r) => setTimeout(r, 300));
   assert.ok(fake.state.dms.slice(dmsBefore).some((d) => d.to === STRANGER && /join-us/.test(d.content)), 'they get the invite link to the Discord server');
-  assert.equal((await state('stranger')).user.role, 'member');
+  assert.equal((await state('stranger')).user.role, 'applicant', 'acceptance alone does not bypass Discord membership');
+  sessions.stranger = (await login(STRANGER, [])).cookie;
+  assert.equal((await state('stranger')).user.role, 'member', 'accepted person joins Discord');
   // the bot is not allowed to give roles
   sessions.late = (await login('100000000000000106', [])).cookie;
   const a3 = await apply('late', 'Denied');

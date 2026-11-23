@@ -3,6 +3,7 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const { createInvite, redeemInvite } = require('./guest-invite-helper');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -34,7 +35,7 @@ async function startServer(seedDb) {
   fake = await startFakeDiscord();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-discord-'));
   if (seedDb) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(seedDb));
-  port = 40000 + Math.floor(Math.random() * 20000);
+  port = await require('./free-port')();
   base = `http://localhost:${port}`;
   proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
@@ -121,8 +122,13 @@ test('cookie sessions are protected against requests from other websites, and lo
   assert.equal(noJson.status, 415);
   const foreign = await fetch(base + '/api/events', { method: 'POST', headers: { Cookie: sessions.A, 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: '{}' });
   assert.equal(foreign.status, 403);
-  const out = await fetch(base + '/api/logout', { method: 'POST', headers: { Cookie: sessions.B, 'Content-Type': 'application/json' } });
+  // Hotfix 1.46.2.2 (SA-05): logout now ends the session on the server, so it is done on a second device of B; the
+  // later tests keep using B's first session, which must survive (logout = this device only, D-2).
+  const secondDevice = (await discordLogin(B, [])).cookie;
+  const out = await fetch(base + '/api/logout', { method: 'POST', headers: { Cookie: secondDevice, 'Content-Type': 'application/json' } });
   assert.match(out.headers.get('set-cookie'), /Max-Age=0/);
+  assert.equal((await fetch(base + '/api/state', { headers: { Cookie: secondDevice } })).status, 401, 'the logged-out session is dead server-side');
+  assert.equal((await fetch(base + '/api/state', { headers: { Cookie: sessions.B } })).status, 200, "B's other device stays signed in");
 });
 
 test('characters belong to a Discord user; officers can move them to another player', async () => {
@@ -177,7 +183,9 @@ test('the attendance PIN goes to party leaders and leadership only; players type
   assert.deepEqual(pinDMs.map((d) => d.to).sort(), [A, B].sort(), 'party leader + officer, nobody else');
   assert.ok(pinDMs.every((d) => d.content.includes(code)));
   assert.ok(pinDMs.find((d) => d.to === B).content.includes('leader of Party 1'));
-  assert.equal(withPin.pin.sent.length, 2);
+  // PIN generation is published before asynchronous DM delivery; re-read the delivery result.
+  const withDelivery=await waitFor(async()=>{const e=(await state('A')).events.find(e=>e.id===ev.id);return e?.pin?.sent?.length===2 && e;});
+  assert.equal(withDelivery.pin.sent.length, 2);
 
   const seenByPlayer = (await state('D')).events.find((e) => e.id === ev.id);
   assert.equal(seenByPlayer.pin, undefined, 'players never receive the PIN');
@@ -442,7 +450,7 @@ test('outsiders: turned away by default; with applications switched on they sign
   void dm;
 });
 
-test('an application: needs a character and a few words, one at a time; the leadership accepts and the applicant is a member at once', async () => {
+test('an application: needs a character and a few words, one at a time; acceptance needs Discord membership before member access', async () => {
   const send = (b, who = 'X') => call('/api/applications', 'POST', b, who);
   assert.equal((await send({ characterName: 'N', about: 'short' })).status, 400);
   assert.equal((await send({ characterName: 'Newbie', role: 'Healer', about: 'ok' })).status, 400, 'a few words about yourself are needed');
@@ -459,7 +467,9 @@ test('an application: needs a character and a few words, one at a time; the lead
   fake.state.roleAdds.length = 0;
   const done = (await call('/api/applications/' + a.id, 'PUT', { decision: 'accept', note: 'Welcome!' }, 'A')).body;
   assert.equal(done.status, 'accepted');
-  // the same session is a member now, no new sign-in needed
+  // Accepted outsiders must join Discord; an authoritative sign-in establishes membership.
+  assert.equal((await state('X')).user.role, 'applicant');
+  sessions.X = (await discordLogin(OUTSIDER, [])).cookie;
   const now = await state('X');
   assert.equal(now.user.role, 'member');
   const mine = now.members.filter((m) => m.owner === OUTSIDER);
@@ -476,7 +486,9 @@ test('kicking a player: their character is deactivated (not deleted), they canno
   const beforeKick = await state('B');
   const charId = beforeKick.members.find((m) => m.owner === B).id;
 
-  assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: B, reason: 'Inactive for months' }, 'B')).status, 403, 'members cannot kick');
+  // Hotfix 1.46.2.2: officer status is live now, so B (just added to the officer list) already is an officer here;
+  // "members cannot kick" is checked with C, a plain member.
+  assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: B, reason: 'Inactive for months' }, 'C')).status, 403, 'members cannot kick');
   assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: A, reason: 'oops' }, 'A')).status, 400, 'cannot kick yourself');
   assert.equal((await call('/api/admin/kick', 'POST', { ownerKey: '999999999999999999' }, 'A')).status, 404, 'has to be a real, signed-in player');
 
@@ -522,12 +534,8 @@ test('guest class coaches: someone outside the guild joins via the invite link, 
   // without the special link, applications being closed still blocks a total stranger, same as ever
   assert.equal((await discordLogin(GUEST, null)).cookie, null, 'a plain sign-in is still blocked while applications are closed');
 
-  // with the link, the same person gets through as an applicant, not rejected
-  const first = await discordLogin(GUEST, null, { authQuery: '?guestcoach=1' });
-  assert.ok(first.cookie, 'the guest-coach link lets them through even with applications closed');
-  sessions.guest = first.cookie;
-  assert.equal((await state('guest')).user.role, 'applicant');
-  assert.equal((await state('guest')).isCoach, false, 'not a coach yet - only after they actually join and pick a class');
+  // B04 (hotfix.3): the old public guest-coach link no longer lets anyone through or makes anyone a coach
+  assert.equal((await discordLogin(GUEST, null, { authQuery: '?guestcoach=1' })).cookie, null, 'the old public ?guestcoach=1 link is ignored');
 
   // B already has a character from an earlier test in this file - switch it to Oracle so myStudents has
   // something real to show once the guest coach joins, rather than trying to add a second character for B
@@ -537,11 +545,16 @@ test('guest class coaches: someone outside the guild joins via the invite link, 
   const bChar = (await state('B')).members.find((m) => m.owner === B);
   await call(`/api/members/${bChar.id}`, 'PUT', { name: 'OracleStudent', role: 'Healer', primaryWeapon: 'Orb', secondaryWeapon: 'Wand & Tome' }, 'A');
 
-  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Not a real class' }, 'guest')).status, 400);
-  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Oracle' }, 'A')).status, 400, 'only someone not already a member can join this way');
-  const joined = await call('/api/guest-coaches/join', 'POST', { class: 'Oracle' }, 'guest');
-  assert.equal(joined.status, 200);
-  assert.equal(joined.body.class, 'Oracle');
+  // B04 (hotfix.3): an officer's single-use invitation for one class is the only way in.
+  assert.equal((await call('/api/admin/guest-invites', 'POST', { class: 'Not a real class' }, 'A')).status, 400);
+  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Oracle' }, 'A')).status, 410, 'the old self-enrolment route is gone');
+  const { token } = await createInvite(base, sessions.A, 'Oracle');
+  assert.equal((await redeemInvite(base, token, A)).cookie, null, 'only someone not already a member can join this way - and that refusal does not use up the invitation');
+  const first = await redeemInvite(base, token, GUEST);
+  assert.ok(first.cookie, 'the invitation lets them through even with applications closed');
+  sessions.guest = first.cookie;
+  assert.equal((await state('guest')).user.role, 'applicant');
+  assert.equal((await redeemInvite(base, token, '100000000000000099')).cookie, null, 'single use: a second person cannot use the same invitation');
 
   const guestState = await state('guest');
   assert.equal(guestState.isCoach, true);
@@ -554,8 +567,8 @@ test('guest class coaches: someone outside the guild joins via the invite link, 
   assert.equal(listed.class, 'Oracle');
   assert.deepEqual((await state('guest')).guestCoaches, [], 'the list itself is officer-only, like coachLinks');
 
-  // signing in again later, with no special link at all, still gets them through and still a coach - the
-  // bypass is not only a one-time thing tied to the link itself
+  // signing in again later, with no invitation at all, still gets them through and still a coach - the
+  // invitation is only needed once
   const again = await discordLogin(GUEST, null);
   assert.ok(again.cookie, 'a returning guest coach signs in normally afterwards, no link needed a second time');
   sessions.guest2 = again.cookie;
@@ -570,13 +583,15 @@ test('guest class coaches: someone outside the guild joins via the invite link, 
   assert.equal((await call(`/api/guest-coaches/${GUEST}`, 'DELETE', null, 'guest')).status, 403);
   assert.equal((await call(`/api/guest-coaches/${GUEST}`, 'DELETE', null, 'A')).status, 200);
   assert.equal((await state('A')).guestCoaches.length, 0);
-  assert.equal((await state('guest')).isCoach, false, 'removed - no more coaching access at all');
+  // B04 (hotfix.3): removal also signs the guest coach out everywhere (their sessions are revoked)
+  assert.equal((await call('/api/state', 'GET', null, 'guest')).status, 401, 'removed - signed out, no more coaching access at all');
+  assert.equal((await call('/api/state', 'GET', null, 'guest2')).status, 401, 'every other session of theirs too');
 
   // restore applications to how this file's later tests expect to find them (left open by an earlier test)
   await call('/api/admin/discord', 'PUT', { applications: { enabled: true } }, 'A');
 });
 
-test('a rejected applicant may apply again; a withdrawn application is gone; accepted people can sign in later without being in the server', async () => {
+test('a rejected applicant may apply again; a withdrawn application is gone; accepted people cannot sign in outside Discord when applications are closed', async () => {
   const lone = '100000000000000011';
   const login = await discordLogin(lone, null); sessions.Y = login.cookie;
   const first = (await call('/api/applications', 'POST', { characterName: 'First', role: 'DPS', about: 'Please let me in, I play daily.' }, 'Y')).body;
@@ -592,16 +607,20 @@ test('a rejected applicant may apply again; a withdrawn application is gone; acc
   await call('/api/admin/discord', 'PUT', { applications: { enabled: false } }, 'A');
   assert.equal((await discordLogin('100000000000000012', null)).cookie, null, 'a new outsider is turned away again');
   const back = await discordLogin(lone, null);
-  assert.ok(back.cookie, 'somebody who was accepted is never turned away');
-  sessions.Y2 = back.cookie;
+  assert.equal(back.cookie, null, 'acceptance no longer bypasses a confirmed departure');
+  const joined = await discordLogin(lone, []);
+  assert.ok(joined.cookie, 'accepted person can join Discord and sign in');
+  sessions.Y2 = joined.cookie;
   assert.equal((await state('Y2')).user.role, 'member');
   assert.equal((await call('/api/applications', 'POST', { characterName: 'Late', role: 'DPS', about: 'Applications are closed now' }, 'X')).status, 409, 'members cannot apply');
   await call('/api/admin/discord', 'PUT', { applications: { enabled: true } }, 'A');
 });
 
 // ---------------------------------------------------------------- the Discord tools and "Post to Discord"
+// Hotfix 1.46.2.2: from here on, plain-member checks use C. B was re-accepted in the kick test above and is an officer
+// again (on the Admin officer list); before live authorization B's older session still looked like a member here.
 test('the connection check tells the leadership what works, and the invite link has the right permissions', async () => {
-  assert.equal((await call('/api/admin/discord-check', 'GET', null, 'B')).status, 403);
+  assert.equal((await call('/api/admin/discord-check', 'GET', null, 'C')).status, 403);
   const c = (await call('/api/admin/discord-check', 'GET', null, 'A')).body;
   assert.deepEqual([c.login, c.bot, c.botUser.name, c.guild.name], [true, true, 'GuildHallBot', 'Test Guild']);
   assert.deepEqual(c.channels.map((x) => x.name), ['general', 'parties'], 'only text channels, in the order of the server');
@@ -621,15 +640,15 @@ test('the connection check tells the leadership what works, and the invite link 
 test('the leadership picks a channel, posts a test message, and posts the picture of the parties with a text', async () => {
   const ch = '800000000000000001';
   assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { channelId: 'nope' } }, 'A')).status, 400);
-  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { channelId: ch, channelName: 'parties', text: '📋 **{event}** parties\n{link}' } }, 'B')).status, 403);
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { channelId: ch, channelName: 'parties', text: '📋 **{event}** parties\n{link}' } }, 'C')).status, 403);
   await call('/api/admin/discord', 'PUT', { partyPost: { channelId: ch, channelName: 'parties', text: '📋 **{event}** parties\n{link}' } }, 'A');
   fake.state.posts.length = 0;
   assert.deepEqual((await call('/api/admin/discord-test', 'POST', {}, 'A')).body, { ok: true, error: '' });
   assert.equal(fake.state.posts[0].channel, ch); assert.match(fake.state.posts[0].content, /can post in this channel/);
-  assert.equal((await call('/api/admin/discord-test', 'POST', {}, 'B')).status, 403);
+  assert.equal((await call('/api/admin/discord-test', 'POST', {}, 'C')).status, 403);
   const ev = (await call('/api/events', 'POST', { title: 'Castle siege: Stonegard', type: 'Castle Siege', start: inMinutes(600) }, 'A')).body;
   const post = (b, who = 'A') => call(`/api/events/${ev.id}/post-parties`, 'POST', b, who);
-  assert.equal((await post({ image: tinyPng, text: 'x' }, 'B')).status, 403, 'only the leadership posts');
+  assert.equal((await post({ image: tinyPng, text: 'x' }, 'C')).status, 403, 'only the leadership posts');
   assert.equal((await post({ image: Buffer.from('not a picture at all, just text '.repeat(20)).toString('base64'), text: 'x' })).status, 400, 'must be a PNG');
   assert.equal((await post({ image: '', text: 'x' })).status, 400);
   fake.state.posts.length = 0;
@@ -641,7 +660,7 @@ test('the leadership picks a channel, posts a test message, and posts the pictur
   assert.deepEqual([p.file.name, p.file.png, p.file.size > 300], ['parties-castle-siege-stonegard.png', true, true]);
   const seen = (await state('A')).events.find((e) => e.id === ev.id);
   assert.equal(seen.partyPosts.length, 1); assert.equal(seen.partyPosts[0].ok, true);
-  assert.equal((await state('B')).events.find((e) => e.id === ev.id).partyPosts, undefined, 'players do not see the posting log');
+  assert.equal((await state('C')).events.find((e) => e.id === ev.id).partyPosts, undefined, 'players do not see the posting log');
   // another channel and a failure: the bot has no permission there
   const other = '800000000000000002';
   fake.state.denyChannels.add(other);
@@ -662,13 +681,13 @@ test('party announcements can @-mention chosen Discord roles, in the correct <@&
   const post = (b) => call(`/api/events/${ev.id}/post-parties`, 'POST', { image: tinyPng, text: 'Parties are up!', ...b }, 'A');
 
   // who may read/pick roles, and what the picker sees
-  assert.equal((await call('/api/discord/roles', 'GET', null, 'B')).status, 403, 'members cannot read the role list');
+  assert.equal((await call('/api/discord/roles', 'GET', null, 'C')).status, 403, 'members cannot read the role list');
   const roles = (await call('/api/discord/roles', 'GET', null, 'A')).body;
   assert.deepEqual(roles.roles.map((r) => r.name).sort(), ['GuildHallBot', 'Member', 'Officer'], '@everyone is filtered out, the bot is not');
   assert.deepEqual(roles.selected, [], 'nothing configured yet');
 
   // saving the setting: only officers, only real-looking role ids, capped
-  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [officerRole] } }, 'B')).status, 403);
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [officerRole] } }, 'C')).status, 403);
   assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: ['not-a-role'] } }, 'A')).status, 400);
   assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: Array.from({ length: 11 }, (_, i) => String(9e17 + i)) } }, 'A')).status, 400, 'up to 10 roles');
   const saved = (await call('/api/admin/discord', 'PUT', { partyPost: { mentionRoleIds: [officerRole, memberRole, officerRole] } }, 'A')).body;
@@ -699,7 +718,7 @@ test('switching on "delete previous announcement" removes the last one when post
   const ev2 = (await call('/api/events', 'POST', { title: 'Week 2', type: 'Castle Siege', start: inMinutes(700) }, 'A')).body;
   const post = (ev, b) => call(`/api/events/${ev.id}/post-parties`, 'POST', { image: tinyPng, text: 'x', ...b }, 'A');
 
-  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: true } }, 'B')).status, 403);
+  assert.equal((await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: true } }, 'C')).status, 403);
 
   // off by default: two posts, both stay up, nothing deleted
   await call('/api/admin/discord', 'PUT', { partyPost: { deletePrevious: false } }, 'A');
@@ -746,7 +765,9 @@ test('a Discord role or a specific player can be granted officer status from Adm
   assert.equal((await call('/api/admin/officers', 'PUT', { roleIds: [ADVISOR_ROLE] }, 'plain')).status, 403, 'members cannot grant officer status themselves');
   await call('/api/admin/officers', 'PUT', { roleIds: [ADVISOR_ROLE] }, 'A');
 
-  assert.equal((await state('plain')).user.role, 'member', 'their current 7-day session is unaffected until they sign in again');
+  // Hotfix 1.46.2.2 (live authorization, F-A): an Admin officer grant applies to the current session at once (before:
+  // only from the next sign-in). The new sign-in below must of course agree.
+  assert.equal((await state('plain')).user.role, 'officer', 'officer status from Admin applies live, without signing in again');
 
   sessions.plain2 = (await discordLogin(OTHER_PLAYER, [ADVISOR_ROLE])).cookie;
   assert.equal((await state('plain2')).user.role, 'officer', 'the advisor role now grants officer, from the next sign-in onward');
@@ -764,7 +785,7 @@ test('a Discord role or a specific player can be granted officer status from Adm
 
 // ---------------------------------------------------------------- Admin > Testing: the DM button test
 test('Admin > Testing can send a live DM button test to picked players and watch what each one clicks', async () => {
-  assert.equal((await call('/api/admin/dm-test/start', 'POST', { playerKeys: [B] }, 'B')).status, 403, 'members cannot run this');
+  assert.equal((await call('/api/admin/dm-test/start', 'POST', { playerKeys: [B] }, 'C')).status, 403, 'members cannot run this');
   assert.equal((await call('/api/admin/dm-test/start', 'POST', { playerKeys: [] }, 'A')).status, 400, 'needs at least one player');
 
   const started = await call('/api/admin/dm-test/start', 'POST', { playerKeys: [B, C] }, 'A');

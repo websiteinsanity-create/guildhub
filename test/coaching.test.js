@@ -4,6 +4,7 @@
 // visibility rules.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const { inviteGuestCoach } = require('./guest-invite-helper');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -25,7 +26,7 @@ const sessions = {};
 async function startServer() {
   fake = await startFakeDiscord();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-coach-'));
-  port = 40000 + Math.floor(Math.random() * 20000);
+  port = await require('./free-port')();
   base = `http://localhost:${port}`;
   proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
@@ -335,17 +336,12 @@ test('posting a VOD DMs whoever coaches the player\'s current class - not the po
 test('a guest coach is never DMed about a new VOD, even for the class they coach - they can still see it, just not get pinged about every upload', async () => {
   await call('/api/admin/coach-links', 'POST', { coach: COACH, class: 'Scorpion' }, 'officer').catch(() => {});
 
-  // a true outsider signs in via the guest-coach link (not added to guildMembers at all, same as a real
+  // a true outsider signs in via a guest-coach invitation (not added to guildMembers at all, same as a real
   // stranger - see the dedicated discord.test.js coverage for why that distinction matters) and joins as a
   // guest coach for the same class StudentChar plays
   const GUEST = '100000000000000070';
-  const start = await fetch(base + '/auth/discord?guestcoach=1', { redirect: 'manual' });
-  const setCookies = (start.headers.raw ? start.headers.raw()['set-cookie'] : start.headers.get('set-cookie').split(/,(?=\s*\w+=)/)) || [];
-  const startCookies = Object.fromEntries(setCookies.map((c) => c.split(';')[0].split('=').map((s) => s.trim())));
-  const cb = await fetch(`${base}/auth/discord/callback?code=${GUEST}&state=${startCookies.gh_oauth}`, { redirect: 'manual', headers: { Cookie: Object.entries(startCookies).map(([k, v]) => `${k}=${v}`).join('; ') } });
-  const guestCookie = `gh_session=${/gh_session=([^;]+)/.exec(cb.headers.get('set-cookie') || '')[1]}`;
-  sessions.guest = guestCookie;
-  assert.equal((await call('/api/guest-coaches/join', 'POST', { class: 'Scorpion' }, 'guest')).status, 200);
+  // B04 (hotfix.3): the public ?guestcoach=1 link is gone; an officer's single-use invitation for Scorpion does it.
+  sessions.guest = await inviteGuestCoach(base, sessions.officer, 'Scorpion', GUEST);
 
   fake.state.dms.length = 0;
   const posted = await call('/api/vods', 'POST', { url: 'https://youtu.be/ppppppppppp', type: 'Siege', recordedDate: '2026-09-29' }, 'student');

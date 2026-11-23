@@ -11,7 +11,7 @@ const path = require('node:path');
 async function startServer(seedDb) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-test-'));
   if (seedDb) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(seedDb));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = 0; let boundPort;
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
     env: { ...process.env, PORT: String(port), DATA_DIR: dir, MEMBER_PASSCODE: 'm1', OFFICER_PASSCODE: 'o1' },
@@ -19,10 +19,10 @@ async function startServer(seedDb) {
   });
   await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('server did not start')), 8000);
-    proc.stdout.on('data', (d) => { if (String(d).includes('running')) { clearTimeout(t); resolve(); } });
+    proc.stdout.on('data', (d) => { if (String(d).includes('running')) { boundPort=Number(/running on http:\/\/[^:]+:(\d+)/.exec(String(d))[1]); clearTimeout(t); resolve(); } });
     proc.on('exit', (c) => reject(new Error('server exited early: ' + c)));
   });
-  const base = `http://localhost:${port}`;
+  const base = `http://localhost:${boundPort}`;
   const call = async (p, method = 'GET', body, token) => {
     const res = await fetch(base + p, {
       method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },

@@ -46,12 +46,12 @@ module.exports = function install(ctx) {
   // CLASS they coach (so the Warden coach never sees the Predator build, the Predator coach never the Warden).
   function buildsOf(m) {
     return [{ key: 'main', name: 'Main build', class: classOf(m), mode: m.mode || '', role: m.role || '' }]
-      .concat((m.builds || []).map((b) => ({ key: String(b.id), name: b.name || 'Build', class: classOf(b), mode: b.mode || '', role: b.role || '' })));
+      .concat((m.builds || []).map((b) => ({ key: String(b.id), securityQuarantined: !!b.securityQuarantined, name: b.name || 'Build', class: classOf(b), mode: b.mode || '', role: b.role || '' })));
   }
   const rowKey = (r) => r.buildKey || 'main';
   const coachedClasses = (user) => (isCoach(user) && ctx.coaching ? ctx.coaching.classesCoachedBy(user.key) : []);
   function canAccessBuild(user, m, b) {
-    return isOfficer(user) || m.owner === user.key || (!!b.class && coachedClasses(user).includes(b.class));
+    return isOfficer(user) || (!m.securityQuarantined && !b.securityQuarantined && (m.owner === user.key || (!!b.class && coachedClasses(user).includes(b.class))));
   }
   const visibleBuilds = (user, m) => buildsOf(m).filter((b) => canAccessBuild(user, m, b));
   // The whole-page check: can this person open this character's thread at all (= at least one build of it).

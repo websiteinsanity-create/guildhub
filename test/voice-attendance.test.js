@@ -79,7 +79,7 @@ async function startServer(extraEnv, botOpts) {
   const fake = await startFakeDiscord();
   const bot = await startFakeBot(botOpts);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-voiceattn-'));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   const base = `http://localhost:${port}`;
   const spawnServer = async (envOverride) => {
     const pr = spawn(process.execPath, ['server.js'], {
@@ -382,13 +382,16 @@ withServer('once Shotcaller has actually tracked an event, the no-PIN auto-atten
   await s.call('/api/settings', 'PUT', { attendanceMode: 'voice' }, s.officer);
   await s.call('/api/admin/compliance', 'PUT', { finalAfterMinutes: 5 }, s.officer);
   const { ev, anchorMembers, party2Members } = await makeTrackedEvent(s, -10);     // started 10 minutes ago
-  await s.call(`/api/events/${ev.id}`, 'PUT', { type: ev.type, start: ev.start, pinEnabled: false }, s.officer);
+  await s.call(`/api/events/${ev.id}`, 'PUT', { type: ev.type, start: ev.start, pinEnabled: false, voiceTrackAuto: false }, s.officer);
   // Said Going, but never once shows up in voice - a genuine no-show the whole feature exists to catch.
   await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: party2Members[0].id, status: 'yes' }, s.officer);
   const r = await s.call(`/api/events/${ev.id}/post-parties`, 'POST', postBody({}), s.officer);
   assert.equal(r.status, 200, JSON.stringify(r.body));
   s.bot.setConnected('c0', anchorMembers.map((m) => m.owner));
   s.bot.setConnected('c1', []);
+  // This test is about the no-PIN fallback, not racing the independent auto-start scheduler.
+  const manual = await s.call(`/api/events/${ev.id}/voice-track/start`, 'POST', {}, s.officer);
+  assert.equal(manual.status, 200, JSON.stringify(manual.body));
   await poll(s, async () => { const e = await attendedOf(s, ev.id); return e.attended.length >= anchorMembers.length ? e : null; });
   await new Promise((res) => setTimeout(res, 500));                              // give the scheduler's own tick a chance to run too
   const finalEv = await attendedOf(s, ev.id);

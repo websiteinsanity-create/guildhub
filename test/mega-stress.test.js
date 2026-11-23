@@ -80,7 +80,7 @@ async function startServer(seedDb) {
   const bot = await startFakeBot();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-megastress-'));
   if (seedDb) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(seedDb));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   const base = `http://localhost:${port}`;
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
