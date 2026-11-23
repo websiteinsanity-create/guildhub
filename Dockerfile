@@ -1,4 +1,6 @@
 FROM node:22-alpine
+RUN apk add --no-cache util-linux && test -x /usr/bin/flock
+ENV NODE_ENV=production
 WORKDIR /app
 # No dependencies to install (the app is zero-dependency Node.js), so this is just the source.
 COPY . .

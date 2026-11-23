@@ -4,6 +4,7 @@ function startFakeDiscord() {
   const state = { dms: [], guildMembers: {}, failDM: new Set(), tokens: {}, channels: {}, posts: [], roleAdds: [], roleFail: false, botInGuild: true, denyChannels: new Set(), denyDelete: new Set(), botToken: '', clientSecret: 'shh', knownUsers: ['100000000000000001'],
     roleList: [{ id: '900000000000000001', name: 'Officer', position: 5 }, { id: '900000000000000010', name: 'Member', position: 2 }, { id: '900000000000000099', name: 'GuildHallBot', position: 3 }],
     channelList: [{ id: '800000000000000001', name: 'parties', type: 0, position: 1 }, { id: '800000000000000002', name: 'general', type: 0, position: 0 }, { id: '800000000000000003', name: 'Voice', type: 2, position: 2 }] };
+  const hung = new Set();   // responses held open by state.memberFail = { mode: 'hang' }
   const srv = http.createServer((req, res) => {
     const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
       const raw = Buffer.concat(chunks), body = raw.toString('utf8');
@@ -28,7 +29,34 @@ function startFakeDiscord() {
       const grl = path.match(/^\/guilds\/(\d+)\/roles$/);
       if (req.method === 'GET' && grl && isBot) return send(200, state.roleList);
       const gbm = path.match(/^\/guilds\/(\d+)\/members\/(\d+)$/);
-      if (req.method === 'GET' && gbm && isBot) return gbm[2] === '999000000000000001' ? send(200, { roles: ['900000000000000099'] }) : send(404, { code: 10007, message: 'Unknown Member' });
+      if (req.method === 'GET' && gbm && isBot) {
+        // Optional extensions (all off by default, so older tests see exactly the original behaviour below):
+        //  state.memberLookups      - counter of bot member lookups (always counted)
+        //  state.memberFail         - { mode, guild? }: 'hang'/'timeout' (never answers), 'reset' (drops the
+        //                             socket), '500', '429' (retryAfter seconds), '401', '403', '10004'.
+        //                             With `guild`, only lookups in that guild fail.
+        //  state.memberLookup=true  - answer from state.guildMembersByGuild[guild][user], falling back to
+        //                             state.guildMembers[user]; missing -> 404 10007.
+        state.memberLookups = (state.memberLookups || 0) + 1;
+        const fail = state.memberFail;
+        if (fail && fail.mode && (!fail.guild || fail.guild === gbm[1])) {
+          if (fail.mode === 'hang' || fail.mode === 'timeout') { hung.add(res); res.on('close', () => hung.delete(res)); return; }
+          if (fail.mode === 'reset') return req.socket.destroy();
+          if (fail.mode === '500') return send(500, { message: 'Internal Server Error', code: 0 });
+          if (fail.mode === '429') { res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(fail.retryAfter ?? 1) }); return res.end(JSON.stringify({ message: 'You are being rate limited.', retry_after: fail.retryAfter ?? 1, global: false })); }
+          if (fail.mode === '401') return send(401, { message: '401: Unauthorized', code: 0 });
+          if (fail.mode === '403') return send(403, { message: 'Missing Access', code: 50001 });
+          if (fail.mode === '10004') return send(404, { message: 'Unknown Guild', code: 10004 });
+        }
+        // Hotfix 1.46.2.2 (lead integration): like real Discord, the bot's member lookup now answers from the same
+        // membership the sign-in path uses (state.guildMembers), so a role refresh in any test sees consistent data.
+        // state.memberLookup=false restores the old "only the bot itself is a member" answer.
+        if (state.memberLookup !== false) {
+          const m = (state.guildMembersByGuild && state.guildMembersByGuild[gbm[1]] && state.guildMembersByGuild[gbm[1]][gbm[2]]) || (gbm[2] === '999000000000000001' ? { roles: ['900000000000000099'] } : state.guildMembers[gbm[2]]);
+          return m ? send(200, { roles: [], ...m, user: { id: gbm[2] } }) : send(404, { code: 10007, message: 'Unknown Member' });
+        }
+        return gbm[2] === '999000000000000001' ? send(200, { roles: ['900000000000000099'] }) : send(404, { code: 10007, message: 'Unknown Member' });
+      }
       const um = path.match(/^\/users\/(\d+)$/);
       if (req.method === 'GET' && um && isBot) return state.knownUsers.includes(um[1]) ? send(200, { id: um[1], username: 'someone' + um[1].slice(-3) }) : send(404, { code: 10013, message: 'Unknown User' });
       const gc = path.match(/^\/guilds\/(\d+)\/channels$/);
@@ -95,6 +123,6 @@ function startFakeDiscord() {
       send(404, { message: 'not found ' + req.method + ' ' + path });
     });
   });
-  return new Promise((r) => srv.listen(0, () => r({ state, url: `http://localhost:${srv.address().port}/api/v10`, origin: `http://localhost:${srv.address().port}`, close: () => srv.close() })));
+  return new Promise((r) => srv.listen(0, () => r({ state, url: `http://localhost:${srv.address().port}/api/v10`, origin: `http://localhost:${srv.address().port}`, close: () => { for (const h of hung) h.destroy(); hung.clear(); return srv.close(); } })));
 }
 module.exports = { startFakeDiscord };

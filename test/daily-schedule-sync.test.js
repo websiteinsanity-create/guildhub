@@ -16,7 +16,7 @@ function harness(previous,clock=Date.parse('2026-11-05T12:00:00Z'),shared){
   deleteMessage:async(channel,id)=>{calls.push(['DELETE',id]);if(failure)return {ok:false,error:'Temporary Discord error'};if(messages.has(id))messages.get(id).deleted=true;return {ok:true};}};
  class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
  const box={db,discord,crypto,Date:Clock,Intl,JSON,Set,Map,Number,Math,String,Object,process:{env:{DAILY_SCHEDULE_SYNC_MS:'10'}},console:{error(){}},PUBLIC_DIR:'.',fs:{readFileSync(){throw Error('no banner')}},path,
-  shuttingDown:false,flushTimer:null,flushInFlight:null,config:{defaultTimezone:'Europe/Berlin'},afterPersist:()=>{},tickHooks:[],route:()=>{},need:(v,c,m)=>{if(!v)throw Error(m);},audit:{log(){}},
+  saveFailures:0,shuttingDown:false,flushTimer:null,flushInFlight:null,config:{defaultTimezone:'Europe/Berlin'},afterPersist:()=>{},tickHooks:[],route:()=>{},need:(v,c,m)=>{if(!v)throw Error(m);},audit:{log(){}},
   unix:iso=>Math.floor(Date.parse(iso)/1000),findEvent:id=>db.events.find(e=>e.id===Number(id)),
   save:()=>{dirty=true;},get dirty(){return dirty;},set dirty(v){dirty=v;},
   flush:async()=>{persisted=JSON.parse(JSON.stringify(db));dirty=false;box.afterPersist();},

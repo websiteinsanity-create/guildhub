@@ -62,7 +62,7 @@ async function startServer(extraEnv) {
   const fake = await startFakeDiscord();
   const bot = await startFakeBot();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-voicetrackctl-'));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   const base = `http://localhost:${port}`;
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),

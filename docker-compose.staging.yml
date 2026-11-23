@@ -1,0 +1,84 @@
+# GuildHub STAGING (test environment) - 1.46.2-hotfix.5 RC4.
+#
+# Completely separate from live GuildHub:
+#   stack/project "guildhub-test", container "guild-hall-test", image "guild-hall-test:rc4",
+#   own host port, own URL, own data and own Security Ledger under /opt/persistent_volume/guildhub-test.
+#
+# The image is NOT built by this file. Build it once on the Docker host from the extracted release folder
+# (see INSTALL_STAGING_PORTAINER_RC4.md, step 3):
+#   docker build -t guild-hall-test:rc4 /opt/guildhub-release/guildhall-1.46.2-hotfix.5-rc4-deploy.1
+# That keeps the live image tag "guild-hall:latest" untouched and works in Portainer's web editor, which has no
+# build context.
+#
+# Every value below comes from the Portainer stack's own "Environment variables" list. Do NOT reuse live values
+# for DISCORD_BOT_TOKEN, DISCORD_CLIENT_SECRET, SHOTCALLER_API_KEY or ALLIANCE_*: staging must use its own
+# Discord application/bot that is only a member of a Discord TEST server, or leave DISCORD_BOT_TOKEN empty.
+# With DISCORD_BOT_TOKEN empty GuildHub sends no Discord messages at all (no DMs, reminders or party posts).
+
+name: guildhub-test
+
+services:
+  guildhub-test:
+    image: guild-hall-test:rc4
+    pull_policy: never                 # use the locally built image only; never pull or rebuild anything
+    container_name: guild-hall-test
+    restart: unless-stopped
+    ports:
+      # Host port for staging. Must differ from live (live uses ${PORT:-3000}). Inside the container it is always 3000.
+      - "${STAGING_HOST_PORT:-3100}:3000"
+    environment:
+      - NODE_ENV=production
+      - GUILDHUB_LEDGER_DIR=/app/security-ledger
+      # Set to acknowledge-current-state ONLY for the single first start of RC4 on this data, then remove it.
+      - GUILDHUB_LEDGER_BOOTSTRAP=${GUILDHUB_LEDGER_BOOTSTRAP:-}
+      # The staging URL players/testers open. Required - deployment stops if it is missing. No slash at the end.
+      - PUBLIC_URL=${PUBLIC_URL:?set PUBLIC_URL to the staging URL, e.g. https://guildhub-test.example.org}
+      - PORT=3000
+      - LISTEN_HOST=${LISTEN_HOST:-}
+      # Discord: a SEPARATE staging application (its own OAuth redirect = <PUBLIC_URL>/auth/discord/callback).
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      # Staging bot token only (bot invited to the Discord TEST server only), or empty = no Discord messages.
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-}
+      - DISCORD_OFFICER_ROLE_IDS=${DISCORD_OFFICER_ROLE_IDS:-}
+      - DISCORD_OFFICER_USER_IDS=${DISCORD_OFFICER_USER_IDS:-}
+      - DISCORD_MEMBER_ROLE_ID=${DISCORD_MEMBER_ROLE_ID:-}
+      - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY:-}
+      # Passcode (demo) mode is only used when no DISCORD_* login is configured. Never leave the defaults on a
+      # staging URL that is reachable from the internet.
+      - MEMBER_PASSCODE=${MEMBER_PASSCODE:?set a staging member passcode}
+      - OFFICER_PASSCODE=${OFFICER_PASSCODE:?set a staging officer passcode}
+      # Alliance / Shotcaller: empty on staging unless a separate TEST Shotcaller exists. Never the live
+      # Shotcaller URL or key - staging would then control the live bot.
+      - ALLIANCE_GUILD_ID=${ALLIANCE_GUILD_ID:-}
+      - ALLIANCE_OFFICER_ROLE_IDS=${ALLIANCE_OFFICER_ROLE_IDS:-}
+      - ALLIANCE_OFFICER_USER_IDS=${ALLIANCE_OFFICER_USER_IDS:-}
+      - SHOTCALLER_URL=${SHOTCALLER_URL:-}
+      - SHOTCALLER_API_KEY=${SHOTCALLER_API_KEY:-}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-}
+      - ROLE_MAX_STALE_MINUTES=${ROLE_MAX_STALE_MINUTES:-}
+      - ALLIANCE_VERIFY_MAX_STALE_MINUTES=${ALLIANCE_VERIFY_MAX_STALE_MINUTES:-}
+      - SESSIONS_VALID_AFTER=${SESSIONS_VALID_AFTER:-}
+    volumes:
+      # Both folders already exist. The Ledger folder must be owned by root and have mode 0700 BEFORE the first start.
+      - /opt/persistent_volume/guildhub-test/GUILDHUB_LEDGER:/app/security-ledger
+      - /opt/persistent_volume/guildhub-test/data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    labels:
+      # Watchtower must never update or restart staging.
+      - com.centurylinklabs.watchtower.enable=false
+    healthcheck:
+      test: ["CMD", "node", "-e",
+             "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

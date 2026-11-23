@@ -97,7 +97,7 @@ module.exports = function install(ctx) {
     const own = new Set(D.members.filter((m) => m.owner === user.key).map((m) => m.id));
     // A coach sees their own linked students' profiles in full (questlog links, notes, loot and points included),
     // the same as they would see their own - not the stripped-down view a normal member gets of anyone else.
-    const coachedOwners = new Set(coaching.studentsOf(user.key));
+    const coachedOwners = new Set(ctx.isCoach(user) ? coaching.studentsOf(user.key) : []);   // hotfix 1.46.2.2: only a current coach
     const coachedIds = new Set(D.members.filter((m) => coachedOwners.has(m.owner)).map((m) => m.id));
     const ownOrCoached = (id) => own.has(id) || coachedIds.has(id);
     const P = compliance.players();
@@ -113,7 +113,9 @@ module.exports = function install(ctx) {
     });
     return {
       user: { key: user.key, name: user.name, username: user.username || '', avatar: user.avatar || '', role: user.role, canManageAlliance:!!ctx.canManageAlliance?.(user), support: !!user.support, readOnly: !!user.support, canViewLeadership: !!user.support && isOfficer(user) },
-      members: D.members.filter((m) => off || !m.pendingApproval || own.has(m.id)).map((m) => (off || ownOrCoached(m.id) ? m : { ...m, questlogs: [] })),     // Questlog links: the leadership, the owner, and their coach
+      // hotfix.4: `content` marks the character that carries the player's own VODs and Gear Thread - also while it is
+      // classified Inactive (e.g. leave of absence) - so the pages do not have to guess from the activity flag.
+      members: D.members.filter((m) => off || !m.pendingApproval || own.has(m.id)).map((m) => ({ ...(off || ownOrCoached(m.id) ? m : { ...m, questlogs: [] }), content: typeof ctx.isContentCharacter === 'function' ? ctx.isContentCharacter(m) : !!m.active })),     // Questlog links: the leadership, the owner, and their coach
       events,
       points: off ? D.points : hide('points') ? [] : D.points.filter((p) => ownOrCoached(p.memberId)),
       duties: off ? D.duties : [],                          // the tasks are for the leadership only
@@ -281,6 +283,7 @@ module.exports = function install(ctx) {
       else c = queue(user, { kind: 'member', ownerKey: m.owner, memberId: m.id, changes: fresh });
       pending = [...new Set(Object.keys(gated).map((f) => groupLabel(FIELD_GROUP[f])))];
     }
+    if(isOfficer(user))delete m.securityQuarantined; // explicit officer review releases restored ACL quarantine
     const fields = ['name', 'role', 'rank', 'owner', 'primaryWeapon', 'secondaryWeapon', 'active', 'gearScore', 'level', 'mode'].filter((f) => beforeEdit[f] !== m[f]);
     if (fields.length) audit(user, 'member.update', { type: 'member', id: m.id, name: m.name }, `${user.name} changed ${m.name}: ${fields.join(', ')}.`,
       Object.fromEntries(fields.map((f) => [f, beforeEdit[f]])), Object.fromEntries(fields.map((f) => [f, m[f]])));
@@ -324,6 +327,7 @@ module.exports = function install(ctx) {
     const data = pickBuild(body);
     if (gate(user, 'builds')) { queue(user, { kind: 'build', op: 'update', ownerKey: m.owner, memberId: m.id, buildId: b.id, data }); save(); return buildResult(m, true); }
     Object.assign(b, data);
+    if(isOfficer(user))delete b.securityQuarantined; // explicit review of a restored build ACL
     save();
     return m;
   });

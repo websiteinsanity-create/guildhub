@@ -1,12 +1,12 @@
 // Single-process, persistent one-time grants. No plaintext code or password is persisted.
 const fs=require('node:fs'),crypto=require('node:crypto');
 const USER='SupportAI',KEY='support:SupportAI',CODE_MS=10*60e3,SESSION_MS=2*60*60e3;
-module.exports=function(file,clock=()=>Date.now()){
- let state=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{pending:null,session:null},busy=false;
+module.exports=function(file,clock=()=>Date.now(),{ledger=null}={}){
+ let state=ledger?ledger.support():fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{pending:null,session:null},busy=false;
  const attempts=new Map();let globalAttempts=[];
  const error=(status,message)=>Object.assign(Error(message),{status});
  const digest=(code,salt)=>crypto.createHash('sha256').update(salt+code).digest('hex');
- async function commit(next){const tmp=file+'.tmp';await fs.promises.writeFile(tmp,JSON.stringify(next),{mode:0o600});await fs.promises.rename(tmp,file);state=next;}
+ async function commit(next){if(ledger){ledger.setSupport(next);state=next;}const tmp=file+'.tmp';await fs.promises.writeFile(tmp,JSON.stringify(next),{mode:0o600});await fs.promises.rename(tmp,file);state=next;}
  async function exclusive(fn){if(busy)throw error(409,'Support access is being updated. Try again.');busy=true;try{return await fn();}finally{busy=false;}}
  const status=()=>({username:USER,codePending:!!state.pending && clock()<state.pending.expiresAt,codeExpiresAt:state.pending && clock()<state.pending.expiresAt?state.pending.expiresAt:null,sessionActive:!!state.session && clock()<state.session.expiresAt,sessionExpiresAt:state.session && clock()<state.session.expiresAt?state.session.expiresAt:null});
  return {

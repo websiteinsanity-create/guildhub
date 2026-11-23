@@ -294,19 +294,37 @@ function showLogin() {
   // when general guild applications (a different thing) are switched off, and swap the note so it does not
   // say "send us an application" to someone who is not trying to become a guild member at all.
   const merc = /^#\/merc\/\d+$/.test(location.hash);
-  const guestCoach = location.hash === '#/guest-coach';
-  const dLink = $('#login-discord a.discord'); if (dLink) dLink.href = merc ? '/auth/discord?merc=1' : guestCoach ? '/auth/discord?guestcoach=1' : '/auth/discord';
+  // B04 (hotfix.3): a guest coach joins only through a personal invitation (#/guest-invite/<token>). The token stays
+  // in the URL fragment and goes to the server once, in a same-origin POST that starts the Discord sign-in.
+  const guestCoach = guestInviteToken() !== '';
+  const dLink = $('#login-discord a.discord'); if (dLink) { dLink.href = merc ? '/auth/discord?merc=1' : '/auth/discord'; if (guestCoach) dLink.dataset.act = 'guest-invite-start'; else delete dLink.dataset.act; }
   const mn = $('#login-merc-note'); if (mn) mn.classList.toggle('hidden', !merc);
   const gn = $('#login-guestcoach-note'); if (gn) gn.classList.toggle('hidden', !guestCoach);
   if (an && (merc || guestCoach)) an.classList.add('hidden');
   // The Discord round trip (this app -> Discord -> /auth/discord/callback -> this app again) is a full page
   // reload through a different path, which drops the #/merc/... or #/guest-coach hash along the way - save it
   // here, before the person leaves for Discord, and start() below restores it once they are actually signed in.
-  if (merc || guestCoach) localStorage.setItem('gh_pending_hash', location.hash);
+  if (merc) localStorage.setItem('gh_pending_hash', location.hash);
+  if (guestCoach) localStorage.setItem('gh_pending_hash', '#/guest-coach');   // never the token itself
   const q = new URLSearchParams(location.search);
   if (q.get('loginError')) { $('#login-err').textContent = q.get('loginError'); history.replaceState(null, '', location.pathname + location.hash); }
   applyBranding();
 }
+function guestInviteToken() { const m = /^#\/guest-invite\/([A-Za-z0-9_-]{43})$/.exec(location.hash); return m ? m[1] : ''; }
+async function startGuestInvite(ev) {
+  if (ev) ev.preventDefault();
+  const token = guestInviteToken();
+  const err = $('#login-err');
+  try {
+    const r = await fetch('/auth/discord/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.location) throw new Error(j.error || 'This invitation link is not valid any more.');
+    localStorage.setItem('gh_pending_hash', '#/guest-coach');
+    history.replaceState(null, '', location.pathname + '#/guest-coach');   // the token leaves the address bar
+    location.href = j.location;
+  } catch (e) { if (err) err.textContent = e.message; else toast(e.message, true); }
+}
+ACTIONS['guest-invite-start'] = (el, d, ev) => startGuestInvite(ev);
 async function logout() {
   token = ''; localStorage.removeItem('gh_token'); S.user = null;
   if (S.cfg && (S.cfg.authMode === 'discord' || S.user?.support || S.cfg.supportLogin)) { try { await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } }); } catch {} }
@@ -384,8 +402,12 @@ const hiddenFromMembers = (key) => (S.settings.hiddenSections || []).includes(ke
 // The one active, non-mercenary character the signed-in user themselves owns, if any - what "My Gear Thread"
 // links straight into. A mercenary-only account (or one with no character at all yet) has nothing to open, so
 // the nav entry itself is hidden rather than linking to a broken/empty thread - see renderNav's filter below.
-const myGearThreadId = () => { const m = S.members.find((x) => x.owner === S.user.key && x.active && !x.mercenary); return m ? m.id : null; };
+// hotfix.4 (LOA): a player's Gear Thread belongs to their content character (`content` from the server) - also while it
+// is classified Inactive, e.g. during a leave of absence. Falls back to the activity flag for older state.
+const isContentChar = (m) => !m.mercenary && (m.content ?? m.active);
+const myGearThreadId = () => { const m = S.members.find((x) => x.owner === S.user.key && isContentChar(x)); return m ? m.id : null; };
 function canSee(page, id) {
+  if (page === 'guest-invite') return true;           // B04: anyone signed in may continue an invitation through Discord
   if (S.user && S.user.role === 'applicant') return page === 'apply' || page === 'merc' || page === 'guest-coach' || (page === 'vods' && S.isCoach);       // not accepted: only the application, a mercenary signup link they followed, the guest-coach page, or (once they are a guest coach) the VODs they coach
   if (page === 'apply') return false;
   const n = NAV.find((x) => x.key === page);
@@ -538,7 +560,7 @@ window.addEventListener('resize', () => { if (window.innerWidth > 860 && $('#app
 function render() {
   let { page, id } = route();
   if (page === 'roster') page = 'member';
-  if (S.user.role === 'applicant' && page !== 'merc' && page !== 'guest-coach' && !(page === 'vods' && S.isCoach)) page = 'apply';
+  if (S.user.role === 'applicant' && page !== 'merc' && page !== 'guest-coach' && page !== 'guest-invite' && !(page === 'vods' && S.isCoach)) page = 'apply';
   if (!canSee(page, id) || !VIEWS[page]) page = 'dashboard';
   applyBranding();
   renderNav(page, id);
@@ -773,13 +795,29 @@ function rosterTable(list, mercenary) {
    </tr>`;
   }).join('')}</tbody></table></div>`;
 }
+// B04 (hotfix.3): guest coaches only join through a single-use invitation for one class (valid 72 h). The new link is
+// shown once, right after creating it, and only kept in this page's memory - the server never returns it again.
+function guestInviteBlock() {
+  const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  const invites = (S.guestInvites || []);
+  const pending = invites.filter((i) => i.status === 'pending');
+  const fresh = UI.newGuestInvite;
+  return `<div class="guest-invite-box">
+    <form data-form="guest-invite-create" class="link-row" style="flex-wrap:wrap;gap:8px"><label class="sr-only" for="gi-class">Class</label><select id="gi-class" name="class" required>${opts(classes, UI.guestInviteClass || classes[0] || '')}</select><button class="btn sm primary">Create invitation</button></form>
+    ${fresh ? `<div class="guest-invite-new" style="margin-top:10px"><div class="muted small">Invitation for <b>${esc(fresh.class)}</b> - single use, valid until ${esc(fmtShort(fresh.expiresAt))}. Copy it now: it is not shown again.</div>
+      <div class="link-row"><input readonly value="${esc(fresh.link)}" style="flex:1" onclick="this.select()" aria-label="New guest coach invitation link"><button class="btn sm" data-act="copy-guestcoach-link" data-link="${esc(fresh.link)}">Copy link</button></div></div>` : ''}
+    <div class="muted small" style="margin:12px 0 6px"><b>Open invitations (${pending.length})</b></div>
+    ${pending.length ? pending.map((i) => `<div class="rule-row"><span><b>${esc(i.class)}</b> <span class="muted small">by ${esc(i.createdByName || 'an officer')} · created ${esc(fmtShort(i.createdAt))} · expires ${esc(fmtShort(i.expiresAt))}</span></span>
+      <button class="btn sm danger" data-act="guest-invite-revoke" data-id="${i.id}">Revoke</button></div>`).join('') : '<div class="muted small">No open invitations.</div>'}
+  </div>`;
+}
+const guestCoachOrigin = (g) => g.via === 'legacy' ? '<span class="roster-subtle" title="Joined through the old public link before invitations existed - please review">Old public link - review</span>' : `<span class="roster-subtle">Invited${g.invitedByName ? ' by ' + esc(g.invitedByName) : ''}</span>`;
 function rosterCoachContent() {
  const q = (UI.rosterQ || '').trim().toLowerCase();
  const all = S.guestCoaches || [];
  const list = all.filter(g => (!q || [g.name,g.class].join(' ').toLowerCase().includes(q)) && (!UI.rosterCoachClass || g.class === UI.rosterCoachClass)).slice().sort((a,b)=>a.name.localeCompare(b.name));
- const link = location.origin + '/#/guest-coach';
- return `<div class="roster-coach-invite"><div><strong>Guest coaches</strong><p>External coaches stay separate from your guild roster. Assign their class below.</p></div><div class="link-row"><input readonly value="${esc(link)}" aria-label="Guest coach invite link"><button class="btn" data-act="copy-guestcoach-link" data-link="${esc(link)}">Copy invite link</button></div></div>
- ${list.length ? `<div class="roster-table-wrap"><table class="roster-table roster-coach-table"><thead><tr><th>Coach</th><th>Assigned class</th><th>Actions</th></tr></thead><tbody>${list.map(g=>`<tr><td data-label="Coach"><strong>${esc(g.name)}</strong><div class="roster-subtle">Guest coach</div></td><td data-label="Assigned class"><select data-act="guestcoach-class" data-id="${esc(g.discordId)}" aria-label="Assigned class for ${esc(g.name)}">${opts((S.cfg.classes || []).map(c=>c.name).sort((a,b)=>a.localeCompare(b)),g.class)}</select></td><td data-label="Actions"><button class="btn sm danger" data-act="guestcoach-remove" data-id="${esc(g.discordId)}" data-name="${esc(g.name)}">Remove</button></td></tr>`).join('')}</tbody></table></div>` : rosterEmpty('No coaches match these filters.')}
+ return `<div class="roster-coach-invite"><div><strong>Guest coaches</strong><p>External coaches stay separate from your guild roster. Invite one with a single-use link for one class; change or remove them below.</p></div>${guestInviteBlock()}</div>
+ ${list.length ? `<div class="roster-table-wrap"><table class="roster-table roster-coach-table"><thead><tr><th>Coach</th><th>Assigned class</th><th>Actions</th></tr></thead><tbody>${list.map(g=>`<tr><td data-label="Coach"><strong>${esc(g.name)}</strong><div class="roster-subtle">Discord ${esc(g.discordId)}</div>${guestCoachOrigin(g)}</td><td data-label="Assigned class"><select data-act="guestcoach-class" data-id="${esc(g.discordId)}" aria-label="Assigned class for ${esc(g.name)}">${opts((S.cfg.classes || []).map(c=>c.name).sort((a,b)=>a.localeCompare(b)),g.class)}</select></td><td data-label="Actions"><button class="btn sm danger" data-act="guestcoach-remove" data-id="${esc(g.discordId)}" data-name="${esc(g.name)}">Remove</button></td></tr>`).join('')}</tbody></table></div>` : rosterEmpty('No coaches match these filters.')}
  <div class="roster-result-count">${list.length} of ${all.length} coaches</div>`;
 }
 function rosterEmpty(text) {
@@ -838,12 +876,11 @@ ACTIONS['roster-reset'] = () => {
 function guestCoachesSection() {
   const list = (S.guestCoaches || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   const classes = (S.cfg.classes || []).map((c) => c.name).sort((a, b) => a.localeCompare(b));
-  const link = `${location.origin}/#/guest-coach`;
   return `<details class="fold" data-fold="guest-coaches" ${(UI.fold && UI.fold['guest-coaches']) ? 'open' : ''} style="margin-top:20px;border-top:1px solid var(--line)"><summary>Guest coaches (${list.length})</summary>
     <div class="fold-body">
-      <div class="muted small" style="margin-bottom:10px">Someone outside the guild who reviews VODs for one class. Share this link to invite one - it works even if general applications are closed, and does not make them a guild member.</div>
-      <div class="link-row" style="margin-bottom:14px"><input readonly value="${esc(link)}" style="flex:1" onclick="this.select()" aria-label="Guest coach invite link"><button class="btn sm" data-act="copy-guestcoach-link" data-link="${esc(link)}">Copy link</button></div>
-      ${list.length ? list.map((g) => `<div class="rule-row"><span><b>${esc(g.name)}</b></span>
+      <div class="muted small" style="margin-bottom:10px">Someone outside the guild who reviews VODs for one class. Invite one with a single-use link (valid 72 hours) - it works even if general applications are closed, and does not make them a guild member.</div>
+      <div style="margin-bottom:14px">${guestInviteBlock()}</div>
+      ${list.length ? list.map((g) => `<div class="rule-row"><span><b>${esc(g.name)}</b> <span class="muted small">Discord ${esc(g.discordId)}</span> ${guestCoachOrigin(g)}</span>
         <select data-act="guestcoach-class" data-id="${esc(g.discordId)}">${opts(classes, g.class)}</select>
         <button class="btn sm danger" data-act="guestcoach-remove" data-id="${esc(g.discordId)}" data-name="${esc(g.name)}">Remove</button></div>`).join('')
         : '<div class="muted small">No guest coaches yet.</div>'}
@@ -2259,6 +2296,12 @@ document.addEventListener('click', async (e) => {
   else if (a === 'copy-guestcoach-link') {
     navigator.clipboard?.writeText(d.link).then(() => toast('Link copied')).catch(() => toast('Could not copy - select and copy the link by hand'));
   }
+  else if (a === 'guest-invite-revoke') {
+    if (confirm('Revoke this invitation? The link stops working at once.')) act(() => api(`/api/admin/guest-invites/${d.id}`, 'DELETE'), 'Invitation revoked');
+  }
+  else if (a === 'vod-review-delete') {
+    if (confirm('Delete your review note? This cannot be undone.')) act(() => api(`/api/vods/${d.vodId}/reviews/${d.reviewId}`, 'DELETE'), 'Review note deleted');
+  }
   else if (a === 'guestcoach-remove') {
     if (confirm(`Remove ${d.name} as a guest coach? They lose VOD access immediately and can no longer sign in at all.`)) act(() => api(`/api/guest-coaches/${d.id}`, 'DELETE'), 'Removed');
   }
@@ -2659,7 +2702,7 @@ function vodMarkerPanelHtml(v) {
         <button type="button" class="vod-marker-jump" data-act="vod-marker-jump" data-marker-id="${m.id}" title="Jump to ${fmtVodTimestamp(m.timestamp)}">
           <span class="vod-marker-time">${fmtVodTimestamp(m.timestamp)} <span class="muted small" style="font-weight:400">${esc(m.createdByName || m.createdBy)}</span></span><span class="vod-marker-note">${esc(m.note)}</span>
         </button>
-        ${v.canManage ? `<details class="menu vod-marker-actions"><summary aria-label="Actions for coaching point at ${fmtVodTimestamp(m.timestamp)}">⋯</summary><div class="menu-list"><button type="button" class="danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete coaching point</button></div></details>` : ''}
+        ${(m.canEdit ?? v.canManage) ? `<details class="menu vod-marker-actions"><summary aria-label="Actions for coaching point at ${fmtVodTimestamp(m.timestamp)}">⋯</summary><div class="menu-list"><button type="button" class="danger" data-act="vod-marker-delete" data-marker-id="${m.id}">Delete coaching point</button></div></details>` : ''}
       </div>`).join('')}</div>` : '<div class="empty">No coaching points yet.</div>'}`;
 }
 function vodReviewSubtitle(v) {
@@ -2677,6 +2720,7 @@ function vodReviewEntryHtml(v, r) {
     ${r.canEdit ? `<div class="link-row" style="margin-top:4px">
       <button type="button" class="btn sm" data-act="vod-review-edit" data-vod-id="${v.id}" data-review-id="${r.id}">Edit</button>
       <button type="button" class="btn sm" data-act="vod-review-resend" data-vod-id="${v.id}" data-review-id="${r.id}">Resend</button>
+      ${r.canDelete ? `<button type="button" class="btn sm danger" data-act="vod-review-delete" data-vod-id="${v.id}" data-review-id="${r.id}">Delete</button>` : ''}
     </div>` : ''}
   </div>`;
 }
@@ -2710,10 +2754,10 @@ function viewVodReview(id) {
           <button type="button" class="btn sm" data-act="vod-draw-toggle" id="vod-draw-btn" aria-pressed="false">${vodToolIcon('pen')}<span>Draw</span></button>
           <button type="button" class="btn sm" data-act="vod-draw-clear">${vodToolIcon('clear')}<span>Clear</span></button>
           <button type="button" class="btn sm" data-act="vod-fullscreen" id="vod-fs-btn">${vodToolIcon('expand')}<span>Fullscreen</span></button>
-          ${v.canManage ? `<button type="button" class="btn sm primary" data-act="vod-compose">${vodToolIcon('plus')}<span>Add coaching point</span></button>` : ''}
+          ${(v.canAnnotate ?? v.canManage) ? `<button type="button" class="btn sm primary" data-act="vod-compose">${vodToolIcon('plus')}<span>Add coaching point</span></button>` : ''}
         </div>
       </div>
-      ${v.canManage ? `<details class="vod-composer panel" id="vod-composer"><summary>Add a coaching point</summary><form data-form="vod-marker">
+      ${(v.canAnnotate ?? v.canManage) ? `<details class="vod-composer panel" id="vod-composer"><summary>Add a coaching point</summary><form data-form="vod-marker">
         <div class="field"><label for="vm-note">Note</label><textarea id="vm-note" name="note" maxlength="500" placeholder="What should the player notice here?" data-autogrow required></textarea></div>
         <div class="link-row vod-composer-save"><span class="muted small" id="vod-current-time">Current position: 0:00</span><button class="btn primary">Save coaching point</button></div>
         <p class="muted small vod-composer-hint">Saved at the current video position, with any drawing attached.</p>
@@ -3066,7 +3110,7 @@ function viewGearThreads() {
   // Officers see one row per character (every build is theirs to open). A coach sees one row per BUILD whose
   // class they coach, since a character's Warden build and Predator build can have different coaches.
   const rows = [];
-  for (const m of S.members.filter((x) => x.active && !x.mercenary)) {
+  for (const m of S.members.filter(isContentChar)) {
     if (off) { rows.push({ m, b: null }); continue; }
     if (classOf(m) && myClasses.includes(classOf(m))) rows.push({ m, b: null });
     for (const b of (m.builds || [])) if (classOf(b) && myClasses.includes(classOf(b))) rows.push({ m, b });
@@ -3088,7 +3132,7 @@ function viewGearThreads() {
   ${list.length ? `<div class="tbl-wrap"><table>
     <thead><tr><th>Character</th><th>Weapons</th><th>Owner</th><th>Last updated</th></tr></thead>
     <tbody>${list.map((r) => `<tr class="click" data-act="gearthreads-open" data-id="${r.m.id}" data-build="${r.b ? r.b.id : 'main'}">
-      <td><b>${esc(r.m.name)}</b>${r.b ? ` <span class="muted small">· ${esc(r.b.name)}</span>` : ''}${off && (r.m.builds || []).length ? ` <span class="muted small">· ${(r.m.builds.length + 1)} builds</span>` : ''}</td>
+      <td><b>${esc(r.m.name)}</b>${!r.m.active ? ' <span class="roster-state">Inactive</span>' : ''}${r.b ? ` <span class="muted small">· ${esc(r.b.name)}</span>` : ''}${off && (r.m.builds || []).length ? ` <span class="muted small">· ${(r.m.builds.length + 1)} builds</span>` : ''}</td>
       <td class="wpn">${weaponLine(r.b || r.m)}</td>
       <td class="muted small">${esc(ownerName(r.m.owner))}</td>
       <td class="muted small">Not started yet</td>
@@ -3100,7 +3144,7 @@ function viewGearThreads() {
 // the grouping client-side from whichever classes actually have a student showing up in that list right now.
 function classesCoachedLabel() {
   const owners = new Set(S.myStudents || []);
-  const classes = new Set(S.members.filter((m) => m.active && owners.has(m.owner)).map((m) => classOf(m)).filter(Boolean));
+  const classes = new Set(S.members.filter((m) => isContentChar(m) && owners.has(m.owner)).map((m) => classOf(m)).filter(Boolean));
   return { count: classes.size || 1 };
 }
 ACTIONS['gearthreads-open'] = (el, d) => { UI.gearBuildPref = UI.gearBuildPref || {}; if (d.build) UI.gearBuildPref[String(d.id)] = d.build; if (typeof GEARTHREAD !== 'undefined' && GEARTHREAD.id === String(d.id)) GEARTHREAD = { id: null, data: null }; location.hash = '#/gearthreads/' + d.id; };
@@ -3226,6 +3270,11 @@ ACTIONS['vod-review-edit'] = (el, d) => {
 };
 ACTIONS['vod-review-resend'] = (el, d) => act(() => api(`/api/vods/${d.vodId}/reviews/${d.reviewId}/resend`, 'POST'), 'Resent');
 FORMS['vod-review'] = (f, fd, id) => act(async () => { await api(`/api/vods/${id}/reviews`, 'POST', { note: fd.note }); closeDialog(); }, 'Review sent');
+FORMS['guest-invite-create'] = (f, fd) => act(async () => {
+  const r = await api('/api/admin/guest-invites', 'POST', { class: fd.class });
+  UI.guestInviteClass = fd.class;
+  UI.newGuestInvite = { ...r.invite, link: r.link };    // page memory only; shown once
+}, 'Invitation created - copy the link now');
 FORMS['vod-review-edit'] = (f, fd, id) => act(async () => { await api(`/api/vods/${id}/reviews/${f.dataset.reviewId}`, 'PUT', { note: fd.note }); closeDialog(); }, 'Saved');
 CHANGES['loot-type'] = (el) => {
   const lu = el.value === 'Lucent', item = $('#lf-item-field'), amt = $('#lf-amt-field');

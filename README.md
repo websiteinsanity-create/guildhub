@@ -1,3 +1,5 @@
+> **hotfix.5 RC3 security/deployment:** Follow [RC3_OPERATIONS.md](RC3_OPERATIONS.md) before upgrading. Production requires the separately persisted Ledger, explicit environment and reviewed migration. Older RC2 operational instructions are superseded.
+
 # Guild Hall
 
 A small, self-hosted guild manager for Throne and Liberty. No database, no build step,

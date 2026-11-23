@@ -16,7 +16,7 @@ const sessions = {};
 async function startServer() {
   fake = await startFakeDiscord();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-merc-'));
-  port = 40000 + Math.floor(Math.random() * 20000);
+  port = await require('./free-port')();
   base = `http://localhost:${port}`;
   proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),

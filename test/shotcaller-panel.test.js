@@ -48,7 +48,7 @@ function startFakeBot(startDelayMs = 0, stopDelayMs = 0) {
 async function startServer(bot, seedDb) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-sc-'));
   if (seedDb) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify(seedDb));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
     env: { ...process.env, PORT: String(port), DATA_DIR: dir, MEMBER_PASSCODE: 'm1', OFFICER_PASSCODE: 'o1', DISCORD_GUILD_ID: GUILD, SHOTCALLER_URL: bot.url, SHOTCALLER_API_KEY: KEY },

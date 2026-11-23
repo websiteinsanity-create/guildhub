@@ -35,7 +35,7 @@ const sessions = {};
 async function startServer() {
   fake = await startFakeDiscord();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-dailysched-'));
-  port = 40000 + Math.floor(Math.random() * 20000);
+  port = await require('./free-port')();
   base = `http://localhost:${port}`;
   proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
@@ -235,7 +235,7 @@ test('a new game day deletes yesterday\'s banner and event messages before posti
       },
     },
   }));
-  const port2 = 40000 + Math.floor(Math.random() * 20000), base2 = `http://localhost:${port2}`;
+  const port2 = await require('./free-port')(), base2 = `http://localhost:${port2}`;
   const proc2 = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
     env: {

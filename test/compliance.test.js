@@ -8,7 +8,7 @@ const path = require('node:path');
 
 async function startServer() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guild-hall-comp-'));
-  const port = 40000 + Math.floor(Math.random() * 20000);
+  const port = await require('./free-port')();
   const proc = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
     env: { ...process.env, PORT: String(port), DATA_DIR: dir, MEMBER_PASSCODE: 'm1', OFFICER_PASSCODE: 'o1', DEMO_MODE: '1' },
@@ -317,6 +317,10 @@ withServer('the event chart counts who is coming, not coming and silent, per rol
   exp.members.push({ id: dps2, owner: 'Ann', name: 'AnnAlt', role: 'Tank', rank: 'Member', active: true, gearScore: 0, level: 1, builds: [], questlogs: [] });
   exp.nextId = dps2 + 1;
   assert.equal((await s.call('/api/import', 'POST', exp, s.officer)).status, 200);
+  // A newly introduced restored ownership record is quarantined until explicit officer review.
+  assert.equal((await s.call(`/api/members/${dps2}`, 'PUT', {name:'AnnAlt'}, s.ann)).status, 403);
+  assert.equal((await s.call(`/api/members/${dps2}`, 'PUT', {name:'AnnAlt'}, s.officer)).status, 200);
+
   const ev = (await s.call('/api/events', 'POST', { type: 'Wargames', start: inDays(3) }, s.officer)).body;
   await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: c.bob, status: 'yes' }, s.bob);
   await s.call(`/api/events/${ev.id}/rsvp`, 'POST', { memberId: c.cat, status: 'no' }, s.cat);

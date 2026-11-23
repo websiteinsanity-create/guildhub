@@ -11,6 +11,7 @@ const path = require('node:path');
 const { startFakeDiscord } = require('./fake-discord');
 
 const GUILD = '111111111111111111', OFFICER_ROLE = '900000000000000001', SECRET = 'private-uploads-test-secret';
+const ALLIANCE_GUILD = '333333333333333333';
 const OWNER = '200000000000000001', OTHER = '200000000000000002', COACH_A = '200000000000000003', COACH_B = '200000000000000004', APPLICANT = '200000000000000005', OFFICER = '200000000000000006';
 const T = '2026-10-01T18:00:00.000Z';
 const png = (seed) => { const b = Buffer.alloc(300, seed); Buffer.from('89504e470d0a1a0a', 'hex').copy(b); return b; };
@@ -63,10 +64,10 @@ before(async () => {
   const port = 41000 + Math.floor(Math.random() * 9000); base = `http://localhost:${port}`;
   proc = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'inherit'],
     env: { PATH: process.env.PATH, PORT: String(port), DATA_DIR: dir, DISCORD_CLIENT_ID: '555', DISCORD_CLIENT_SECRET: 'shh', PUBLIC_URL: base, DISCORD_GUILD_ID: GUILD,
-      DISCORD_OFFICER_ROLE_IDS: OFFICER_ROLE, DISCORD_BOT_TOKEN: 'bot-token', DISCORD_API_BASE: fake.url } });
+      DISCORD_OFFICER_ROLE_IDS: OFFICER_ROLE, DISCORD_BOT_TOKEN: 'bot-token', DISCORD_API_BASE: fake.url, ALLIANCE_GUILD_ID: ALLIANCE_GUILD } });
   await new Promise((resolve, reject) => { const t = setTimeout(() => reject(new Error('server did not start')), 8000); proc.stdout.on('data', (d) => { if (String(d).includes('running')) { clearTimeout(t); resolve(); } }); });
 });
-after(() => { if (proc) proc.kill(); if (fake) fake.close(); if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+after(async () => { if (proc && proc.exitCode===null) { const exit=new Promise(r=>proc.once('exit',r));proc.kill();await exit; } if (fake) fake.close(); if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
 
 test('media access matrix: owner, officer, coaches, unrelated member, applicant, anonymous, bad and expired sessions, support, alliance - in parity with the thread API', async () => {
   const S = {
@@ -75,7 +76,9 @@ test('media access matrix: owner, officer, coaches, unrelated member, applicant,
   };
   S.tampered = S.owner.slice(0, -3) + (S.owner.endsWith('AAA') ? 'BBB' : 'AAA');
   S.expired = mint({ key: OWNER, name: 'Owner', role: 'member', discord: true, exp: Date.now() - 1000 });
-  S.alliance = mint({ key: '300000000000000001', name: 'Partner', role: 'alliance', discord: true, exp: Date.now() + 3600e3 });
+  // Hotfix 1.46.2.2: an Alliance session always names the configured partner server (the server issues no other kind);
+  // one without it is not a session at all (401). The realistic token keeps checking the 403 for Alliance sessions.
+  S.alliance = mint({ key: '300000000000000001', name: 'Partner', role: 'alliance', allianceGuildId: ALLIANCE_GUILD, discord: true, exp: Date.now() + 3600e3 });
   const gen = await fetch(base + '/api/admin/support-access/generate', { method: 'POST', headers: { Cookie: S.officer, 'Content-Type': 'application/json' }, body: '{}' });
   const code = (await gen.json()).code;
   const sl = await fetch(base + '/api/support/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'SupportAI', code }) });

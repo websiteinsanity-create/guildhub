@@ -1,7 +1,19 @@
 'use strict';
 // One application/session. Partner operations remain guild-scoped; Insanity administrators
 // use their unchanged Insanity identity and the Insanity authority for bridge administration.
-module.exports=function install({route,need,shotcaller,allianceGuildId,audit,canAdmin=()=>false,access=()=>({enabled:true,officerRoleIds:[],officerUserIds:[]}),getDb,save=()=>{}}){
+module.exports=function install({route:baseRoute,need,shotcaller,allianceGuildId,audit,canAdmin=()=>false,access=()=>({enabled:true,officerRoleIds:[],officerUserIds:[]}),getDb,save=()=>{},verifyPartner=null,partnerMessage=null}){
+ // Every route below is partner-reachable or admin-only. For Alliance partner sessions (role 'alliance') each
+ // request first awaits a live verifyPartner() decision (membership + roles in the partner Discord server against
+ // the CURRENT allowlist). Without an injected verifier, partner sessions are denied (fail-closed).
+ // Insanity sessions are not affected here; admin paths keep using canAdmin.
+ const denyText=reason=>(typeof partnerMessage==='function'?partnerMessage(reason):null) || 'Alliance officer access could not be verified.';
+ async function partnerGate(user){
+  if(!user || user.role!=='alliance')return;
+  let v=null;
+  if(typeof verifyPartner==='function'){try{v=await verifyPartner(user);}catch{v=null;}}
+  need(!!v && v.ok===true,403,denyText(v && v.reason || 'unverifiable'));
+ }
+ const route=(method,pattern,handler,options)=>baseRoute(method,pattern,async(ctx={})=>{await partnerGate(ctx.user);return handler(ctx);},options);
  const configured=()=>!!(allianceGuildId && allianceGuildId!==shotcaller.guildId && shotcaller.url && shotcaller.apiKey);
  const ready=()=>need(configured(),409,'Alliance Bridge is not configured.');
  const admin=user=>{need(canAdmin(user),403,'Insanity administrator access is required.');};

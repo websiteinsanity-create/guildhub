@@ -123,6 +123,10 @@ module.exports = function install(ctx) {
       out.channels = c.ok ? c.channels : []; out.channelsError = c.error || '';
       out.roles = ro.ok ? ro.roles.filter((x) => x.name !== '@everyone').sort((a, b) => b.position - a.position) : []; out.rolesError = ro.error || '';
     }
+    // Hotfix 1.46.2.2: can the bot read the Alliance partner server (needed for live partner checks), and how is the
+    // Discord role refresh doing. Reason codes and counts only - no ids.
+    if (typeof ctx.allianceDiagnose === 'function') { try { out.allianceBot = await ctx.allianceDiagnose(); } catch { out.allianceBot = { ok: false, reason: 'unverifiable' }; } }
+    if (typeof ctx.roleRefreshStats === 'function') out.roleRefresh = ctx.roleRefreshStats();
     out.selected = D.settings.partyPost.channelId;
     out.selectedRoles = D.settings.partyPost.mentionRoleIds;
     return out;
@@ -305,10 +309,17 @@ module.exports = function install(ctx) {
   // hides them from every other page automatically - those already filter by "active" everywhere. They are
   // only ever shown again on the one event's party board (mercFor), where board() adds them to the pool.
   // Extra officers, editable here instead of .env - a Discord role (besides DISCORD_OFFICER_ROLE_IDS) and/or
-  // specific players. Takes effect the next time that person signs in (officer status, like everything else
-  // about who someone is, is decided once at sign-in and kept for the 7-day session, not re-checked live).
-  route('PUT', '/api/admin/officers', ({ body }) => {
+  // specific players. Since hotfix 1.46.2.2 officer status is decided live on every request (access.js), so a
+  // change here applies at once; anyone who stops being an officer through it also has all their sessions ended
+  // (D-2), so they sign in again with their remaining rights.
+  route('PUT', '/api/admin/officers', ({ body, user }) => {
+    // Validate every submitted identity before either role/user settings can change.
+    if(body.userIds!==undefined){
+      need(Array.isArray(body.userIds) && body.userIds.length<=50,400,'Pick up to 50 valid officer identities.');
+      need(body.userIds.every(id=>typeof id==='string' && (discord.loginEnabled?/^\d{15,25}$/.test(id):require('./security-ledger').validSecurityKey(id))),400,'Pick valid Discord player IDs (or local demo names).');
+    }
     const st = db().settings;
+    const officersBefore = typeof ctx.officerKeys === 'function' ? ctx.officerKeys() : [];
     if (body.roleIds !== undefined) {
       const ids = Array.isArray(body.roleIds) ? body.roleIds : [];
       need(ids.length <= 10, 400, 'Pick up to 10 roles.');
@@ -322,6 +333,13 @@ module.exports = function install(ctx) {
       st.officerUserIds = [...new Set(ids.map((id) => clean(id, 40)).filter(Boolean))];
     }
     save();
+    for (const key of officersBefore) {
+      if (ctx.isOfficerKey(key)) continue;
+      if (typeof ctx.syncStoredRole === 'function') ctx.syncStoredRole(key);
+      ctx.revokeUserSessions(key, 'officer removed');
+      audit(user, 'officer.remove', { type: 'player', id: key, name: db().users[key]?.name || key }, `${user.name} changed the officer settings; ${db().users[key]?.name || key} is no longer an officer and was signed out everywhere.`);
+    }
+    if (officersBefore.length) save();
     return st;
   }, { officer: true });
 
